@@ -292,7 +292,7 @@ func checkPublicURL(ctx context.Context, o Options) Requirement {
 
 // errUnreachable is a dependency that could not be dialled at all, which the
 // public URL alone reads as something other than a failure.
-var errUnreachable = errors.New("check: nothing answered")
+var errUnreachable = errors.New("nothing answered")
 
 // readJSON reads one JSON document. A status outside 200 and a body that is
 // not the document asked for are both the finding, so every caller above
@@ -304,7 +304,9 @@ func readJSON(ctx context.Context, client *http.Client, url string, into any) er
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("%w: %s", errUnreachable, err)
+		// Both the sentinel and the transport's own words are kept: the
+		// public URL branches on the first and every line prints the second.
+		return fmt.Errorf("%w: %w", errUnreachable, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {

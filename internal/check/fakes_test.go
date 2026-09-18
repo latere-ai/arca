@@ -93,7 +93,7 @@ func (versionQuerier) Query(context.Context, string, ...any) (pgx.Rows, error) {
 }
 
 func (q versionQuerier) QueryRow(context.Context, string, ...any) pgx.Row {
-	return versionRow{version: q.version}
+	return versionRow(q)
 }
 
 // versionRow scans the server version, or refuses when the case set none.
