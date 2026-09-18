@@ -1,6 +1,6 @@
 ---
 title: "Events and the reaper: the ledger, the log, the reconciliation of the two stores"
-status: drafted
+status: testing
 track: core
 depends_on:
   - specs/003-object-store.md
@@ -33,6 +33,149 @@ Arca holds no limit of its own. It counts and it reports; whether a
 space may grow further is the platform's decision, and it reaches Arca
 in the authorizer's answer ([[006-identity]]). Nothing here decides
 access.
+
+## Current state
+
+Built and in the tree on 2026-09-18. `internal/events` holds the ledger, the
+closed action table, the append and the cursor tail; `internal/reaper` holds
+the reconciler with its findings table and its seams; `arcad` has the `reap`
+subcommand and the loop inside `serve`. The commits are `1ff054d` (the
+reference check held to the schema), `150a7d0` (the ledger, the log and the
+tail with migration `0005_usage_events.up.sql`), `810329d` (the passes, the
+findings and the seams), `ad6f1d3` (the subcommand, the two variables and the
+in-serve loop) and `95d9f82` (the store and e2e tiers). The gate passes at
+each of them.
+
+What arrived from Drive is `internal/handler/events.go` (the append and the
+cursor tail), the usage accounting inside `internal/handler/quota.go` (the
+admission delta and the charge, not the stored limit), `internal/gc`
+(every pass and the first-seen grace window), and migrations
+`000005_quotas_events` and `000008_events_move`, folded into `0005` with the
+action `CHECK` dropped in favour of the table in `internal/events`. What
+changed on the way is the table in "What arrives from Drive" below, as
+written.
+
+### The route is not registered
+
+`GET /v1/events` is a handler function, `events.Handler(log, querier, guard)`,
+and no mux carries it. [[013-api]] owns the route table and registers it, in
+front of the verifier of [[006-identity]].
+
+The seam the wiring binds is `events.Guard`, two methods and no more:
+
+```go
+// Guard is the authorizer seam of spec 006, as internal/events needs it.
+type Guard interface {
+	// Caller answers the subject the verified token identifies, rendered
+	// <issuer>|<sub>, and "" for a request that carried no usable token.
+	Caller(r *http.Request) string
+	// Ask puts one question of the vocabulary and answers the decision
+	// verbatim, Filter included, so the handler narrows its own query. An
+	// error is a call that produced no decision and fails closed as 503.
+	Ask(r *http.Request, action string, resource authz.Resource) (authz.Decision, error)
+}
+```
+
+The answer is `latere.ai/x/pkg/authz`'s `Decision` and not a boolean, because
+criterion 10 needs the `Filter` and because an adapter over the shared client
+is then one method deep. `events.LimitOf(decision)` reads
+`limits.quota_bytes` off the same answer for the write paths of
+[[005-files]] and [[007-uploads]].
+
+### Where each criterion stands
+
+| # | State |
+|---|---|
+| 1 | Holds. `TestLimitOfReadsWhatTheAnswerCarried` and `TestChargeHonoursTheLimitTheAnswerCarried` over an answer with no limits, and `0005_usage_events.up.sql` holds no limit column |
+| 2 | Holds. `TestTheLimitLivesAsLongAsTheAnswerAndNoLonger` runs the shared client over a stub authorizer on a clock the test moves |
+| 3 | Holds at the ledger: `TestStoreUsageAdmitsTheLimitAndRefusesTheByteAfterIt` against Postgres carries the used and limit figures. The `413` itself waits on a write route ([[005-files]], [[013-api]]) |
+| 4 | Holds. The same test releases bytes on a space over the limit |
+| 5 | Holds. `TestDeltaChargesWhatAWriteAdds`, one row per case of the admission table |
+| 6 | Holds. `TestUsageFailsClosed` at the seam and `TestStoreUsageFailsClosed` against Postgres, where the refused charge rolls back with the row. The `storage_unavailable` rendering waits on [[013-api]] |
+| 7 | Deferred to [[007-uploads]], which creates `upload_sessions`. The recomputation sums two tables and says so, and a space with an open session will reconcile low until the third term joins it |
+| 8 | Holds. `TestEveryAppendedActionIsInTheTable` walks every Go file of the tree for an action built out of a literal |
+| 9 | Holds. `TestStoreTheTailIsGaplessAcrossABurst`, eight writers and a keyset walk that reads each row once |
+| 10 | Holds. `TestEventFilter`. The conformance row is [[017-conformance-suite]]'s |
+| 11 | Holds. `TestStoreAPutThatFailedAfterTheBucketWriteIsReapedAfterTheWindow` against MinIO |
+| 12 | Holds. `TestStoreADeleteThatFailedAfterTheRowIsReaped` |
+| 13 | Deferred to [[007-uploads]]. The union `store.ObjectReferenced` asks is held to the schema by a test, so the table joins it with the migration that creates it |
+| 14 | Holds. `TestPassTwoReportsARowWithoutItsBytesAndDeletesNothing` and `TestStoreARowWithoutItsBytesIsReportedAndKept` |
+| 15 | Deferred to [[009-workspaces]]. Pass 3 is a `Pass` the reconciler is given, with a unit test on a fake |
+| 16 | The trash half holds: `TestStoreTrashPastItsRetentionLeavesBothStores`. The tombstone half is deferred to [[009-workspaces]] |
+| 16b | Holds at the statement: `TestPassEightDropsAStarWhoseTargetIsGoneAndKeepsOneOnATrashedTarget`. The star routes are [[005-files]]'s |
+| 17 | Holds. `TestStoreLedgerReconciles` against Postgres, with the healthy run correcting nothing |
+| 18 | Holds. `TestARunTwiceLeavesWhatOneRunLeft` and the settled sweep of the store tier. Two reapers at once are two conditional statements, which is what the second run is |
+| 19 | Holds. `TestDryRunReportsWhatARunWouldChange` runs one fixture dry and live and holds the found counts equal |
+| 20 | Holds. `TestServeSaysWhetherThisReplicaReconciles` and `TestE2EReapRunsOneSequenceAndExits` |
+
+### Divergences
+
+Each is a decision rather than a gap.
+
+- **Migration 0005 applies across a gap.** [[004-metadata-store]] assigns
+  `0005` to this spec and `0002` through `0004` to [[007-uploads]],
+  [[008-shares-and-links]] and [[009-workspaces]], which do not exist yet.
+  The migrator records one version, so a database that applies `0005` before
+  those three exist will never receive them. No installation is on this
+  schema, a fresh database applies all five in order, and a development stack
+  that reached `0005` first is recreated with `make clean`. The file says so
+  at its top and `TestStoreTheLedgerAndTheLogApplyOverTheNumbersTheirSpecsHaveNotFilled`
+  proves the gap itself applies.
+- **`events_created_idx` is in the migration** and not in
+  [[004-metadata-store]]'s schema block. Pass 9 deletes by `created_at`, and
+  the predecessor carried the same index.
+- **A thirteenth finding kind, `lease_expired`.** [[018-observability]]'s
+  `kind` vocabulary has twelve members and none for an expired attachment,
+  because that table counts those with `arca_lease_expiries_total`. A pass
+  whose findings no run reports is a pass an operator cannot see run at all,
+  so the reconciler reports one. 018 absorbs the row when it is built.
+- **Pass 8 follows criterion 16b and not the pass table's wording.** The
+  table says "no live `files` row" and the criterion says a star on a
+  trashed but restorable target is kept; the criterion is the narrower
+  statement, so the pass keeps a star whose target is trashed.
+- **Pass 2 asks the bucket once per row per run.** The alternative is holding
+  every key of the bucket in memory for the run, which grows with the
+  installation. The cost is the same order as pass 1's query per key, which
+  is what the predecessor already paid.
+- **Pass 10 walks `space_usage` rows.** A space that holds rows and has no
+  ledger row at all is outside the walk, which is what the spec's wording
+  says; every write path creates the row with its first charge.
+- **The reaper's sweep statements live in `internal/reaper`.**
+  [[004-metadata-store]] owns one query set per table for the handlers; the
+  reaper sweeps across tables several specs own, and a query set per table
+  for one caller would spread one pass over four packages.
+- **`Older` joined the `Log` interface**, the count pass 9 reports in a dry
+  run. Without it the dry run would carry the log's own SQL into the reaper.
+- **`ARCA_TRASH_RETENTION` joined `internal/config`** beside
+  `ARCA_REAP_INTERVAL`. It is [[005-files]]'s row of
+  [[002-repository-scaffold]]'s table, and passes 5 and 6 read it.
+- **The tail's `id` is a number and `next_cursor` a string**, which is the
+  envelope this spec's own example shows. [[013-api]]'s "shapes a consumer
+  meets more than once" renders an event id as a string; the tail is keyset
+  paginated on a `BIGSERIAL` and the number is what a consumer compares.
+- **A denied `event.read` is `403 forbidden`.** Invariant 6's 404 is about a
+  reference the request named being denied at lookup, and this route names a
+  space rather than an object. The predecessor answered 404.
+- **A tail whose query failed is `503 storage_unavailable`.** The database
+  did not answer, which is retryable, and a 500 says otherwise.
+- **The handler carries four rows of [[013-api]]'s error table** in an
+  unexported writer, so it is complete on its own. `internal/api` deletes one
+  function when it registers the route. No `details.request_id` is written,
+  because the middleware that mints one is [[013-api]]'s.
+- **`events.id` is allocated before its transaction commits.** A row with a
+  lower id can therefore become visible after a higher one, and a tail
+  reading at that instant would step past it. The window is one statement
+  wide for an append, the burst test reads after the burst, and nothing here
+  adds a lag mechanism this spec did not ask for.
+
+### The Drive bugs this port fixes
+
+| Bug | Where | Fix |
+|---|---|---|
+| The reference check read two of the three tables that keep bytes alive, while calling itself the single invariant deciding whether a blob may be deleted | `drive/internal/store/refs.go`, `StorageKeyReferenced` | `store.objectReferencedSQL` is held to the schema by `TestObjectReferencedNamesEveryTableThatHoldsAnObjectID`, and `TestTheGuardFindsThePredecessorsGap` runs the comparison over the predecessor's own two table statement and reports `upload_sessions` missing |
+| The dry run under-reported: `pruneStars` and `pruneEvents` returned before counting and `purgeWorkspaces` skipped both of its counters, so what a dry run printed was not what a run would do | `drive/internal/gc/reconciler.go` | Every pass counts what it found in both modes, and `TestDryRunReportsWhatARunWouldChange` holds the found counts of one fixture equal |
+| `Reconcile` returned on the first pass that failed, so a bucket that was down kept the ledger from ever reconciling | the same | Every pass runs, the failures are joined, and the run reports itself failed. `TestAPassThatFailsDoesNotStopTheRest` |
+| A usage query that failed admitted the write, with a warning nobody reads | `drive/internal/handler/quota.go`, `quotaAllows` | The charge is inside the write's transaction, so a ledger that cannot be written takes the write down with it. `TestUsageFailsClosed`, `TestStoreUsageFailsClosed` |
 
 ## Design
 
