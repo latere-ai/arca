@@ -102,7 +102,13 @@ func reap(ctx context.Context, args []string, getenv config.Getenv, stdout, stde
 		return fail(stderr, err)
 	}
 	defer db.Close()
-	reconciler, err := reaper.New(reaperOptions(cfg, db, bucket, *dryRun))
+	// Pass 3 is not given here. Its sweep is a method of the workspace
+	// service of spec 009, which refuses to build without the authorizer
+	// every one of its handlers decides through, and this process registers
+	// no handler and starts no verifier. A replica running the in-process
+	// loop expires leases; an installation that moves the reconciler off the
+	// API replicas keeps that one pass on them.
+	reconciler, err := reaper.New(reaperOptions(cfg, db, bucket, *dryRun, nil))
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -136,14 +142,70 @@ func report(stdout io.Writer, findings reaper.Findings, dryRun bool) {
 // reaperOptions is what both roles build the reconciler from. serve and reap
 // read the same configuration and reconcile the same way; what differs is
 // where the loop lives.
-func reaperOptions(cfg config.Config, db *store.DB, bucket blob.Store, dryRun bool) reaper.Options {
+func reaperOptions(cfg config.Config, db *store.DB, bucket blob.Store, dryRun bool, leases reaper.Pass) reaper.Options {
 	return reaper.Options{
 		DB:             db,
 		Bucket:         bucket,
 		Prefix:         cfg.BucketPrefix,
 		TrashRetention: cfg.TrashRetention,
 		DryRun:         dryRun,
+		Leases:         leases,
 	}
+}
+
+// The two seams spec 009 declared and spec 010 fills. Both are here rather
+// than in either package, because a package that imported the other to bind
+// its own seam would be the dependency the seam exists to avoid: the
+// workspaces know nothing of the log, the reconciler knows nothing of the
+// lease, and the node is what knows both.
+
+// ledger binds the log and the usage counter of spec 010 to the seam of
+// spec 009. Both calls run inside the caller's transaction, which is what
+// makes a mutation and the row recording it one commit.
+type ledger struct {
+	log   events.Log
+	usage events.Ledger
+}
+
+// Append writes one row of the log. The action is one word of spec 010's
+// closed vocabulary, spelled the same on both sides; the append refuses a
+// word the vocabulary does not name, so a mapping that drifted is a refused
+// transaction rather than a row no consumer can filter for.
+//
+// The id the append answers is dropped. A workspace asked for the row to
+// exist and reads no cursor of its own.
+func (l ledger) Append(ctx context.Context, q store.Querier, e workspaces.Event) error {
+	_, err := l.log.Append(ctx, q, events.Event{
+		Owner: e.Owner, Path: e.Path, Action: events.Action(e.Action),
+		Actor: e.Actor, Detail: e.Detail,
+	})
+	return err
+}
+
+// Release gives the bytes a sync dropped back to the space's counter. The
+// total afterwards is the counter's own business: the caller asked for the
+// number to move and reads it back through the routes that report usage.
+func (l ledger) Release(ctx context.Context, q store.Querier, owner string, bytes int64) error {
+	_, err := l.usage.Release(ctx, q, owner, bytes)
+	return err
+}
+
+// leasePass binds pass 3 of spec 010's table to the sweep of spec 009. The
+// reconciler hands every pass a querier and a dry flag; this sweep opens its
+// own transactions, one per row it ends, because a reap is a row, a lease and
+// a log entry written together.
+type leasePass struct{ service *workspaces.Service }
+
+// Sweep ends what outlived its deadline, and runs nothing at all on a dry
+// run. The sweep has no counting half: every statement it issues is a write,
+// so a dry run that called it would change both stores while reporting that
+// it changed neither, which is the one thing a dry run may not do. It
+// reports nothing rather than a number it did not measure.
+func (p leasePass) Sweep(ctx context.Context, _ store.Querier, now time.Time, dry bool) (int, error) {
+	if dry {
+		return 0, nil
+	}
+	return p.service.ExpireLeases(ctx, now)
 }
 
 // bucketOptions is the bucket client every role opens, from the one table of
@@ -261,14 +323,17 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	if err != nil {
 		return fail(stderr, err)
 	}
-	// The workspaces of spec 009. The file plane of spec 005 and the ledger
-	// of spec 010 are seams: the queries below are the file-plane half a
-	// workspace reads as a subtree, and a nil ledger writes nothing until
-	// that spec lands its log.
+	// The workspaces of spec 009. The file plane of spec 005 is still a
+	// seam: the queries below are the file-plane half a workspace reads as
+	// a subtree, and they answer it until that spec lands its own. The
+	// ledger is no longer one: spec 010 is in this build, so an attach, a
+	// release, a sync and a reap append a row of its log and a sync gives
+	// the bytes it dropped back to its space's counter.
 	durable, err := workspaces.New(workspaces.Options{
 		DB: db, Workspaces: store.NewWorkspaces(), Attachments: store.NewAttachments(),
 		Objects: store.NewWorkspaceObjects(), Bucket: bucket, Prefix: cfg.BucketPrefix,
 		Authorizer: identity.Authorizer,
+		Ledger:     ledger{log: events.NewLog(), usage: events.NewLedger()},
 	})
 	if err != nil {
 		return fail(stderr, err)
@@ -295,7 +360,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	// ARCA_REAP_INTERVAL to 0 here and runs arcad reap as a process of its
 	// own. It starts before the listeners, so a reconciler that cannot be
 	// built fails the start-up before a port is bound.
-	if err := startReaper(ctx, cfg, db, bucket, stdout); err != nil {
+	if err := startReaper(ctx, cfg, db, bucket, leasePass{durable}, stdout); err != nil {
 		return fail(stderr, err)
 	}
 
@@ -367,12 +432,12 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 // startReaper starts the in-process reconciliation loop, or says on the
 // start-up line that this replica runs none. Which it is, is a fact an
 // operator reads once rather than infers from a missing metric.
-func startReaper(ctx context.Context, cfg config.Config, db *store.DB, bucket blob.Store, stdout io.Writer) error {
+func startReaper(ctx context.Context, cfg config.Config, db *store.DB, bucket blob.Store, leases reaper.Pass, stdout io.Writer) error {
 	if cfg.ReapInterval <= 0 {
 		_, _ = fmt.Fprintln(stdout, "arcad: the reconciler is off on this replica; ARCA_REAP_INTERVAL is 0")
 		return nil
 	}
-	reconciler, err := reaper.New(reaperOptions(cfg, db, bucket, false))
+	reconciler, err := reaper.New(reaperOptions(cfg, db, bucket, false, leases))
 	if err != nil {
 		return err
 	}

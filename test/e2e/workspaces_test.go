@@ -9,7 +9,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"slices"
 	"strings"
@@ -17,11 +16,6 @@ import (
 	"time"
 
 	"latere.ai/x/pkg/authz/stub"
-
-	"latere.ai/x/arca/internal/blob"
-	"latere.ai/x/arca/internal/store"
-	"latere.ai/x/arca/object"
-	"latere.ai/x/arca/test/stubs/issuer"
 )
 
 // The e2e tier of spec 009: arcad as a process, against a real Postgres, a
@@ -34,75 +28,6 @@ import (
 // what lets the manifest of a multipart-written object be proved here:
 // such an object carries a key its path does not predict, which is the case
 // materialize has to get right.
-
-// api drives one request against the running server with the caller's
-// bearer and answers the status and the body.
-func (i *installation) api(t *testing.T, method, path string, body any) (int, []byte) {
-	t.Helper()
-	var reader io.Reader
-	if body != nil {
-		raw, err := json.Marshal(body)
-		if err != nil {
-			t.Fatal(err)
-		}
-		reader = bytes.NewReader(raw)
-	}
-	req, err := http.NewRequestWithContext(t.Context(), method, i.publicURL+path, reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	req.Header.Set("Authorization", "Bearer "+i.issuer.Mint(issuer.Claims{Sub: "dev"}))
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("%s %s: %v", method, path, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	read, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return resp.StatusCode, read
-}
-
-// expect drives one request and fails the test when the status is not the
-// one wanted, decoding the body into out when it is given.
-func (i *installation) expect(t *testing.T, want int, method, path string, body, out any) []byte {
-	t.Helper()
-	code, read := i.api(t, method, path, body)
-	if code != want {
-		t.Fatalf("%s %s = %d, want %d: %s", method, path, code, want, read)
-	}
-	if out != nil {
-		if err := json.Unmarshal(read, out); err != nil {
-			t.Fatalf("%s %s answered %s: %v", method, path, read, err)
-		}
-	}
-	return read
-}
-
-// errorCode reads the code of a refusal in the envelope of spec 013.
-func errorCode(t *testing.T, body []byte) string {
-	t.Helper()
-	var envelope struct {
-		Error struct {
-			Code    string `json:"code"`
-			Details struct {
-				RequestID string   `json:"request_id"`
-				Fields    []string `json:"fields"`
-			} `json:"details"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(body, &envelope); err != nil {
-		t.Fatalf("the refusal is not the envelope: %s", body)
-	}
-	if envelope.Error.Code != "" && envelope.Error.Details.RequestID == "" {
-		t.Errorf("the refusal carries no request id: %s", body)
-	}
-	return envelope.Error.Code
-}
 
 // missingPaths reads the paths a manifest_incomplete named.
 func missingPaths(t *testing.T, body []byte) []string {
@@ -118,137 +43,6 @@ func missingPaths(t *testing.T, body []byte) []string {
 		t.Fatal(err)
 	}
 	return envelope.Error.Details.Fields
-}
-
-// subject is the space every request of these tiers acts in.
-func (i *installation) subject() string { return i.issuer.URL() + "|dev" }
-
-// allowEverything puts one rule in the stub's table, so the tiers below
-// exercise the routes rather than the ladder. The ladder itself is the unit
-// tier's and the conformance suite's.
-func (i *installation) allowEverything() {
-	i.authorizer.Allow(stub.Rule{Subject: "*", Action: "*", Resource: "*", Allow: true})
-}
-
-// bucket opens the run's own bucket, for seeding and for reading back what a
-// sync removed.
-func (i *installation) bucket(t *testing.T) blob.Store {
-	t.Helper()
-	b, err := blob.NewS3(t.Context(), blob.Options{
-		Bucket: i.stack.bucket, Endpoint: i.stack.endpoint, Region: "us-east-1",
-		AccessKey: i.stack.key, SecretKey: i.stack.secret, PathStyle: true,
-	})
-	if err != nil {
-		t.Fatalf("open the bucket: %v", err)
-	}
-	return b
-}
-
-// database opens the run's own schema.
-func (i *installation) database(t *testing.T) *store.DB {
-	t.Helper()
-	db, err := store.Open(t.Context(), i.databaseURL)
-	if err != nil {
-		t.Fatalf("open the database: %v", err)
-	}
-	t.Cleanup(db.Close)
-	return db
-}
-
-// seeded is one object a tier wrote straight into the two stores.
-type seeded struct {
-	path     string
-	id       object.ID
-	checksum string
-	size     int64
-	bytes    []byte
-}
-
-// put writes one object in one piece and the row that names it, which is
-// what a put of spec 005 leaves behind.
-func (i *installation) put(t *testing.T, db *store.DB, path, content string) seeded {
-	t.Helper()
-	id := object.NewID()
-	written, err := i.bucket(t).Put(t.Context(), id.Key(i.prefix), strings.NewReader(content), int64(len(content)), blob.PutOptions{})
-	if err != nil {
-		t.Fatalf("seed %q: %v", path, err)
-	}
-	return i.row(t, db, path, id, written.SHA256, int64(len(content)), object.ChecksumSHA256, []byte(content))
-}
-
-// putInParts writes one object as a multipart upload and the row that names
-// it. Such an object carries the store's composite label rather than a
-// digest of its bytes, and a key the path does not predict, which is the
-// case materialize has to presign from the row.
-func (i *installation) putInParts(t *testing.T, db *store.DB, path, content string) seeded {
-	t.Helper()
-	b := i.bucket(t)
-	id := object.NewID()
-	key := id.Key(i.prefix)
-	upload, err := b.CreateMultipart(t.Context(), key, blob.PutOptions{})
-	if err != nil {
-		t.Fatalf("open the multipart upload: %v", err)
-	}
-	url, err := b.PresignPart(t.Context(), key, upload, 1)
-	if err != nil {
-		t.Fatalf("sign the part: %v", err)
-	}
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodPut, url, strings.NewReader(content))
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.ContentLength = int64(len(content))
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("send the part: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("the part answered %d: %s", resp.StatusCode, body)
-	}
-	etag := strings.Trim(resp.Header.Get("ETag"), `"`)
-	assembled, err := b.CompleteMultipart(t.Context(), key, upload, []blob.Part{{Number: 1, ETag: etag}})
-	if err != nil {
-		t.Fatalf("assemble the parts: %v", err)
-	}
-	if !strings.Contains(assembled.ETag, "-") {
-		t.Fatalf("the assembled object's label is %q, which is not a composite", assembled.ETag)
-	}
-	return i.row(t, db, path, id, assembled.ETag, int64(len(content)), object.ChecksumETag, []byte(content))
-}
-
-// row writes the metadata half of a seeded object.
-func (i *installation) row(t *testing.T, db *store.DB, path string, id object.ID, checksum string, size int64, kind object.ChecksumKind, content []byte) seeded {
-	t.Helper()
-	created, err := store.NewFiles().Insert(t.Context(), db.Querier(), store.File{
-		Owner: i.subject(), Path: path, ObjectID: id, CreatedBy: i.subject(),
-		SizeBytes: size, Checksum: checksum, ChecksumKind: kind,
-	})
-	if err != nil || !created {
-		t.Fatalf("seed the row for %q: %v, %v", path, created, err)
-	}
-	return seeded{path: path, id: id, checksum: checksum, size: size, bytes: content}
-}
-
-// fetch reads a presigned URL the way a sandbox does: straight from the
-// bucket, with no bearer of Arca's.
-func fetch(t *testing.T, url string) (int, []byte) {
-	t.Helper()
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("fetch %s: %v", url, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return resp.StatusCode, body
 }
 
 // The shapes these tiers read back, named here rather than imported so the

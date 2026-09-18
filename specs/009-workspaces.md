@@ -323,13 +323,33 @@ the API frame registers a spec's own rows through), `a8ae9c9` (materialize
 and sync) and `8bf5797` (the store and e2e tiers). The gate passes at each of
 them.
 
+[[010-events-and-reaper]] merged in beside it, so two of the three seams
+above are bound rather than defaulted. `workspaces.Ledger` is that spec's
+log and usage counter: every attach, release, sync and reap appends a row of
+its closed vocabulary, and the bytes a sync dropped go back to the space's
+counter, both inside the transaction that moved them. Pass 3 of its table is
+`Service.ExpireLeases`, run by the in-process loop on every replica that has
+one; the pass writes on every statement it issues and has no counting half,
+so a dry run runs it not at all, and `arcad reap` as a process of its own
+does not carry it, because the service the sweep is a method of refuses to
+build without the authorizer its handlers decide through and that process
+starts no verifier. `workspaces.Objects` is still `store.NewWorkspaceObjects()`:
+[[005-files]] has not landed.
+
+The frame's route tests no longer read the frame's half of the surface. They
+iterate the list `api.New` merges, so a contributed row is held to the same
+rules a frame row is, and the union of every declaration this build
+registers is read in `tools/apidoc`, which is the one place both halves are
+visible and which logs how far the build is from [[013-api]]'s forty-one.
+Sixteen are registered today.
+
 Criteria 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16 and 17 have passing
-tests. Criterion 4 is half here: the pass the reaper calls is
-`Service.ExpireLeases`, tested in this package, and the loop that runs it is
-[[010-events-and-reaper]]'s. Criterion 14 is proved in the unit tier against
-the shared stub authorizer and closes fully with [[017-conformance-suite]]'s
-rows. Criterion 15's purge half is [[010-events-and-reaper]]'s. The spec
-stays at `testing` until those close.
+tests. Criterion 4 is here: `Service.ExpireLeases` is tested in this package
+and the loop that runs it is bound in `cmd/arcad`, with the zombie writer's
+next sync and renew asserted from this side. Criterion 14 is proved in the
+unit tier against the shared stub authorizer and closes fully with
+[[017-conformance-suite]]'s rows. Criterion 15's purge half is
+[[010-events-and-reaper]]'s. The spec stays at `testing` until those close.
 
 ### What arrived from Drive
 
@@ -424,13 +444,6 @@ fails without the fix.
   [[010-events-and-reaper]] must close: either the check takes a row lock on
   the object rows it reads, or the sweep is deferred to the reaper, which
   reads a later snapshot and can see the reference.
-- **The frame's route tests read the frame's own rows.** `internal/api`'s
-  three route tests, the one action per route, the one row per line of
-  [[013-api]]'s table and the one operation per route in the document,
-  iterate the frame's table and cannot see a row a spec contributes through
-  `api.Options.Routes`. This package carries its own equivalents over
-  `Table()`, and every spec that contributes rows must carry its own, or
-  criterion 1 of [[013-api]] stops being measured for them.
 - **Two worktrees of this repository collide on the compose ports.**
   `DEV_PORT_BASE` derives from the checkout directory name, so two tiers run
   side by side take the same ports and the second stack fails to start. One
@@ -445,7 +458,7 @@ runs before the specs that own them land.
 | Seam | What it is | Bound by |
 |---|---|---|
 | `workspaces.Objects` | the subtree half of the file plane: the manifest with object ids, the counters, the rename, the drop, the batched reference check | `store.NewWorkspaceObjects()` today, [[005-files]]' own implementation after the merge |
-| `workspaces.Ledger` | `Append` for the `attach`, `release`, `sync`, `reap` and `restore` rows, and `Release` for the bytes a sync gave back, both inside the caller's transaction | a silent default today, [[010-events-and-reaper]]'s log after the merge |
+| `workspaces.Ledger` | `Append` for the `attach`, `release`, `sync`, `reap` and `restore` rows, and `Release` for the bytes a sync gave back, both inside the caller's transaction | [[010-events-and-reaper]]'s log and usage counter, bound in `cmd/arcad`; the silent default is what a build without them gets |
 | `workspaces.Database` | `Querier` and `Tx`, so the unit tier drives every handler with no Postgres | `*store.DB` |
 
 ### What the sandbox runtime sends, and where it no longer fits

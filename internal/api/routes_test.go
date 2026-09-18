@@ -76,15 +76,14 @@ func TestEveryActionIsOneOfTheVocabulary(t *testing.T) {
 // behind the verifier asks the action of its row, once, before it acts, and
 // a route outside it asks nothing at all.
 //
-// The table carries one row of each kind. The synthetic row is what proves
-// the mechanism rather than the absence of rows: it is registered through
-// the same mount the node uses, and its handler decides through the same
-// seam every handler of a later phase will.
+// It reads the merged registry and not the frame's own table: a contributed
+// row runs behind the same verifier and asks the same way, so the rule is
+// measured for every route the surface registers rather than for the frame's
+// half of it.
 func TestEveryRouteAsksExactlyOneAction(t *testing.T) {
-	rows := append(slices.Clone(routeTable), probeRoute)
-	for _, r := range rows {
+	for _, r := range registry(t) {
 		t.Run(r.method+" "+r.path, func(t *testing.T) {
-			h := newHarness(t, rows)
+			h := newHarness(t)
 			h.endpoint.Allow(stub.Rule{Subject: "*", Action: "*", Resource: "*", Allow: true})
 			h.do(t, r.method, fill(r.path), h.bearer())
 			asked := h.endpoint.Requests()
@@ -107,10 +106,9 @@ func TestEveryRouteAsksExactlyOneAction(t *testing.T) {
 // TestARouteThatIsDeniedDoesNotAct: the question comes before the act, so a
 // deny is the whole of the answer and the handler's work never runs.
 func TestARouteThatIsDeniedDoesNotAct(t *testing.T) {
-	rows := append(slices.Clone(routeTable), probeRoute)
-	h := newHarness(t, rows)
+	h := newHarness(t)
 	h.endpoint.Deny(stub.Rule{Subject: "*", Action: "*", Resource: "*"}, "no rule allows it")
-	w := h.do(t, probeRoute.method, fill(probeRoute.path), h.bearer())
+	w := h.do(t, http.MethodGet, fill(probePath), h.bearer())
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("a denied route answered %d: %s", w.Code, w.Body)
 	}
@@ -125,16 +123,21 @@ func TestARouteThatIsDeniedDoesNotAct(t *testing.T) {
 // differs from its row is a question the document and the server disagree
 // about.
 //
+// It reads the merged registry, so a contributed row is held to the spec the
+// same way a frame row is. How far this build is from the whole surface is
+// not a question this package can answer — the packages that contribute rows
+// import it and it imports none of them — so the count of the build is
+// tools/apidoc's, where the one union of every declaration lives.
+//
 // The converse, that every row of spec 013's table is registered, is
-// criterion 1 of that spec and is checked once the handlers of the later
-// phases land; registered is a subset of the table until then, and the count
-// below is what says how far from the whole surface this build is.
+// criterion 1 of that spec and closes when the last handler lands;
+// registered is a subset of the table until then.
 func TestEveryRegisteredRouteIsInSpec013sTable(t *testing.T) {
 	spec := routesOfSpec013(t)
 	if len(spec) < 41 {
 		t.Fatalf("spec 013's tables name %d routes, and the surface is forty-one plus the document", len(spec))
 	}
-	for _, r := range routeTable {
+	for _, r := range registry(t) {
 		key := r.method + " " + r.path
 		action, ok := spec[key]
 		if !ok {
@@ -145,15 +148,14 @@ func TestEveryRegisteredRouteIsInSpec013sTable(t *testing.T) {
 			t.Errorf("%s asks %q; spec 013's row says %q", key, r.action, action)
 		}
 	}
-	t.Logf("%d of spec 013's %d routes are registered in this build", len(routeTable), len(spec))
 }
 
 // TestTheDocumentDescribesEveryRegisteredRouteAndNoOther: the route table is
 // the one declaration, so the document and the router are one reading of it.
 func TestTheDocumentDescribesEveryRegisteredRouteAndNoOther(t *testing.T) {
-	h := newHarness(t, routeTable)
+	h := newHarness(t)
 	var want []string
-	for _, r := range routeTable {
+	for _, r := range h.api.rows {
 		want = append(want, r.method+" "+strings.ReplaceAll(r.path, "...}", "}"))
 	}
 	slices.Sort(want)
@@ -163,24 +165,53 @@ func TestTheDocumentDescribesEveryRegisteredRouteAndNoOther(t *testing.T) {
 	}
 }
 
-// probeRoute is a route of this test alone: one row behind the verifier that
-// asks one action through the seam every handler decides through. It exists
-// so the tests above read a route of each kind while the table itself holds
-// only the three exceptions, and it is never registered by Mount.
-var probeRoute = route{
-	method: http.MethodGet, path: "/v1/files/{owner}/{path...}",
-	action: authorizer.ActionFileRead, status: http.StatusOK,
-	summary: "Read one object.",
-	handler: func(a *API, w http.ResponseWriter, r *http.Request) {
-		res := authorizer.File{
-			ID: "01J8R4", Owner: r.PathValue("owner"), Path: r.PathValue("path"), Plane: "files",
-		}.Resource()
-		if _, err := a.authorizer.Decide(r.Context(), authorizer.ActionFileRead, res); err != nil {
-			WriteError(w, r, FromAuth(err))
-			return
-		}
-		httpjson.Write(w, http.StatusOK, map[string]string{"state": "acted"})
-	},
+// probePath is the row these tests contribute: one row of spec 013's file
+// table, which is a row of the kind the frame's own table never holds.
+const probePath = "/v1/files/{owner}/{path...}"
+
+// probe is that row's handler. It is contributed through Options.Routes, the
+// way a spec's own package contributes its rows, and it decides through the
+// authorizer seam the surface hands every handler. It exists so the tests
+// below read a route of each kind — a frame row and a contributed one — from
+// one merged registry, while spec 005's own handlers are still to land.
+//
+// The authorizer is bound after New, because the seam is the surface's and a
+// contributed row is declared before there is a surface to read it from.
+type probe struct{ authorizer *auth.Authorizer }
+
+// route is the declaration the surface merges.
+func (p *probe) route() Route {
+	return Route{
+		Method: http.MethodGet, Path: probePath,
+		Action: authorizer.ActionFileRead, Status: http.StatusOK,
+		Summary: "Read one object.",
+		Handler: http.HandlerFunc(p.answer),
+	}
+}
+
+// answer asks its one action and acts only on an allow.
+func (p *probe) answer(w http.ResponseWriter, r *http.Request) {
+	res := authorizer.File{
+		ID: "01J8R4", Owner: r.PathValue("owner"), Path: r.PathValue("path"), Plane: "files",
+	}.Resource()
+	if _, err := p.authorizer.Decide(r.Context(), authorizer.ActionFileRead, res); err != nil {
+		WriteError(w, r, FromAuth(err))
+		return
+	}
+	httpjson.Write(w, http.StatusOK, map[string]string{"state": "acted"})
+}
+
+// registry is the list a surface of these tests registers: the frame's own
+// table and the row they contribute, merged the way New merges them. The mux
+// and the document are both built from it, so a test that reads it reads the
+// surface and not one half of it.
+func registry(t *testing.T) []route {
+	t.Helper()
+	rows, err := merge(routeTable, []Route{(&probe{}).route()})
+	if err != nil {
+		t.Fatalf("the surface would not merge: %v", err)
+	}
+	return rows
 }
 
 // fill replaces the wildcards of a registration with values a request can
@@ -202,8 +233,11 @@ type harness struct {
 	endpoint *stub.Server
 }
 
-// newHarness mounts rows on a surface wired the way the node wires one.
-func newHarness(t *testing.T, rows []route, opts ...func(*Options)) *harness {
+// newHarness mounts a surface wired the way the node wires one: the frame's
+// own table plus the rows the options contribute, which by default is the
+// probe above. What it mounts is the surface's own merged list, so no test
+// drives a route the surface did not register.
+func newHarness(t *testing.T, opts ...func(*Options)) *harness {
 	t.Helper()
 	iss := issuertest.New(t, issuertest.WithDefaultAudience("arca"))
 	endpoint := stub.New(t, stub.WithVocabulary(authorizer.Vocabulary()))
@@ -214,6 +248,7 @@ func newHarness(t *testing.T, rows []route, opts ...func(*Options)) *harness {
 	if err != nil {
 		t.Fatalf("the node would not start: %v", err)
 	}
+	p := &probe{}
 	o := Options{
 		Verifier: id.Verifier, Authorizer: id.Authorizer,
 		PublicURL: "https://storage.example",
@@ -222,6 +257,7 @@ func newHarness(t *testing.T, rows []route, opts ...func(*Options)) *harness {
 		// page and no database, because what the tail reads is that
 		// package's own business.
 		Events: &fakeLog{},
+		Routes: []Route{p.route()},
 	}
 	for _, opt := range opts {
 		opt(&o)
@@ -230,13 +266,9 @@ func newHarness(t *testing.T, rows []route, opts ...func(*Options)) *harness {
 	if err != nil {
 		t.Fatalf("the surface would not build: %v", err)
 	}
+	p.authorizer = a.Authorizer()
 	mux := http.NewServeMux()
-	if rows == nil {
-		// Nil is the surface's own list: the frame's table plus whatever the
-		// options contributed, which is what Mount registers.
-		rows = a.rows
-	}
-	a.mount(mux, rows)
+	a.mount(mux, a.rows)
 	return &harness{mux: mux, api: a, issuer: iss, endpoint: endpoint}
 }
 

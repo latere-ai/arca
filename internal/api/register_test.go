@@ -29,7 +29,7 @@ func contributed() Route {
 
 func TestAContributedRouteIsRegisteredBehindTheVerifierAndDescribed(t *testing.T) {
 	row := contributed()
-	h := newHarness(t, nil, func(o *Options) { o.Routes = []Route{row} })
+	h := newHarness(t, func(o *Options) { o.Routes = []Route{row} })
 	h.endpoint.Allow(stub.Rule{Subject: "*", Action: "*", Resource: "*", Allow: true})
 
 	// No bearer: the contributed row meets the verifier like every other

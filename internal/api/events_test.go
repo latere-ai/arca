@@ -53,7 +53,7 @@ var aMoment = time.Date(2026, 9, 18, 10, 30, 0, 0, time.UTC)
 // every other answer carries.
 func TestTheEventTailAnswersThroughTheFrame(t *testing.T) {
 	log := &fakeLog{}
-	h := newHarness(t, routeTable, withLog(log))
+	h := newHarness(t, withLog(log))
 	log.page = events.Page{
 		Entries: []events.Event{
 			{ID: 41821, Owner: h.subject(), Path: "files/reports/q3.pdf", Action: events.ActionPut, At: aMoment},
@@ -106,7 +106,7 @@ func TestTheEventTailAnswersThroughTheFrame(t *testing.T) {
 // and it is the frame's envelope that says so.
 func TestADeniedEventReadIsForbidden(t *testing.T) {
 	log := &fakeLog{}
-	h := newHarness(t, routeTable, withLog(log))
+	h := newHarness(t, withLog(log))
 	h.endpoint.Deny(stub.Rule{Subject: "*", Action: "*", Resource: "*"}, "the caller is not a member")
 
 	w := h.do(t, http.MethodGet, "/v1/events?owner="+anotherSpace, h.bearer())
@@ -151,7 +151,7 @@ func TestTheTailAnswersEveryRowThroughTheFrame(t *testing.T) {
 			nil, CodeStorageUnavailable},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			h := newHarness(t, routeTable, withLog(c.log))
+			h := newHarness(t, withLog(c.log))
 			h.endpoint.Allow(stub.Rule{Subject: "*", Action: "*", Resource: "*", Allow: true})
 			if c.fail != nil {
 				c.fail(h.endpoint)
@@ -179,7 +179,7 @@ func TestTheTailAnswersEveryRowThroughTheFrame(t *testing.T) {
 // route it cannot answer. It is a start-up failure and not a nil dereference
 // on the first request, like the two of spec 006.
 func TestTheSurfaceRefusesToBuildWithoutTheEventLog(t *testing.T) {
-	h := newHarness(t, routeTable)
+	h := newHarness(t)
 	_, err := New(Options{Verifier: h.api.verifier, Authorizer: h.api.authorizer})
 	if err == nil || !strings.Contains(err.Error(), "no event log") {
 		t.Errorf("a surface with no event log built: %v", err)
@@ -190,7 +190,7 @@ func TestTheSurfaceRefusesToBuildWithoutTheEventLog(t *testing.T) {
 // subject of spec 006 and nothing else, and a request no verifier admitted
 // carries none.
 func TestTheGuardReadsTheCallerTheVerifierLeft(t *testing.T) {
-	g := eventGuard{api: newHarness(t, routeTable).api}
+	g := eventGuard{api: newHarness(t).api}
 	if got := g.Caller(request(t, aSpace)); got != aSpace {
 		t.Errorf("the guard read the caller %q", got)
 	}
@@ -208,7 +208,7 @@ func TestTheGuardTranslatesEveryAnswer(t *testing.T) {
 	res := authorizer.Event{Owner: aSpace}.Resource()
 
 	t.Run("an allow is a decision", func(t *testing.T) {
-		h := newHarness(t, routeTable)
+		h := newHarness(t)
 		h.endpoint.Allow(stub.Rule{Subject: "*", Action: "*", Resource: "*", Allow: true})
 		d, err := eventGuard{api: h.api}.Ask(request(t, aSpace), authorizer.ActionEventRead, res)
 		if err != nil || !d.Allow {
@@ -216,7 +216,7 @@ func TestTheGuardTranslatesEveryAnswer(t *testing.T) {
 		}
 	})
 	t.Run("a deny is a decision and not an error", func(t *testing.T) {
-		h := newHarness(t, routeTable)
+		h := newHarness(t)
 		h.endpoint.Deny(stub.Rule{Subject: "*", Action: "*", Resource: "*"}, "the caller is not a member")
 		d, err := eventGuard{api: h.api}.Ask(request(t, aSpace), authorizer.ActionEventRead, res)
 		if err != nil {
@@ -227,7 +227,7 @@ func TestTheGuardTranslatesEveryAnswer(t *testing.T) {
 		}
 	})
 	t.Run("an endpoint that answered nothing is no decision", func(t *testing.T) {
-		h := newHarness(t, routeTable)
+		h := newHarness(t)
 		h.endpoint.Fail(http.StatusBadGateway)
 		_, err := eventGuard{api: h.api}.Ask(request(t, aSpace), authorizer.ActionEventRead, res)
 		if err == nil {
@@ -238,7 +238,7 @@ func TestTheGuardTranslatesEveryAnswer(t *testing.T) {
 		}
 	})
 	t.Run("an action outside the vocabulary is no decision", func(t *testing.T) {
-		h := newHarness(t, routeTable)
+		h := newHarness(t)
 		h.endpoint.Allow(stub.Rule{Subject: "*", Action: "*", Resource: "*", Allow: true})
 		// It is a bug in the caller rather than an outage, and the shared
 		// client catches it before the wire.

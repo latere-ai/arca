@@ -7,6 +7,8 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -184,4 +186,94 @@ func TestBytesThatAreNotJSONPanic(t *testing.T) {
 		}
 	}()
 	mustYAML([]byte("{this is not JSON"))
+}
+
+var (
+	// routeRow matches one row of a route table of spec 013: the method,
+	// the path, and the action column.
+	routeRow = regexp.MustCompile(`^\| (GET|POST|PUT|PATCH|DELETE|HEAD) \| ` + "`([^`]+)`" + ` \| ([^|]+) \|`)
+	// tickedAction matches an action a row names.
+	tickedAction = regexp.MustCompile("`([a-z]+\\.[a-z]+)`")
+)
+
+// specRoutes reads every route table of specs/013-api.md: each row's method
+// and path, mapped to every action its third column names. A row whose
+// action the request chooses names more than one and a row outside the
+// verifier names none, which is why the map holds a list. A row whose path
+// carries a query selects a representation of a route already named, so the
+// query is dropped and the first row of a path wins.
+func specRoutes(t *testing.T) map[string][]string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "specs", "013-api.md"))
+	if err != nil {
+		t.Fatalf("spec 013: %v", err)
+	}
+	out := map[string][]string{}
+	for line := range strings.Lines(string(raw)) {
+		m := routeRow.FindStringSubmatch(strings.TrimSpace(line))
+		if m == nil {
+			continue
+		}
+		path, _, _ := strings.Cut(m[2], "?")
+		key := m[1] + " " + path
+		if _, seen := out[key]; seen {
+			continue
+		}
+		var actions []string
+		for _, a := range tickedAction.FindAllStringSubmatch(m[3], -1) {
+			actions = append(actions, a[1])
+		}
+		out[key] = actions
+	}
+	if len(out) == 0 {
+		t.Fatal("spec 013 has no route table")
+	}
+	return out
+}
+
+// TestEveryRouteThisBuildRegistersIsOneOfSpec013sTable is criterion 1 of
+// spec 013 for the whole surface rather than for one package's half of it.
+//
+// This is the one place the whole build is visible. internal/api is under
+// every package that contributes rows and imports none of them, so the
+// frame's own test reads the frame and the rows a test contributes, and each
+// owning package's test reads its own; the union is here, and the node
+// registers the same union because Routes and Table are two readings of one
+// declaration.
+//
+// The converse — that every row of the table is registered — closes when the
+// last handler lands. The line this logs is how far the build is from the
+// whole surface.
+func TestEveryRouteThisBuildRegistersIsOneOfSpec013sTable(t *testing.T) {
+	spec := specRoutes(t)
+	if len(spec) < 41 {
+		t.Fatalf("spec 013's tables name %d routes, and the surface is forty-one plus the document", len(spec))
+	}
+	registered := routes()
+	seen := map[string]bool{}
+	for _, r := range registered {
+		key := r.Method + " " + r.Path
+		if seen[key] {
+			t.Errorf("%s is registered twice", key)
+		}
+		seen[key] = true
+		actions, named := spec[key]
+		if !named {
+			t.Errorf("%s is registered and spec 013's table does not name it", key)
+			continue
+		}
+		// A row whose third column names actions is held to them. The rows
+		// that follow the action their attach asked name none, and the
+		// owning package's own test holds each to the action it puts.
+		if len(actions) > 0 && !slices.Contains(actions, r.Action) {
+			t.Errorf("%s asks %q; spec 013's row names %v", key, r.Action, actions)
+		}
+		if len(actions) == 0 && r.Public && r.Action != "" {
+			t.Errorf("%s is outside the verifier and asks %q; the grant the token resolves to is the whole of the authorization", key, r.Action)
+		}
+		if r.Summary == "" {
+			t.Errorf("%s carries no summary for the document", key)
+		}
+	}
+	t.Logf("%d of spec 013's %d routes are registered in this build", len(registered), len(spec))
 }

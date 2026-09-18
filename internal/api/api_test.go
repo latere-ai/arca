@@ -6,7 +6,6 @@ package api
 import (
 	"encoding/json"
 	"net/http"
-	"slices"
 	"strings"
 	"testing"
 
@@ -25,7 +24,7 @@ func TestTheSurfaceRefusesToBuildWithoutTheTwoOfSpec006(t *testing.T) {
 	if _, err := New(Options{}); err == nil || !strings.Contains(err.Error(), "no verifier") {
 		t.Errorf("a surface with no verifier built: %v", err)
 	}
-	h := newHarness(t, routeTable)
+	h := newHarness(t)
 	if _, err := New(Options{Verifier: h.api.verifier}); err == nil || !strings.Contains(err.Error(), "no authorizer") {
 		t.Errorf("a surface with no authorizer built: %v", err)
 	}
@@ -35,7 +34,7 @@ func TestTheSurfaceRefusesToBuildWithoutTheTwoOfSpec006(t *testing.T) {
 // the three link routes answer without a token, and answer the frame's
 // not_implemented until spec 008 lands their behaviour.
 func TestAPublicLinkRouteTakesNoBearer(t *testing.T) {
-	h := newHarness(t, routeTable)
+	h := newHarness(t)
 	for _, path := range []string{
 		"/v1/shares/links/tkn",
 		"/v1/shares/links/tkn/meta",
@@ -62,7 +61,7 @@ func TestAPublicLinkRouteTakesNoBearer(t *testing.T) {
 // registers both answer 401 without a bearer, so whether a route exists is
 // not something an unauthenticated caller learns.
 func TestEveryOtherPathUnderV1MeetsTheVerifier(t *testing.T) {
-	h := newHarness(t, append(slices.Clone(routeTable), probeRoute))
+	h := newHarness(t)
 	for _, path := range []string{
 		"/v1/files/https%3A%2F%2Fissuer.example%7C9ab3/files/reports/q3.pdf",
 		"/v1/shares",
@@ -89,7 +88,7 @@ func TestEveryOtherPathUnderV1MeetsTheVerifier(t *testing.T) {
 // no row of the table names is a 404 in the same envelope as every other
 // refusal, and not the router's own bare answer.
 func TestAPathNobodyRegisteredIsNotFoundOnceVerified(t *testing.T) {
-	h := newHarness(t, routeTable)
+	h := newHarness(t)
 	w := h.do(t, http.MethodGet, "/v1/no-such-route", h.bearer())
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("the path answered %d, want 404: %s", w.Code, w.Body)
@@ -104,7 +103,7 @@ func TestAPathNobodyRegisteredIsNotFoundOnceVerified(t *testing.T) {
 // API. The document parses as OpenAPI 3 and names the server this
 // installation is reached at.
 func TestOpenAPIIsServedWithoutAToken(t *testing.T) {
-	h := newHarness(t, routeTable)
+	h := newHarness(t)
 	w := h.do(t, http.MethodGet, "/openapi.json", "")
 	if w.Code != http.StatusOK {
 		t.Fatalf("the document answered %d", w.Code)
@@ -133,7 +132,7 @@ func TestOpenAPIIsServedWithoutAToken(t *testing.T) {
 // TestTheDocumentDeclaresOneResponsePerCode: spec 013's error table reaches
 // the document whole, so a generator emits one type per code.
 func TestTheDocumentDeclaresOneResponsePerCode(t *testing.T) {
-	d := newHarness(t, routeTable).document(t)
+	d := newHarness(t).document(t)
 	for _, code := range Codes() {
 		if _, ok := d.Components.Responses[code]; !ok {
 			t.Errorf("the document declares no response for %s", code)
@@ -155,7 +154,7 @@ func TestTheDocumentDeclaresOneResponsePerCode(t *testing.T) {
 func TestAGuardedRouteDeclaresTheBearerAndAPublicOneDoesNot(t *testing.T) {
 	d := apidocs.Build(apidocs.Options{
 		Title: Title, Version: DocumentVersion,
-		Routes: routesOf(append(slices.Clone(routeTable), probeRoute)), Errors: Errors(),
+		Routes: routesOf(registry(t)), Errors: Errors(),
 	})
 	public := d.Paths["/v1/shares/links/{token}"]["get"]
 	if len(public.Security) != 0 {
@@ -176,11 +175,10 @@ func TestAGuardedRouteDeclaresTheBearerAndAPublicOneDoesNot(t *testing.T) {
 // TestTheSubjectRateLimitIsPerSubject: a caller over its rate is refused
 // with the code of the table, and another caller is not.
 func TestTheSubjectRateLimitIsPerSubject(t *testing.T) {
-	rows := append(slices.Clone(routeTable), probeRoute)
-	h := newHarness(t, rows, func(o *Options) { o.RequestsPerMinute = 2 })
+	h := newHarness(t, func(o *Options) { o.RequestsPerMinute = 2 })
 	h.endpoint.Allow(stub.Rule{Subject: "*", Action: "*", Resource: "*", Allow: true})
 	alice := h.issuer.Mint(issuertest.Claims{Sub: "alice"})
-	path := fill(probeRoute.path)
+	path := fill(probePath)
 
 	for i := range 2 {
 		if w := h.do(t, http.MethodGet, path, alice); w.Code != http.StatusOK {
@@ -205,20 +203,19 @@ func TestTheSubjectRateLimitIsPerSubject(t *testing.T) {
 // both are charged the address bucket. A caller whose token verifies pays
 // the subject bucket alone and never this one.
 func TestTheAddressRateLimitBoundsWhatHasNoSubject(t *testing.T) {
-	rows := append(slices.Clone(routeTable), probeRoute)
-	h := newHarness(t, rows, func(o *Options) { o.UnauthenticatedRequestsPerMinute = 2 })
+	h := newHarness(t, func(o *Options) { o.UnauthenticatedRequestsPerMinute = 2 })
 	h.endpoint.Allow(stub.Rule{Subject: "*", Action: "*", Resource: "*", Allow: true})
 
 	// One guess at a link token and one bad bearer exhaust the bucket.
 	if w := h.do(t, http.MethodGet, "/v1/shares/links/guess", ""); w.Code != http.StatusNotImplemented {
 		t.Fatalf("a link route answered %d", w.Code)
 	}
-	if w := h.do(t, http.MethodGet, fill(probeRoute.path), "not-a-token"); w.Code != http.StatusUnauthorized {
+	if w := h.do(t, http.MethodGet, fill(probePath), "not-a-token"); w.Code != http.StatusUnauthorized {
 		t.Fatalf("a bad bearer answered %d", w.Code)
 	}
 	for _, c := range []struct{ name, path, token string }{
 		{"another guess at a link token", "/v1/shares/links/guess2", ""},
-		{"another bad bearer", fill(probeRoute.path), "still-not-a-token"},
+		{"another bad bearer", fill(probePath), "still-not-a-token"},
 	} {
 		w := h.do(t, http.MethodGet, c.path, c.token)
 		if w.Code != http.StatusTooManyRequests {
@@ -227,7 +224,7 @@ func TestTheAddressRateLimitBoundsWhatHasNoSubject(t *testing.T) {
 	}
 	// A caller whose token verifies pays the other bucket, which this case
 	// left alone.
-	if w := h.do(t, http.MethodGet, fill(probeRoute.path), h.bearer()); w.Code != http.StatusOK {
+	if w := h.do(t, http.MethodGet, fill(probePath), h.bearer()); w.Code != http.StatusOK {
 		t.Errorf("a verified caller was charged the address bucket: %d %s", w.Code, w.Body)
 	}
 }
@@ -235,13 +232,12 @@ func TestTheAddressRateLimitBoundsWhatHasNoSubject(t *testing.T) {
 // TestARateOfZeroLimitsNothing: the row's own value for a limiter that is
 // off, which is what an installation behind its own gateway sets.
 func TestARateOfZeroLimitsNothing(t *testing.T) {
-	rows := append(slices.Clone(routeTable), probeRoute)
-	h := newHarness(t, rows, func(o *Options) {
+	h := newHarness(t, func(o *Options) {
 		o.RequestsPerMinute, o.UnauthenticatedRequestsPerMinute = 0, 0
 	})
 	h.endpoint.Allow(stub.Rule{Subject: "*", Action: "*", Resource: "*", Allow: true})
 	for i := range 5 {
-		if w := h.do(t, http.MethodGet, fill(probeRoute.path), h.bearer()); w.Code != http.StatusOK {
+		if w := h.do(t, http.MethodGet, fill(probePath), h.bearer()); w.Code != http.StatusOK {
 			t.Fatalf("request %d answered %d with the limiters off", i+1, w.Code)
 		}
 		if w := h.do(t, http.MethodGet, "/v1/shares/links/tkn", ""); w.Code != http.StatusNotImplemented {
@@ -253,10 +249,9 @@ func TestARateOfZeroLimitsNothing(t *testing.T) {
 // TestAnAuthorizerThatAnswersNothingIsNeverAnAllow: the seam end to end.
 // An endpoint that is out of reach is 503 on the wire and no route acts.
 func TestAnAuthorizerThatAnswersNothingIsNeverAnAllow(t *testing.T) {
-	rows := append(slices.Clone(routeTable), probeRoute)
-	h := newHarness(t, rows)
+	h := newHarness(t)
 	h.endpoint.Fail(http.StatusBadGateway)
-	w := h.do(t, http.MethodGet, fill(probeRoute.path), h.bearer())
+	w := h.do(t, http.MethodGet, fill(probePath), h.bearer())
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("an unreachable authorizer answered %d: %s", w.Code, w.Body)
 	}
@@ -272,10 +267,9 @@ func TestAnAuthorizerThatAnswersNothingIsNeverAnAllow(t *testing.T) {
 // operator's authorizer sees, so a log line there and one here name one
 // request.
 func TestTheQuestionCarriesTheRequestId(t *testing.T) {
-	rows := append(slices.Clone(routeTable), probeRoute)
-	h := newHarness(t, rows)
+	h := newHarness(t)
 	h.endpoint.Allow(stub.Rule{Subject: "*", Action: "*", Resource: "*", Allow: true})
-	w := h.do(t, http.MethodGet, fill(probeRoute.path), h.bearer())
+	w := h.do(t, http.MethodGet, fill(probePath), h.bearer())
 	asked := h.endpoint.Requests()
 	if len(asked) != 1 {
 		t.Fatalf("the endpoint was asked %d times", len(asked))

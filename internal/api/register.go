@@ -14,12 +14,17 @@ import (
 // The seam a spec's own package contributes its rows of spec 013's table
 // through.
 //
-// The route table of routes.go is the frame's: the three public link routes,
-// which belong outside the verifier and could not be registered anywhere
-// else. Every other row's behaviour belongs to the package that owns it, and
-// that package holds its own handlers, so it declares its rows and the node
-// hands them here. The mux and the OpenAPI document are still built from one
-// list read twice, which is the property the frame exists to keep.
+// The route table of routes.go holds the rows the frame itself answers, and
+// there are two kinds. Three are the public link routes, which belong
+// outside the verifier and could not be registered anywhere else. The fourth
+// is the event tail of spec 010: its handler is internal/events', and the
+// frame binds it, because that package is under this one and a row it
+// contributed would be an import cycle.
+//
+// Every other row's behaviour belongs to a package above this one, which
+// holds its own handlers, so it declares its rows and the node hands them
+// here. The mux and the OpenAPI document are still built from one list read
+// twice, which is the property the frame exists to keep.
 //
 // A contributed row cannot be public. The three exceptions of spec 013 are
 // the whole exception to invariant 5 of spec 001, and a fourth would have to

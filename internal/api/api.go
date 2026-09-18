@@ -6,11 +6,13 @@
 // id, the two rate limits, and the OpenAPI document generated from the route
 // table.
 //
-// The route table of routes.go is the one declaration of the surface. The
-// mux is built from it, the document is built from it, and the tests read
-// it, so a route cannot be registered without an action, described without
-// being registered, or registered outside the verifier without a test naming
-// it as one of the three exceptions spec 013 allows.
+// The route table of routes.go and the rows the owning packages contribute
+// through Options.Routes merge into one list at start, and that list is the
+// one declaration of the surface. The mux is built from it, the document is
+// built from it, and the tests read it, so a route cannot be registered
+// without an action, described without being registered, or registered
+// outside the verifier without a test naming it as one of the three
+// exceptions spec 013 allows. See register.go for the seam.
 //
 // Every request under /v1 runs behind the verifier of spec 006, with three
 // exceptions: GET /v1/shares/links/{token}, its /meta and its /files/...,
