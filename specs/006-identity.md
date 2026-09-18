@@ -1,6 +1,6 @@
 ---
 title: "Identity: verification, the subject, the action vocabulary, the authorizer question, the owner policy"
-status: drafted
+status: testing
 track: core
 depends_on:
   - specs/001-architecture.md
@@ -37,6 +37,50 @@ question from its own tables and a self-hoster needs no fork.
 The contract is the family's, shared with the other open cores: one
 verifier package, one authorizer envelope, one conformance suite. An
 authorizer written for one core answers for all of them.
+
+## Current state
+
+Built and in the tree on 2026-09-18, phase 2 of [[019-migration-from-drive]].
+`authorizer/` publishes the vocabulary and the resource shapes,
+`internal/auth` holds the verifier, the authorizer client, the owner
+policy and the `Decide` seam, `cmd/arcad` builds both at start and mounts
+the surface of [[013-api]] behind them, and the `verifier` and
+`authorizer` waivers are gone from `.lateregate.yaml` so the real
+identity rules run. The gate passes with all fifteen gates on.
+
+Criteria 1, 2, 3, 6, 8, 11 and 12 have passing tests. Four are open and
+belong to later phases: criterion 4 and criterion 9's second half wait
+for `test/conformance` ([[017-conformance-suite]]), criterion 5's fault
+modes for the stub tiers of [[014-test-stubs-and-tiers]], criterion 7
+for the usage ledger of [[010-events-and-reaper]], and criterion 10 for
+the `check` command of [[012-administration]]. The spec stays at
+`testing` until they close.
+
+What the implementation decided, where this spec was silent:
+
+- The resource shapes are types of `authorizer/` rather than of
+  `internal/auth`, because the table above names the fields per kind and
+  an endpoint writer needs them as much as the server does. Cella keeps
+  its shapes in the control plane and says why; Arca's are half of what
+  an endpoint is written against, so they are published with the actions.
+- A grant reaches none of eight actions, named above, and the prefix a
+  grant on a workspace is read against is `workspaces/<slug>`.
+- The grants table and the public link table are the `GrantLookup` and
+  `LinkResolver` interfaces of `internal/auth`, which
+  [[008-shares-and-links]] implements. Both nil is an installation that
+  has issued neither, which is every installation until that spec lands.
+- A table that cannot answer is no decision: a store failure in the
+  grant step or the link step reaches the seam as
+  `authorizer_unavailable` and never as a deny, the same rule as an
+  endpoint that does not answer.
+- `ARCA_OIDC_INSECURE_ISSUERS` is checked in `internal/auth`, not in the
+  shared verifier, which has no such option: an issuer must be `https`,
+  or `http` on loopback, and the variable admits `http` anywhere else.
+- The tests use the family's own stubs, `latere.ai/x/pkg/authkit/issuertest`
+  and `latere.ai/x/pkg/authz/stub`, so Arca stands up no issuer and no
+  authorizer of its own. The stub issuer and stub authorizer of
+  [[014-test-stubs-and-tiers]] are for the tiers that run arcad as a
+  process.
 
 ## Design
 
@@ -167,7 +211,7 @@ Authorization: Bearer {ARCA_AUTHORIZER_TOKEN}
 | deny | 403 `forbidden` with the reason in the developer detail; a deny at lookup is 404 `not_found`, indistinguishable from a missing object |
 | `limits.quota_bytes` | the space's byte limit for the answer's `ttl`; without it a space has no limit, because Arca stores none ([[010-events-and-reaper]]) |
 | `filter` | on a `list` action, the owners and labels the page is narrowed to |
-| probe | the resource id `probe` of kind `Space`, which every authorizer denies for every subject; `arcad check` asks it and refuses an endpoint that allows |
+| probe | the shared contract's reserved resource id, `authz.ProbeID`, of kind `Space`, which every authorizer denies for every subject; `arcad check` asks it and refuses an endpoint that allows. The id is the family's one value and not a word of Arca's own, so one check command reads one answer from every endpoint of the family; `authorizer.Probe` builds the resource |
 
 The authorizer client is the shared one, so its transport carries the
 request's trace and every call is a span.
@@ -195,11 +239,25 @@ The ladder a grant is read against is [[008-shares-and-links]]'s:
 `workspace.list`; `write` adds `file.write`, `file.delete`,
 `file.restore`, `upload.write`, `workspace.write`, `workspace.attach`,
 `workspace.sync`; `manage` adds `share.create`, `share.read`,
-`share.list`, `share.revoke` on the granted subtree. `space.admin`,
-`workspace.create`, and `workspace.delete` are the owner's or an
-administrator's. The owner
-policy applies `authz.Restrict` last, so a narrowed personal key is
-narrowed here too.
+`share.list`, `share.revoke` on the granted subtree.
+
+No grant reaches the remaining eight, which are the owner's or an
+administrator's: `space.admin`, `workspace.create`, `workspace.delete`,
+`workspace.restore`, `event.read`, `link.create`, `link.read`,
+`link.revoke`. Making a workspace, removing one, undoing a delete,
+reading a space's log, and minting or revoking a token anyone may read
+with are powers over the space and not over a subtree of it, so a grant
+on a subtree does not confer them. `link.read` sits on that list and is
+still the one action an anonymous caller reaches, because the link step
+of the flowchart answers it and no grant does.
+
+A grant names a path prefix, and a workspace names a slug rather than a
+path, so the prefix a grant on a workspace is read against is
+`workspaces/<slug>`, the subtree of the workspaces plane
+([[001-architecture]]) that workspace owns.
+
+The owner policy applies `authz.Restrict` last, so a narrowed personal
+key is narrowed here too.
 
 The owner policy answers from Arca's own grants table, which is the one
 place this core reads its own state to decide. That is deliberate: a

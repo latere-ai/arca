@@ -16,6 +16,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"latere.ai/x/pkg/authz"
 )
 
 // Defaults for the optional variables.
@@ -23,6 +25,13 @@ const (
 	DefaultPublicAddr   = ":8080"
 	DefaultInternalAddr = ":8081"
 	DefaultBucketPrefix = "arca/"
+	// DefaultOIDCAudience is the aud every token must carry, spec 006.
+	DefaultOIDCAudience = "arca"
+	// DefaultRequestsPerMinute is the token bucket per subject after
+	// authentication, and DefaultUnauthenticatedRequestsPerMinute the one
+	// per client address before it (spec 015). Zero disables either.
+	DefaultRequestsPerMinute                = 600
+	DefaultUnauthenticatedRequestsPerMinute = 60
 )
 
 // prefixShape is what a bucket prefix may hold: the characters a key is
@@ -64,6 +73,27 @@ type Config struct {
 	PublicCDNURL string
 	// DatabaseURL is the Postgres connection string.
 	DatabaseURL string
+	// PublicURL is the address clients reach the public listener at, and
+	// the base of every URL the server writes (spec 013).
+	PublicURL string
+	// OIDCIssuers are the issuers whose tokens are verified (spec 006).
+	OIDCIssuers []string
+	// OIDCAudience is the audience every token must carry.
+	OIDCAudience string
+	// OIDCInsecureIssuers admits an http:// issuer that is not on loopback,
+	// for the test tiers of spec 014.
+	OIDCInsecureIssuers bool
+	// AuthorizerURL is the authorizer endpoint; unset selects the owner
+	// policy of spec 006. AuthorizerToken is the bearer it expects.
+	AuthorizerURL   string
+	AuthorizerToken string
+	// AdminSubjects are the rendered subjects the owner policy treats as
+	// administrators of the installation.
+	AdminSubjects []string
+	// RequestsPerMinute and UnauthenticatedRequestsPerMinute are the two
+	// token buckets of spec 015. Zero disables one.
+	RequestsPerMinute                int
+	UnauthenticatedRequestsPerMinute int
 }
 
 // Database reads the one variable the migrate subcommand needs, so a
@@ -94,6 +124,13 @@ func checkDatabaseURL(url string) string {
 // Load reads every variable through getenv and returns the configuration,
 // or one error naming every problem found, sorted by variable name.
 func Load(getenv Getenv) (Config, error) {
+	var problems []string
+	// note is the other half of the same slice: a row written with a format
+	// string rather than a built one, so a check reads as the sentence an
+	// operator gets. Every problem, however it is written, ends in the one
+	// sorted message below.
+	note := func(format string, args ...any) { problems = append(problems, fmt.Sprintf(format, args...)) }
+
 	c := Config{
 		PublicAddr:      withDefault(getenv("ARCA_PUBLIC_ADDR"), DefaultPublicAddr),
 		InternalAddr:    withDefault(getenv("ARCA_INTERNAL_ADDR"), DefaultInternalAddr),
@@ -105,8 +142,19 @@ func Load(getenv Getenv) (Config, error) {
 		BucketSecretKey: value(getenv("ARCA_BUCKET_SECRET_KEY")),
 		PublicCDNURL:    strings.TrimRight(value(getenv("ARCA_PUBLIC_CDN_URL")), "/"),
 		DatabaseURL:     value(getenv("ARCA_DATABASE_URL")),
+
+		PublicURL:           value(getenv("ARCA_PUBLIC_URL")),
+		OIDCIssuers:         list(getenv("ARCA_OIDC_ISSUERS")),
+		OIDCAudience:        withDefault(getenv("ARCA_OIDC_AUDIENCE"), DefaultOIDCAudience),
+		OIDCInsecureIssuers: boolean(getenv("ARCA_OIDC_INSECURE_ISSUERS"), "ARCA_OIDC_INSECURE_ISSUERS", note),
+		AuthorizerURL:       value(getenv("ARCA_AUTHORIZER_URL")),
+		AuthorizerToken:     value(getenv("ARCA_AUTHORIZER_TOKEN")),
+		AdminSubjects:       authz.ParseSubjects(getenv("ARCA_ADMIN_SUBJECTS")),
+		RequestsPerMinute: count(getenv("ARCA_REQUESTS_PER_MINUTE"),
+			DefaultRequestsPerMinute, "ARCA_REQUESTS_PER_MINUTE", note),
+		UnauthenticatedRequestsPerMinute: count(getenv("ARCA_UNAUTHENTICATED_REQUESTS_PER_MINUTE"),
+			DefaultUnauthenticatedRequestsPerMinute, "ARCA_UNAUTHENTICATED_REQUESTS_PER_MINUTE", note),
 	}
-	var problems []string
 	if err := checkAddr(c.PublicAddr); err != nil {
 		problems = append(problems, "ARCA_PUBLIC_ADDR "+err.Error())
 	}
@@ -150,6 +198,22 @@ func Load(getenv Getenv) (Config, error) {
 	if problem := checkDatabaseURL(c.DatabaseURL); problem != "" {
 		problems = append(problems, problem)
 	}
+	if c.PublicURL == "" {
+		note("ARCA_PUBLIC_URL is unset, and every URL the server writes is built on it")
+	} else if err := checkURL(c.PublicURL); err != nil {
+		note("ARCA_PUBLIC_URL %s", err)
+	}
+	if len(c.OIDCIssuers) == 0 {
+		note("ARCA_OIDC_ISSUERS names no issuer, and there is no anonymous access to a space")
+	}
+	if c.AuthorizerURL != "" {
+		if err := checkURL(c.AuthorizerURL); err != nil {
+			note("ARCA_AUTHORIZER_URL %s", err)
+		}
+		if c.AuthorizerToken == "" {
+			note("ARCA_AUTHORIZER_TOKEN is unset while ARCA_AUTHORIZER_URL is set, and the endpoint requires a bearer")
+		}
+	}
 	if len(problems) > 0 {
 		sort.Strings(problems)
 		return Config{}, errors.New("configuration: " + strings.Join(problems, "; "))
@@ -166,6 +230,53 @@ func withDefault(v, def string) string {
 
 // value is the variable as the server reads it: a blank value is unset.
 func value(v string) string { return strings.TrimSpace(v) }
+
+// list reads a comma separated variable, dropping blanks, so a trailing
+// comma and a value written with spaces both read as the operator meant.
+func list(raw string) []string {
+	var out []string
+	for part := range strings.SplitSeq(raw, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+// boolean reads a flag variable. Unset is false, and anything that does not
+// read as a boolean is a problem rather than a silent false, because an
+// operator who wrote "yes" meant yes.
+func boolean(raw, name string, note func(string, ...any)) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return false
+	}
+	v, err := strconv.ParseBool(raw)
+	if err != nil {
+		note("%s is %q, not true or false", name, raw)
+		return false
+	}
+	return v
+}
+
+// count reads a whole number that is not negative. Unset is the default, and
+// zero is what the variable's own row says it is rather than an absence.
+func count(raw string, def int, name string, note func(string, ...any)) int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return def
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil {
+		note("%s is %q, not a whole number", name, raw)
+		return def
+	}
+	if v < 0 {
+		note("%s is %d, and a rate below zero is not a rate", name, v)
+		return def
+	}
+	return v
+}
 
 // normalisePrefix is spec 003's rule: a missing trailing slash is appended,
 // a leading slash is a configuration error, and the value holds only the

@@ -61,11 +61,15 @@ depcheck:
       decision: >-
         the server reaches latere.ai/x/pkg, the standard library, the
         S3 client of spec 003 with the modules the SDK splits itself
-        into, and the Postgres driver and migrator of spec 004; the
-        OpenTelemetry SDK joins the list with spec 006, and nothing else
-        does without a row here (spec 001). The SDK is the one cloud
-        dependency invariant 9 admits, because it speaks the S3 API and
-        nothing else: no cloud control plane, no Kubernetes client.
+        into, the Postgres driver and migrator of spec 004, and the
+        OpenTelemetry SDK that pkg/otel exports through, which spec 006
+        brought: the authorizer client and the verifier both send their
+        calls through an instrumented transport, so the request's trace
+        reaches the operator's endpoint and every call is a span.
+        Nothing else joins without a row here (spec 001). The S3 SDK is
+        the one cloud dependency invariant 9 admits, because it speaks
+        the S3 API and nothing else: no cloud control plane, no
+        Kubernetes client.
       allow:
         latere.ai/x/pkg: the shared library every Latere service is built on (spec 002)
         github.com/aws/aws-sdk-go-v2: the SDK's core, its signer, and its retry, under the S3 client of spec 003
@@ -94,8 +98,18 @@ depcheck:
         github.com/jackc/pgerrcode: the SQLSTATE names the migrate driver branches on
         github.com/golang-migrate/migrate/v4: the migrator of spec 004, with its iofs source and its pgx/v5 driver, run through latere.ai/x/pkg/pgxmigrate
         github.com/google/uuid: the object id of spec 003, a UUIDv7 per write of content; reached through latere.ai/x/pkg besides, and not a cloud SDK
+        go.opentelemetry.io: the OpenTelemetry SDK, exporters, and instrumentation the traces and metrics of spec 018 go out through, reached through pkg/otel's instrumented transport (spec 006)
+        google.golang.org: protobuf and gRPC, the wire format and the transport of the OTLP exporters
+        golang.org/x/net: reached by the OTLP exporters
         golang.org/x/sync: the singleflight and errgroup pgx and the migrator reach
-        golang.org/x/text: the encodings pgx reads a server message in
+        golang.org/x/sys: reached by the OTLP exporters
+        golang.org/x/text: the encodings pgx reads a server message in, and reached by the OTLP exporters
+        golang.org/x/time: reached by the OTLP exporters and by pkg/ratelimit's token buckets (spec 015)
+        github.com/cenkalti/backoff: the OTLP exporters' retry schedule
+        github.com/cespare/xxhash: the metric SDK's aggregation keys
+        github.com/felixge/httpsnoop: otelhttp's response recorder
+        github.com/go-logr: the OpenTelemetry SDK's internal logging interface
+        github.com/grpc-ecosystem/grpc-gateway: the OTLP status marshalling the exporters read errors with
 
 license:
   spdx: MIT
@@ -123,13 +137,7 @@ identity:
     - deploy/prod
   # Access is by role: the roles rule runs, and it is one way once set.
   roles_only: true
-  # The two rules that read an import the scaffold does not make yet.
-  # Spec 006 mounts the shared verifier and the authorizer client on /v1,
-  # and both waivers go with it; the dates are the leaf's deadline.
-  waive:
-    verifier:
-      until: 2026-10-31
-      reason: spec 006 mounts latere.ai/x/pkg/authkit/jwt on /v1; nothing is served under /v1 before it
-    authorizer:
-      until: 2026-10-31
-      reason: spec 006 asks its question through latere.ai/x/pkg/authz; nothing decides before it
+  # The verifier and authorizer rules carried dated waivers until spec 006
+  # landed. internal/auth now verifies with latere.ai/x/pkg/authkit/jwt and
+  # asks through latere.ai/x/pkg/authz, so both waivers are gone and the
+  # real rules run.

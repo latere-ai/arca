@@ -1,0 +1,301 @@
+openapi: 3.1.0
+info:
+  title: Arca
+  version: "1"
+  description: "Durable storage for people, agents, and sandboxes: files with versions, trash and stars, uploads in parts, shares with a permission ladder and public links, workspaces with a writer lease, and an event log."
+paths:
+  /v1/shares/links/{token}:
+    get:
+      operationId: getV1SharesLinksByToken
+      summary: A listing of the subtree a link token names.
+      description: "Carries no bearer token: the token in the URL is the whole of the authorization. This build does not serve this route yet and answers not_implemented."
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+      security: []
+      responses:
+        "429":
+          $ref: "#/components/responses/rate_limited"
+        "500":
+          $ref: "#/components/responses/internal"
+        "501":
+          $ref: "#/components/responses/not_implemented"
+  /v1/shares/links/{token}/files/{path}:
+    get:
+      operationId: getV1SharesLinksByTokenFilesByPath
+      summary: One object under the subtree a link token names.
+      description: "Carries no bearer token: the token in the URL is the whole of the authorization. This build does not serve this route yet and answers not_implemented."
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: path
+        in: path
+        required: true
+        description: The rest of the path, slashes included.
+        schema:
+          type: string
+      security: []
+      responses:
+        "429":
+          $ref: "#/components/responses/rate_limited"
+        "500":
+          $ref: "#/components/responses/internal"
+        "501":
+          $ref: "#/components/responses/not_implemented"
+  /v1/shares/links/{token}/meta:
+    get:
+      operationId: getV1SharesLinksByTokenMeta
+      summary: What a link token names, before anything is fetched.
+      description: "Carries no bearer token: the token in the URL is the whole of the authorization. This build does not serve this route yet and answers not_implemented."
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+      security: []
+      responses:
+        "429":
+          $ref: "#/components/responses/rate_limited"
+        "500":
+          $ref: "#/components/responses/internal"
+        "501":
+          $ref: "#/components/responses/not_implemented"
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: A token from an issuer this installation lists, carrying the audience it verifies.
+  schemas:
+    Error:
+      type: object
+      description: The one error shape of this API. A caller branches on error.code and shows error.message.
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              description: The stable identifier of the row of the error table.
+            details:
+              type: object
+              description: "What varies: always request_id, the developer sentence in detail, and the field paths at fault in fields."
+              properties:
+                detail:
+                  type: string
+                fields:
+                  type: array
+                  items:
+                    type: string
+                request_id:
+                  type: string
+            message:
+              type: string
+              description: The one sentence of that row, fixed and shown to a person.
+          required:
+          - code
+          - message
+      required:
+      - error
+    Page:
+      type: object
+      description: The one shape every list route answers. next_cursor is present only when a further page exists.
+      properties:
+        entries:
+          type: array
+          items:
+            type: object
+        next_cursor:
+          type: string
+      required:
+      - entries
+      additionalProperties: false
+  responses:
+    attachment_gone:
+      description: "410 attachment_gone: This attachment has ended; attach again."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    authorizer_unavailable:
+      description: "503 authorizer_unavailable: The permission service is unavailable; retry shortly."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    bad_request:
+      description: "400 bad_request: The request could not be read."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    body_too_large:
+      description: "413 body_too_large: The request body is larger than this server accepts."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    exclusive_fields:
+      description: "400 exclusive_fields: Two fields that cannot be set together are set."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    forbidden:
+      description: "403 forbidden: You do not have permission to do this."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    internal:
+      description: "500 internal: Something went wrong on this server."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    invalid_field:
+      description: "400 invalid_field: A field has a value it cannot take."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    invalid_path:
+      description: "400 invalid_path: That is not a path this server accepts."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    lease_not_held:
+      description: "409 lease_not_held: This attachment does not hold the writer lease."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    length_required:
+      description: "411 length_required: Send a Content-Length with the body."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    link_read_only:
+      description: "422 link_read_only: A link grants reading and nothing more."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    manifest_incomplete:
+      description: "409 manifest_incomplete: The manifest names objects that have not been uploaded."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    missing_field:
+      description: "400 missing_field: A required field is missing."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    not_acceptable:
+      description: "406 not_acceptable: This endpoint answers in JSON."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    not_found:
+      description: "404 not_found: There is no such object."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    not_implemented:
+      description: "501 not_implemented: This server does not serve that."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    object_too_large:
+      description: "413 object_too_large: The object is larger than this server accepts."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    path_taken:
+      description: "409 path_taken: Something already exists at that path."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    precondition_failed:
+      description: "412 precondition_failed: The object is not in the state the request required."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    quota_exceeded:
+      description: "413 quota_exceeded: This space has no room left."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    rate_limited:
+      description: "429 rate_limited: Too many requests; wait and retry."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    slug_taken:
+      description: "409 slug_taken: This space already has a workspace with that name."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    storage_unavailable:
+      description: "503 storage_unavailable: Storage is unavailable right now; retry shortly."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    too_many_parts:
+      description: "422 too_many_parts: The object needs more parts than this server allows."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    unauthenticated:
+      description: "401 unauthenticated: Sign in and send a valid token."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    unknown_field:
+      description: "400 unknown_field: The request body has a field this endpoint does not know."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    unknown_plane:
+      description: "400 unknown_plane: That path starts with a plane this server does not serve."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    unsupported_media_type:
+      description: "415 unsupported_media_type: Send the body as JSON."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    writer_held:
+      description: "409 writer_held: Another writer holds this workspace."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"

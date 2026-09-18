@@ -3,7 +3,7 @@
 
 GO ?= go
 
-.PHONY: build build-stubs check check-all clean down fmt hooks run run-down test-e2e test-store up
+.PHONY: build build-stubs check check-all clean down fmt hooks openapi run run-down test-e2e test-store up
 
 # The whole bar. Every gate lives in latere.ai/x/ci-gate, pinned as a tool
 # in go.mod and configured in .lateregate.yaml, so this target is a name for
@@ -199,6 +199,13 @@ run: build build-stubs up
 # failed run is debuggable.
 run-down:
 	-@if [ -f $(DEV_STUBS_PID) ]; then kill $$(cat $(DEV_STUBS_PID)) 2>/dev/null; rm -f $(DEV_STUBS_PID); echo "the stubs stopped"; fi
+
+# The committed OpenAPI description, written from the route table and the
+# error table of internal/api (spec 013). A test fails when the file is not
+# what a fresh run produces, so a route added without running this does not
+# reach main.
+openapi:
+	@$(GO) run ./tools/apidoc
 
 fmt:
 	gofmt -w $$(git ls-files '*.go')
