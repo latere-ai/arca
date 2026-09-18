@@ -52,9 +52,10 @@ keeps the three that redeem a token, which no contributed row may be, and
 takes the service that answers them through a `Links` seam; `cmd/arcad`
 binds one query set to both readers. The commits are `850e0b6` (the migration and the queries),
 `91ad501` (the grants), `16a35a7` (the links), `2976467` (the wiring and
-the e2e tier), `a2dabc0` (the refusal that names no token) and `32fdacc`
-(the rows declared where they are answered). The gate passes with all
-fifteen gates on at each of them.
+the e2e tier), `a2dabc0` (the refusal that names no token), `32fdacc` (the
+rows declared where they are answered) and `0390a84` (those rows held to
+spec 013's table), each followed by the note it put in this section. The
+gate passes with all fifteen gates on at every one of them.
 
 What arrived from the service Arca replaces is
 `drive/internal/handler/shares.go` (create, list, what is shared with the
