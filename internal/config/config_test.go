@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func env(m map[string]string) Getenv {
@@ -47,6 +48,9 @@ func TestLoadAppliesEveryDefault(t *testing.T) {
 		OIDCAudience:                     DefaultOIDCAudience,
 		RequestsPerMinute:                DefaultRequestsPerMinute,
 		UnauthenticatedRequestsPerMinute: DefaultUnauthenticatedRequestsPerMinute,
+		MaxUploadBytes:                   DefaultMaxUploadBytes,
+		InlineBytes:                      DefaultInlineBytes,
+		TrashRetention:                   DefaultTrashRetention,
 	}
 	if !reflect.DeepEqual(c, want) {
 		t.Fatalf("Load() = %+v, want %+v", c, want)
@@ -76,6 +80,9 @@ func TestLoadReadsEveryVariable(t *testing.T) {
 		"ARCA_ADMIN_SUBJECTS":                      "https://issuer.example|root, https://issuer.example|ops",
 		"ARCA_REQUESTS_PER_MINUTE":                 "1200",
 		"ARCA_UNAUTHENTICATED_REQUESTS_PER_MINUTE": "0",
+		"ARCA_MAX_UPLOAD_BYTES":                    "1073741824",
+		"ARCA_INLINE_BYTES":                        "8388608",
+		"ARCA_TRASH_RETENTION":                     "168h",
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -99,6 +106,7 @@ func TestLoadReadsEveryVariable(t *testing.T) {
 		AuthorizerURL: "https://authz.example/decide", AuthorizerToken: "s3cret",
 		AdminSubjects:     []string{"https://issuer.example|root", "https://issuer.example|ops"},
 		RequestsPerMinute: 1200, UnauthenticatedRequestsPerMinute: 0,
+		MaxUploadBytes: 1 << 30, InlineBytes: 8 << 20, TrashRetention: 168 * time.Hour,
 	}
 	if !reflect.DeepEqual(c, want) {
 		t.Fatalf("Load() = %+v, want %+v", c, want)
@@ -303,5 +311,44 @@ func TestARateOfZeroIsOff(t *testing.T) {
 	}
 	if c.RequestsPerMinute != 0 {
 		t.Errorf("a rate of zero read as %d", c.RequestsPerMinute)
+	}
+}
+
+// TestTheSizeAndWindowVariablesRefuseWhatIsNotOne: the three rows specs 005
+// and 007 read. A value that does not parse, and one that parses to a size
+// or a window nothing could be written or restored inside, are problems and
+// not silent defaults: a server accepting no object, or a trash restoring
+// nothing, is a deployment nobody could debug from its behaviour.
+func TestTheSizeAndWindowVariablesRefuseWhatIsNotOne(t *testing.T) {
+	for _, c := range []struct{ variable, value, want string }{
+		{"ARCA_MAX_UPLOAD_BYTES", "5GB", `ARCA_MAX_UPLOAD_BYTES is "5GB", not a whole number of bytes`},
+		{"ARCA_MAX_UPLOAD_BYTES", "0", "ARCA_MAX_UPLOAD_BYTES is 0, and a server that accepts no object serves nothing"},
+		{"ARCA_INLINE_BYTES", "-1", "ARCA_INLINE_BYTES is -1, and a server that accepts no object serves nothing"},
+		{"ARCA_TRASH_RETENTION", "720", `ARCA_TRASH_RETENTION is "720", not a duration such as 720h`},
+		{"ARCA_TRASH_RETENTION", "0s", "ARCA_TRASH_RETENTION is 0s, and a window that has already closed restores nothing"},
+	} {
+		_, err := Load(required(map[string]string{c.variable: c.value}))
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s=%q loaded with %v", c.variable, c.value, err)
+		}
+	}
+}
+
+// TestTheInlineSizeStaysUnderTheLargestObject: above the inline size the
+// bytes go to the bucket in parts, and the boundary is the same number on
+// both sides of the transfer (spec 007). An inline size above the largest
+// object accepted names a class of write no route serves.
+func TestTheInlineSizeStaysUnderTheLargestObject(t *testing.T) {
+	_, err := Load(required(map[string]string{
+		"ARCA_MAX_UPLOAD_BYTES": "1000", "ARCA_INLINE_BYTES": "2000",
+	}))
+	if err == nil || !strings.Contains(err.Error(),
+		"ARCA_INLINE_BYTES is 2000 and ARCA_MAX_UPLOAD_BYTES is 1000") {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := Load(required(map[string]string{
+		"ARCA_MAX_UPLOAD_BYTES": "2000", "ARCA_INLINE_BYTES": "2000",
+	})); err != nil {
+		t.Fatalf("an inline size equal to the largest object: %v", err)
 	}
 }

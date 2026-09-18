@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"latere.ai/x/pkg/authz"
 )
@@ -32,6 +33,16 @@ const (
 	// per client address before it (spec 015). Zero disables either.
 	DefaultRequestsPerMinute                = 600
 	DefaultUnauthenticatedRequestsPerMinute = 60
+	// DefaultMaxUploadBytes is the largest object this server accepts at
+	// all, and DefaultInlineBytes the largest it streams through itself
+	// (specs 005 and 007). Above the inline size the bytes go from the
+	// client to the bucket in parts and never through a replica, which is
+	// invariant 4 of spec 001.
+	DefaultMaxUploadBytes int64 = 5 << 30
+	DefaultInlineBytes    int64 = 16 << 20
+	// DefaultTrashRetention is how long a trashed object is restorable
+	// before the reaper purges it from both stores (spec 005).
+	DefaultTrashRetention = 720 * time.Hour
 )
 
 // prefixShape is what a bucket prefix may hold: the characters a key is
@@ -94,6 +105,13 @@ type Config struct {
 	// token buckets of spec 015. Zero disables one.
 	RequestsPerMinute                int
 	UnauthenticatedRequestsPerMinute int
+	// MaxUploadBytes is the largest object this server accepts by any
+	// route, and InlineBytes the boundary between the two size classes of
+	// spec 007: at or below it a put streams through the server, above it
+	// the parts of a session go straight to the bucket.
+	MaxUploadBytes, InlineBytes int64
+	// TrashRetention is how long a trashed object is restorable (spec 005).
+	TrashRetention time.Duration
 }
 
 // Database reads the one variable the migrate subcommand needs, so a
@@ -154,6 +172,16 @@ func Load(getenv Getenv) (Config, error) {
 			DefaultRequestsPerMinute, "ARCA_REQUESTS_PER_MINUTE", note),
 		UnauthenticatedRequestsPerMinute: count(getenv("ARCA_UNAUTHENTICATED_REQUESTS_PER_MINUTE"),
 			DefaultUnauthenticatedRequestsPerMinute, "ARCA_UNAUTHENTICATED_REQUESTS_PER_MINUTE", note),
+		MaxUploadBytes: size(getenv("ARCA_MAX_UPLOAD_BYTES"),
+			DefaultMaxUploadBytes, "ARCA_MAX_UPLOAD_BYTES", note),
+		InlineBytes: size(getenv("ARCA_INLINE_BYTES"),
+			DefaultInlineBytes, "ARCA_INLINE_BYTES", note),
+		TrashRetention: window(getenv("ARCA_TRASH_RETENTION"),
+			DefaultTrashRetention, "ARCA_TRASH_RETENTION", note),
+	}
+	if c.InlineBytes > c.MaxUploadBytes {
+		note("ARCA_INLINE_BYTES is %d and ARCA_MAX_UPLOAD_BYTES is %d, and the largest object streamed "+
+			"through the server cannot be larger than the largest object accepted", c.InlineBytes, c.MaxUploadBytes)
 	}
 	if err := checkAddr(c.PublicAddr); err != nil {
 		problems = append(problems, "ARCA_PUBLIC_ADDR "+err.Error())
@@ -273,6 +301,49 @@ func count(raw string, def int, name string, note func(string, ...any)) int {
 	}
 	if v < 0 {
 		note("%s is %d, and a rate below zero is not a rate", name, v)
+		return def
+	}
+	return v
+}
+
+// size reads a byte count. Unset is the default, and a value that is not a
+// whole number above zero is a problem rather than a silent default: a
+// server that accepted no object at all because a variable read as zero
+// would be a deployment nobody could debug from its behaviour.
+func size(raw string, def int64, name string, note func(string, ...any)) int64 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return def
+	}
+	v, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		note("%s is %q, not a whole number of bytes", name, raw)
+		return def
+	}
+	if v <= 0 {
+		note("%s is %d, and a server that accepts no object serves nothing", name, v)
+		return def
+	}
+	return v
+}
+
+// window reads a duration in the form time.ParseDuration accepts, which is
+// what every other window of the family is written in. Unset is the default,
+// and a value that is not a duration above zero is a problem: a retention of
+// zero is a trash nothing can be restored from, which is a decision an
+// operator makes by emptying it and not by a variable that failed to parse.
+func window(raw string, def time.Duration, name string, note func(string, ...any)) time.Duration {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return def
+	}
+	v, err := time.ParseDuration(raw)
+	if err != nil {
+		note("%s is %q, not a duration such as 720h", name, raw)
+		return def
+	}
+	if v <= 0 {
+		note("%s is %s, and a window that has already closed restores nothing", name, v)
 		return def
 	}
 	return v
