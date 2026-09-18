@@ -167,8 +167,9 @@ base by an installation that runs the Prometheus operator.
 
 ## Running the reconciler on its own
 
-The reconciler sweeps for objects the database no longer names and for
-trash past its retention. It runs inside `arcad serve` by default, which is
+The reconciler sweeps for objects the database no longer names, for trash
+past its retention, for workspaces deleted longer ago than that, and for
+grants that expired that long ago. It runs inside `arcad serve` by default, which is
 what a small installation wants.
 
 To move it off the API replicas, patch `arcad-reaper` to one replica in your
