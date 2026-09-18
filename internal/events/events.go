@@ -132,6 +132,9 @@ type Log interface {
 	// Prune removes the rows older than before and answers how many went.
 	// The log is a tail, not an archive (this spec's pass 9).
 	Prune(ctx context.Context, q store.Querier, before time.Time) (int64, error)
+	// Older counts the rows Prune would remove, which is what the dry run
+	// of that pass reports.
+	Older(ctx context.Context, q store.Querier, before time.Time) (int64, error)
 }
 
 // Query selects one page of the tail.
@@ -237,6 +240,15 @@ func (eventLog) Prune(ctx context.Context, q store.Querier, before time.Time) (i
 		return 0, fmt.Errorf("events: prune the log before %s: %w", before.UTC().Format(time.RFC3339), err)
 	}
 	return tag.RowsAffected(), nil
+}
+
+// Older counts the rows Prune would remove.
+func (eventLog) Older(ctx context.Context, q store.Querier, before time.Time) (int64, error) {
+	var n int64
+	if err := q.QueryRow(ctx, `SELECT count(*) FROM events WHERE created_at < $1`, before).Scan(&n); err != nil {
+		return 0, fmt.Errorf("events: count the log before %s: %w", before.UTC().Format(time.RFC3339), err)
+	}
+	return n, nil
 }
 
 // scanner is what a row and a page of rows both answer a scan through.
