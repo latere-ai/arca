@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"latere.ai/x/arca/internal/store"
 	"latere.ai/x/arca/object"
@@ -35,6 +36,11 @@ type memory struct {
 	versions    map[object.ID]bool
 	seq         int
 	txs         int
+	// depth counts the transactions running right now and stray counts the
+	// reads and writes that reached the pool while one was, which is the
+	// fault [memory.use] exists to catch.
+	depth int
+	stray int
 	// fail maps a method name to the failure it answers, so a test drives
 	// the path a store fault takes without a store.
 	fail map[string]error
@@ -58,23 +64,51 @@ func newMemory() *memory {
 	}
 }
 
-// Querier answers nothing: the fakes ignore it, and the real queries take it
-// so one function serves a caller inside a transaction and one outside it.
-func (m *memory) Querier() store.Querier { return nil }
+// handle is what the fakes tell a transaction's querier from the pool's by.
+// Nothing calls its methods: every fake here reads the value and never a
+// connection behind it.
+type handle struct{ tx bool }
+
+func (handle) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+	return pgconn.CommandTag{}, nil
+}
+func (handle) Query(context.Context, string, ...any) (pgx.Rows, error) { return nil, nil }
+func (handle) QueryRow(context.Context, string, ...any) pgx.Row        { return nil }
+
+// Querier answers the pool's handle. The real one takes a connection, which
+// is why [memory.use] counts every fake call that reaches this one while a
+// transaction is open.
+func (m *memory) Querier() store.Querier { return handle{} }
 
 // Tx runs fn against a copy and keeps the copy only when it returns nil.
 func (m *memory) Tx(_ context.Context, fn func(store.Querier) error) error {
 	m.mu.Lock()
 	m.txs++
+	m.depth++
 	before := m.snapshot()
 	m.mu.Unlock()
-	if err := fn(nil); err != nil {
-		m.mu.Lock()
+	err := fn(handle{tx: true})
+	m.mu.Lock()
+	m.depth--
+	if err != nil {
 		m.restore(before)
-		m.mu.Unlock()
-		return err
 	}
-	return nil
+	m.mu.Unlock()
+	return err
+}
+
+// use records a read or a write that reached the pool while a transaction
+// was open. A pool hands out one connection per caller, so a handler that
+// asks for a second while it holds the first deadlocks against itself once
+// enough callers do it at once: every one of them holds a connection and
+// waits for one, until the acquire deadline. No handler may do it, and the
+// unit tier proves none does because every harness checks this count.
+func (m *memory) use(q store.Querier) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if h, ok := q.(handle); m.depth > 0 && (!ok || !h.tx) {
+		m.stray++
+	}
 }
 
 // state is one copy of the stores.
@@ -111,7 +145,8 @@ func (m *memory) refuse(method string) error { return m.fail[method] }
 
 // ── the workspace query set ──────────────────────────────────────────────
 
-func (m *memory) Create(_ context.Context, _ store.Querier, w store.Workspace) (store.Workspace, error) {
+func (m *memory) Create(_ context.Context, q store.Querier, w store.Workspace) (store.Workspace, error) {
+	m.use(q)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.refuse("Create"); err != nil {
@@ -128,7 +163,8 @@ func (m *memory) Create(_ context.Context, _ store.Querier, w store.Workspace) (
 	return w, nil
 }
 
-func (m *memory) Get(_ context.Context, _ store.Querier, id string) (store.Workspace, error) {
+func (m *memory) Get(_ context.Context, q store.Querier, id string) (store.Workspace, error) {
+	m.use(q)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.refuse("Get"); err != nil {
@@ -142,17 +178,20 @@ func (m *memory) Get(_ context.Context, _ store.Querier, id string) (store.Works
 }
 
 func (m *memory) GetForUpdate(ctx context.Context, q store.Querier, id string) (store.Workspace, error) {
+	m.use(q)
 	if err := m.refuse("GetForUpdate"); err != nil {
 		return store.Workspace{}, err
 	}
 	return m.Get(ctx, q, id)
 }
 
-func (m *memory) List(_ context.Context, _ store.Querier, owner, cursor string, limit int) ([]store.Workspace, error) {
+func (m *memory) List(_ context.Context, q store.Querier, owner, cursor string, limit int) ([]store.Workspace, error) {
+	m.use(q)
 	return m.listing(owner, cursor, limit, false)
 }
 
-func (m *memory) ListDeleted(_ context.Context, _ store.Querier, owner, cursor string, limit int) ([]store.Workspace, error) {
+func (m *memory) ListDeleted(_ context.Context, q store.Querier, owner, cursor string, limit int) ([]store.Workspace, error) {
+	m.use(q)
 	return m.listing(owner, cursor, limit, true)
 }
 
@@ -176,7 +215,8 @@ func (m *memory) listing(owner, cursor string, limit int, wantDeleted bool) ([]s
 	return page, nil
 }
 
-func (m *memory) Rename(_ context.Context, _ store.Querier, id, slug string, now time.Time) (bool, error) {
+func (m *memory) Rename(_ context.Context, q store.Querier, id, slug string, now time.Time) (bool, error) {
+	m.use(q)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.refuse("Rename"); err != nil {
@@ -196,7 +236,8 @@ func (m *memory) Rename(_ context.Context, _ store.Querier, id, slug string, now
 	return true, nil
 }
 
-func (m *memory) SoftDelete(_ context.Context, _ store.Querier, id string, now time.Time) (bool, error) {
+func (m *memory) SoftDelete(_ context.Context, q store.Querier, id string, now time.Time) (bool, error) {
+	m.use(q)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.refuse("SoftDelete"); err != nil {
@@ -212,7 +253,8 @@ func (m *memory) SoftDelete(_ context.Context, _ store.Querier, id string, now t
 	return true, nil
 }
 
-func (m *memory) Restore(_ context.Context, _ store.Querier, id string) (bool, error) {
+func (m *memory) Restore(_ context.Context, q store.Querier, id string) (bool, error) {
+	m.use(q)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.refuse("Restore"); err != nil {
@@ -227,7 +269,8 @@ func (m *memory) Restore(_ context.Context, _ store.Querier, id string) (bool, e
 	return true, nil
 }
 
-func (m *memory) TakeLease(_ context.Context, _ store.Querier, id, holder string, now, until time.Time) (bool, error) {
+func (m *memory) TakeLease(_ context.Context, q store.Querier, id, holder string, now, until time.Time) (bool, error) {
+	m.use(q)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.refuse("TakeLease"); err != nil {
@@ -245,7 +288,8 @@ func (m *memory) TakeLease(_ context.Context, _ store.Querier, id, holder string
 	return true, nil
 }
 
-func (m *memory) RenewLease(_ context.Context, _ store.Querier, id, holder string, until time.Time) (bool, error) {
+func (m *memory) RenewLease(_ context.Context, q store.Querier, id, holder string, until time.Time) (bool, error) {
+	m.use(q)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.refuse("RenewLease"); err != nil {
@@ -260,7 +304,8 @@ func (m *memory) RenewLease(_ context.Context, _ store.Querier, id, holder strin
 	return true, nil
 }
 
-func (m *memory) ReleaseLease(_ context.Context, _ store.Querier, id, holder string) (bool, error) {
+func (m *memory) ReleaseLease(_ context.Context, q store.Querier, id, holder string) (bool, error) {
+	m.use(q)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.refuse("ReleaseLease"); err != nil {
@@ -275,7 +320,8 @@ func (m *memory) ReleaseLease(_ context.Context, _ store.Querier, id, holder str
 	return true, nil
 }
 
-func (m *memory) StampSync(_ context.Context, _ store.Querier, id string) (time.Time, error) {
+func (m *memory) StampSync(_ context.Context, q store.Querier, id string) (time.Time, error) {
+	m.use(q)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.refuse("StampSync"); err != nil {
@@ -291,7 +337,8 @@ func (m *memory) StampSync(_ context.Context, _ store.Querier, id string) (time.
 	return at, nil
 }
 
-func (m *memory) ExpiredLeases(_ context.Context, _ store.Querier, now time.Time, limit int) ([]store.Workspace, error) {
+func (m *memory) ExpiredLeases(_ context.Context, q store.Querier, now time.Time, limit int) ([]store.Workspace, error) {
+	m.use(q)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.refuse("ExpiredLeases"); err != nil {
@@ -313,7 +360,8 @@ func (m *memory) ExpiredLeases(_ context.Context, _ store.Querier, now time.Time
 
 // ── the attachment query set ─────────────────────────────────────────────
 
-func (m *memory) Insert(_ context.Context, _ store.Querier, a store.Attachment) (store.Attachment, error) {
+func (m *memory) Insert(_ context.Context, q store.Querier, a store.Attachment) (store.Attachment, error) {
+	m.use(q)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.refuse("Insert"); err != nil {
@@ -325,7 +373,8 @@ func (m *memory) Insert(_ context.Context, _ store.Querier, a store.Attachment) 
 	return a, nil
 }
 
-func (m *memory) GetAttachment(_ context.Context, _ store.Querier, workspaceID, id string) (store.Attachment, error) {
+func (m *memory) GetAttachment(_ context.Context, q store.Querier, workspaceID, id string) (store.Attachment, error) {
+	m.use(q)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.refuse("GetAttachment"); err != nil {
@@ -338,7 +387,8 @@ func (m *memory) GetAttachment(_ context.Context, _ store.Querier, workspaceID, 
 	return a, nil
 }
 
-func (m *memory) SetExpiry(_ context.Context, _ store.Querier, id string, until time.Time) (bool, error) {
+func (m *memory) SetExpiry(_ context.Context, q store.Querier, id string, until time.Time) (bool, error) {
+	m.use(q)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.refuse("SetExpiry"); err != nil {
@@ -354,6 +404,7 @@ func (m *memory) SetExpiry(_ context.Context, _ store.Querier, id string, until 
 }
 
 func (m *memory) Release(ctx context.Context, q store.Querier, id string) (bool, error) {
+	m.use(q)
 	if err := m.refuse("Release"); err != nil {
 		return false, err
 	}
@@ -361,13 +412,15 @@ func (m *memory) Release(ctx context.Context, q store.Querier, id string) (bool,
 }
 
 func (m *memory) Reap(ctx context.Context, q store.Querier, id string) (bool, error) {
+	m.use(q)
 	if err := m.refuse("Reap"); err != nil {
 		return false, err
 	}
 	return m.end(ctx, q, id, store.StatusReaped)
 }
 
-func (m *memory) end(_ context.Context, _ store.Querier, id string, status store.AttachmentStatus) (bool, error) {
+func (m *memory) end(_ context.Context, q store.Querier, id string, status store.AttachmentStatus) (bool, error) {
+	m.use(q)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	a, ok := m.attachments[id]
@@ -380,7 +433,8 @@ func (m *memory) end(_ context.Context, _ store.Querier, id string, status store
 	return true, nil
 }
 
-func (m *memory) SetManifest(_ context.Context, _ store.Querier, id string, manifest []byte) (bool, error) {
+func (m *memory) SetManifest(_ context.Context, q store.Querier, id string, manifest []byte) (bool, error) {
+	m.use(q)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.refuse("SetManifest"); err != nil {
@@ -395,7 +449,8 @@ func (m *memory) SetManifest(_ context.Context, _ store.Querier, id string, mani
 	return true, nil
 }
 
-func (m *memory) Expired(_ context.Context, _ store.Querier, now time.Time, limit int) ([]store.Attachment, error) {
+func (m *memory) Expired(_ context.Context, q store.Querier, now time.Time, limit int) ([]store.Attachment, error) {
+	m.use(q)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.refuse("Expired"); err != nil {
@@ -458,7 +513,8 @@ func (m *memory) put(owner, path, checksum string, size int64) object.ID {
 	return id
 }
 
-func (m *memory) Manifest(_ context.Context, _ store.Querier, owner, prefix string) ([]store.WorkspaceFile, error) {
+func (m *memory) Manifest(_ context.Context, q store.Querier, owner, prefix string) ([]store.WorkspaceFile, error) {
+	m.use(q)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.refuse("Manifest"); err != nil {
@@ -473,7 +529,8 @@ func (m *memory) Manifest(_ context.Context, _ store.Querier, owner, prefix stri
 	return out, nil
 }
 
-func (m *memory) Stat(_ context.Context, _ store.Querier, owner, prefix string) (int64, int64, error) {
+func (m *memory) Stat(_ context.Context, q store.Querier, owner, prefix string) (int64, int64, error) {
+	m.use(q)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.refuse("Stat"); err != nil {
@@ -489,7 +546,8 @@ func (m *memory) Stat(_ context.Context, _ store.Querier, owner, prefix string) 
 	return files, bytes, nil
 }
 
-func (m *memory) MoveSubtree(_ context.Context, _ store.Querier, owner, from, to string) (int64, error) {
+func (m *memory) MoveSubtree(_ context.Context, q store.Querier, owner, from, to string) (int64, error) {
+	m.use(q)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.refuse("MoveSubtree"); err != nil {
@@ -510,7 +568,8 @@ func (m *memory) MoveSubtree(_ context.Context, _ store.Querier, owner, from, to
 	return moved, nil
 }
 
-func (m *memory) Drop(_ context.Context, _ store.Querier, owner string, paths []string) ([]object.ID, int64, error) {
+func (m *memory) Drop(_ context.Context, q store.Querier, owner string, paths []string) ([]object.ID, int64, error) {
+	m.use(q)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.refuse("Drop"); err != nil {
@@ -530,7 +589,8 @@ func (m *memory) Drop(_ context.Context, _ store.Querier, owner string, paths []
 	return freed, bytes, nil
 }
 
-func (m *memory) Unreferenced(_ context.Context, _ store.Querier, ids []object.ID) ([]object.ID, error) {
+func (m *memory) Unreferenced(_ context.Context, q store.Querier, ids []object.ID) ([]object.ID, error) {
+	m.use(q)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.refuse("Unreferenced"); err != nil {

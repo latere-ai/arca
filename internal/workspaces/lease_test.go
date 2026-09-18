@@ -15,6 +15,44 @@ import (
 	"latere.ai/x/arca/internal/store"
 )
 
+// TestNoHandlerTakesASecondConnectionWhileItHoldsATransaction holds every
+// handler to one connection. A pool hands out one per caller, so a handler
+// that reads through the pool while it holds a transaction asks for a second
+// while it holds the first: once as many callers do that at once as the pool
+// is wide, each one holds a connection and waits for one, and all of them
+// block until the acquire deadline. The refused attach is the path that
+// tempts it, because it names the holder in the developer detail, and it is
+// exactly the contended path.
+func TestNoHandlerTakesASecondConnectionWhileItHoldsATransaction(t *testing.T) {
+	h := newHarness(t)
+	ws := h.create(t, "build")
+	held := h.attach(t, ws, "sbx_a", "rw")
+
+	h.do(t, http.MethodPost, "/v1/workspaces/"+ws.ID+"/attach",
+		map[string]any{"sandbox_id": "sbx_b", "mode": "rw"})
+	h.do(t, http.MethodPost, "/v1/workspaces/"+ws.ID+"/sync",
+		map[string]any{"attachment_id": held.ID, "files": []Entry{}})
+	h.do(t, http.MethodDelete, "/v1/workspaces/"+ws.ID+"/attach/"+held.ID, nil)
+	h.do(t, http.MethodPatch, "/v1/workspaces/"+ws.ID, map[string]any{"slug": "ship"})
+	if h.store.txs == 0 {
+		t.Fatal("no handler opened a transaction, so nothing was measured")
+	}
+	if h.store.stray > 0 {
+		t.Errorf("%d reads took the pool inside a transaction, want 0", h.store.stray)
+	}
+
+	// The count is not vacuous: this is what it looks like when a read does
+	// reach the pool from inside a transaction.
+	_ = h.store.Tx(t.Context(), func(store.Querier) error {
+		_, err := h.store.Get(t.Context(), h.store.Querier(), ws.ID)
+		return err
+	})
+	if h.store.stray != 1 {
+		t.Errorf("a deliberate pool read inside a transaction counted %d, want 1", h.store.stray)
+	}
+	h.store.stray = 0
+}
+
 func TestTwoWritersOnOneWorkspaceLeaveOneLease(t *testing.T) {
 	h := newHarness(t)
 	ws := h.create(t, "build")

@@ -92,6 +92,17 @@ func newHarness(t *testing.T, opts ...func(*Options)) *harness {
 	}
 	h.mux = http.NewServeMux()
 	surface.Mount(h.mux)
+	// Whatever a test drives, no handler may reach the pool while it holds a
+	// transaction. The fakes count it rather than each test asserting it, so
+	// a handler added later is covered by the tests written for it.
+	t.Cleanup(func() {
+		h.store.mu.Lock()
+		defer h.store.mu.Unlock()
+		if h.store.stray > 0 {
+			t.Errorf("%d reads or writes took the pool inside a transaction; pass the querier through",
+				h.store.stray)
+		}
+	})
 	return h
 }
 

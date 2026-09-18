@@ -89,7 +89,7 @@ func (s *Service) attach(w http.ResponseWriter, r *http.Request) {
 				// lease. The holder is named in the developer detail, so a
 				// runtime fails a sandbox create with something a person can
 				// act on rather than a bare conflict.
-				return api.Refuse(api.CodeWriterHeld, "the workspace is held by %s", holderOf(ctx, s, ws.ID))
+				return api.Refuse(api.CodeWriterHeld, "the workspace is held by %s", holderOf(ctx, s, q, ws.ID))
 			}
 		}
 		// The snapshot is pinned inside the transaction that took the lease,
@@ -344,8 +344,16 @@ func actionOf(mode store.Mode) string {
 // holderOf reads who holds the lease, for the developer detail of a refused
 // attach. A read that fails says nothing rather than failing the refusal: the
 // conflict is already decided, and the name is a courtesy.
-func holderOf(ctx context.Context, s *Service, id string) string {
-	ws, err := s.workspaces.Get(ctx, s.db.Querier(), id)
+//
+// It reads through the querier it is given and never through the pool. The
+// caller is inside a transaction, which holds one connection; taking a
+// second one for a courtesy read means every contended attach holds one
+// connection while it waits for another, and a pool at its default size
+// serves a handful of those before the rest block until the acquire
+// deadline. The querier is also the transaction's own view, which is the
+// right one to report.
+func holderOf(ctx context.Context, s *Service, q store.Querier, id string) string {
+	ws, err := s.workspaces.Get(ctx, q, id)
 	if err != nil || ws.WriterHolder == nil {
 		return "another writer"
 	}

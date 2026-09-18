@@ -184,10 +184,10 @@ func TestAHolderThatCannotBeReadStillRefusesTheSecondWriter(t *testing.T) {
 	// The conflict is already decided by the row count; naming the holder is
 	// a courtesy, so a read that fails says something rather than turning a
 	// conflict into a fault.
-	if got := holderOf(t.Context(), h.service, "ws-9999"); got != "another writer" {
+	if got := holderOf(t.Context(), h.service, h.store.Querier(), "ws-9999"); got != "another writer" {
 		t.Errorf("an unreadable holder reads as %q", got)
 	}
-	if got := holderOf(t.Context(), h.service, ws.ID); got != "sbx_a" {
+	if got := holderOf(t.Context(), h.service, h.store.Querier(), ws.ID); got != "sbx_a" {
 		t.Errorf("the holder reads as %q", got)
 	}
 }

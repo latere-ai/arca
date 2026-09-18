@@ -249,10 +249,15 @@ func (s *Service) sync(w http.ResponseWriter, r *http.Request) {
 //
 // The keys go in one call per thousand, so dropping a large tree costs a
 // constant number of round trips and not one per file.
+//
+// The request's cancellation is dropped first. The rows are already
+// committed, so a client that hangs up on the response must not be able to
+// leave the bytes behind by doing it.
 func (s *Service) sweep(ctx context.Context, freed []object.ID) {
 	if len(freed) == 0 {
 		return
 	}
+	ctx = context.WithoutCancel(ctx)
 	keys := make([]string, 0, len(freed))
 	for _, id := range freed {
 		keys = append(keys, id.Key(s.prefix))
