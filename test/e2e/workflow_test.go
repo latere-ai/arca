@@ -28,7 +28,7 @@ func TestWorkflowJobsMatchTheTable(t *testing.T) {
 		selector string
 		packages string
 	}{
-		{"store", "-run '^TestStore'", "./internal/blob/... ./internal/store/..."},
+		{"store", "-run '^TestStore'", "./internal/blob/... ./internal/store/... ./internal/events/... ./internal/reaper/..."},
 		{"e2e", "-run '^TestE2E'", "./test/e2e/..."},
 	} {
 		if !strings.Contains(workflow, "\n  "+job.name+":\n") {
