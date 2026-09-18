@@ -79,6 +79,13 @@ type installation struct {
 	authorizer  *authorizer.Server
 	binary      string
 	env         []string
+	// The stores this run was given, for a tier that seeds a row or an
+	// object the routes of a later spec would otherwise write. Nothing here
+	// is read by the server: it reaches the same schema and the same prefix
+	// through its own ARCA_* values.
+	stack       stack
+	databaseURL string
+	prefix      string
 }
 
 // start builds the installation of spec 014's make run, in the same order,
@@ -95,8 +102,10 @@ func start(t *testing.T) *installation {
 		issuer:     issuer.New(t),
 		authorizer: authorizer.New(t),
 	}
-	databaseURL := schema(t, s)
-	prefix := bucketPrefix(t, s)
+	i.stack = s
+	i.databaseURL = schema(t, s)
+	i.prefix = bucketPrefix(t, s)
+	databaseURL, prefix := i.databaseURL, i.prefix
 	i.env = append(os.Environ(),
 		"ARCA_PUBLIC_ADDR=127.0.0.1:0",
 		"ARCA_INTERNAL_ADDR=127.0.0.1:0",
