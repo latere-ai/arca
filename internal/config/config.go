@@ -112,6 +112,17 @@ type Config struct {
 	// TrashRetention is how long a trashed object stays restorable before
 	// the reconciler purges it from both stores.
 	TrashRetention time.Duration
+	// OTelEndpoint is ARCA_OTEL_EXPORTER_OTLP_ENDPOINT, where traces, logs
+	// and metrics go (spec 018). Empty exports nothing: spans are created
+	// and discarded, and /metrics still serves, so a self-hoster with no
+	// collector loses no local signal.
+	//
+	// The variable carries the ARCA_ prefix rather than the standard OTEL_
+	// name because spec 002's table owns every variable the server reads and
+	// every one is read through this function, so an operator configures one
+	// prefix and a test passes one map. cmd/arcad hands the value to
+	// pkg/otel, which reads the standard name.
+	OTelEndpoint string
 }
 
 // Database reads the one variable the migrate subcommand needs, so a
@@ -168,6 +179,7 @@ func Load(getenv Getenv) (Config, error) {
 		AuthorizerURL:       value(getenv("ARCA_AUTHORIZER_URL")),
 		AuthorizerToken:     value(getenv("ARCA_AUTHORIZER_TOKEN")),
 		AdminSubjects:       authz.ParseSubjects(getenv("ARCA_ADMIN_SUBJECTS")),
+		OTelEndpoint:        value(getenv("ARCA_OTEL_EXPORTER_OTLP_ENDPOINT")),
 		RequestsPerMinute: count(getenv("ARCA_REQUESTS_PER_MINUTE"),
 			DefaultRequestsPerMinute, "ARCA_REQUESTS_PER_MINUTE", note),
 		UnauthenticatedRequestsPerMinute: count(getenv("ARCA_UNAUTHENTICATED_REQUESTS_PER_MINUTE"),
@@ -215,6 +227,11 @@ func Load(getenv Getenv) (Config, error) {
 	}
 	if problem := checkDatabaseURL(c.DatabaseURL); problem != "" {
 		problems = append(problems, problem)
+	}
+	if c.OTelEndpoint != "" {
+		if err := checkURL(c.OTelEndpoint); err != nil {
+			note("ARCA_OTEL_EXPORTER_OTLP_ENDPOINT %s", err)
+		}
 	}
 	if c.PublicURL == "" {
 		note("ARCA_PUBLIC_URL is unset, and every URL the server writes is built on it")

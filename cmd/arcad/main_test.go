@@ -252,8 +252,10 @@ func TestServeAnswersTheProbesOnBothListenersAndStopsCleanly(t *testing.T) {
 	if code, body := get(t, publicURL+"/"); code != 200 || !strings.HasPrefix(body, "arcad dev (") {
 		t.Errorf("GET / = %d %q", code, body)
 	}
+	// The scrape endpoint of spec 018 is on the internal listener and on no
+	// other; TestMetricsListenerOnly reads it there.
 	if code, _ := get(t, publicURL+"/metrics"); code != 404 {
-		t.Errorf("GET /metrics on the public listener = %d, want 404 until a later spec mounts it", code)
+		t.Errorf("GET /metrics on the public listener = %d, and it is the internal listener's alone", code)
 	}
 
 	if code := stop(); code != 0 {
@@ -650,8 +652,11 @@ func TestReapIsASubcommandWithTwoFlags(t *testing.T) {
 	// A sequence that could not reach a store is a failure and not a quiet
 	// success. A sequence that reaches both is the e2e tier's.
 	errOut.Reset()
+	// The structured lines of spec 018 share this writer with the one
+	// sentence a failure ends on, so the sentence is looked for rather than
+	// expected first.
 	code = run(t.Context(), []string{"reap", "-once"}, stores(t, nil), io.Discard, &errOut)
-	if code != 1 || !strings.HasPrefix(errOut.String(), "arcad: ") {
+	if code != 1 || !strings.Contains(errOut.String(), "\narcad: ") {
 		t.Fatalf("exit %d, stderr %q", code, errOut.String())
 	}
 	// And a configuration it cannot read is exit 1 with one line.
@@ -682,7 +687,7 @@ func TestReapAsALoopRunsUntilItIsStopped(t *testing.T) {
 
 func TestTheReconcilerIsNotStartedOnAConfigurationItCannotRun(t *testing.T) {
 	var out bytes.Buffer
-	if err := startReaper(t.Context(), config.Config{ReapInterval: time.Minute}, nil, nil, nil, &out); err == nil {
+	if err := startReaper(t.Context(), config.Config{ReapInterval: time.Minute}, nil, nil, nil, nil, &out); err == nil {
 		t.Fatal("a reconciler with no stores was started anyway")
 	}
 }

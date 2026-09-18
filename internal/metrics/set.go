@@ -4,6 +4,7 @@
 package metrics
 
 import (
+	"net/http"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -73,6 +74,10 @@ type Set struct {
 	AuthorizerSeconds *pkgmetrics.Histogram
 	TokensRejected    *pkgmetrics.Counter
 
+	// reg is the registry the table was walked onto, which [Set.Handler]
+	// writes and nothing else reads.
+	reg *pkgmetrics.Registry
+
 	// inFlight backs arca_requests_in_flight, a gauge over a number this
 	// package keeps rather than one a package reports.
 	inFlight atomic.Int64
@@ -128,6 +133,7 @@ func Register(reg *pkgmetrics.Registry) *Set {
 		AuthorizerSeconds: r.histogram("arca_authorizer_seconds"),
 		TokensRejected:    r.counter("arca_tokens_rejected_total"),
 
+		reg:     reg,
 		pending: map[string]float64{},
 		current: map[string]float64{},
 	}
@@ -236,3 +242,15 @@ func (s *Set) EventAppended(kind string) {
 // answer carried. Arca stores no limit, so the count of refusals is the only
 // thing about one it can publish.
 func (s *Set) LimitRejected() { s.LimitRejections.Inc(nil) }
+
+// Handler answers this set's exposition in the Prometheus text format. It is
+// GET /metrics of spec 002, mounted on the internal listener and on no other:
+// the series say what an installation holds and how much of it is used, and a
+// scrape endpoint is for the cluster that runs the replica rather than for
+// the replica's clients.
+func (s *Set) Handler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		s.reg.WritePrometheus(w)
+	})
+}
