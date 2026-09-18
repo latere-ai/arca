@@ -6,6 +6,7 @@ package api
 import (
 	"net/http"
 
+	"latere.ai/x/arca/authorizer"
 	"latere.ai/x/arca/internal/apidocs"
 )
 
@@ -40,12 +41,19 @@ type route struct {
 	handler func(*API, http.ResponseWriter, *http.Request)
 }
 
-// routeTable is the surface. Today it is the frame of spec 013: the three public
-// link routes of spec 008, registered outside the verifier because that is
-// where they belong and because registering them later would be registering
-// them somewhere else. Every other row of spec 013's table arrives with the
-// spec that owns its behaviour, on the phases of spec 019.
+// routeTable is the surface. Today it is the frame of spec 013 with the one
+// route whose behaviour has landed: the event tail of spec 010, and the
+// three public link routes of spec 008, registered outside the verifier
+// because that is where they belong and because registering them later would
+// be registering them somewhere else. Every other row of spec 013's table
+// arrives with the spec that owns its behaviour, on the phases of spec 019.
 var routeTable = []route{
+	{
+		method: http.MethodGet, path: "/v1/events",
+		action: authorizer.ActionEventRead, status: http.StatusOK,
+		summary: "One page of a space's log, oldest first.",
+		handler: (*API).events,
+	},
 	{
 		method: http.MethodGet, path: "/v1/shares/links/{token}/meta",
 		public: true, pending: true, status: http.StatusOK,

@@ -4,6 +4,35 @@ info:
   version: "1"
   description: "Durable storage for people, agents, and sandboxes: files with versions, trash and stars, uploads in parts, shares with a permission ladder and public links, workspaces with a writer lease, and an event log."
 paths:
+  /v1/events:
+    get:
+      operationId: getV1Events
+      summary: One page of a space's log, oldest first.
+      description: Asks the authorizer for event.read before it acts.
+      security:
+      - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {}
+        "401":
+          $ref: "#/components/responses/unauthenticated"
+        "403":
+          $ref: "#/components/responses/forbidden"
+        "404":
+          $ref: "#/components/responses/not_found"
+        "429":
+          $ref: "#/components/responses/rate_limited"
+        "500":
+          $ref: "#/components/responses/internal"
+        "503":
+          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /v1/shares/links/{token}:
     get:
       operationId: getV1SharesLinksByToken

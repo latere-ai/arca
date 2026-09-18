@@ -44,7 +44,8 @@ reference check held to the schema), `150a7d0` (the ledger, the log and the
 tail with migration `0005_usage_events.up.sql`), `810329d` (the passes, the
 findings and the seams), `ad6f1d3` (the subcommand, the two variables and the
 in-serve loop) and `95d9f82` (the store and e2e tiers). The gate passes at
-each of them.
+each of them. The route joined the `/v1` frame of [[013-api]] with the merge
+to `main`, which is where the handler gave up its own error writer.
 
 What arrived from Drive is `internal/handler/events.go` (the append and the
 cursor tail), the usage accounting inside `internal/handler/quota.go` (the
@@ -55,11 +56,14 @@ action `CHECK` dropped in favour of the table in `internal/events`. What
 changed on the way is the table in "What arrives from Drive" below, as
 written.
 
-### The route is not registered
+### The route
 
-`GET /v1/events` is a handler function, `events.Handler(log, querier, guard)`,
-and no mux carries it. [[013-api]] owns the route table and registers it, in
-front of the verifier of [[006-identity]].
+`GET /v1/events` is a handler function, `events.Handler(log, querier, guard,
+refuse)`, and no mux of this package carries it. [[013-api]] owns the route
+table and registers it there, behind the verifier of [[006-identity]], with
+the action `event.read`; `internal/api/events.go` is the whole of the
+binding, and the node hands the surface the log and the database it reads
+through.
 
 The seam the wiring binds is `events.Guard`, two methods and no more:
 
@@ -78,7 +82,14 @@ type Guard interface {
 
 The answer is `latere.ai/x/pkg/authz`'s `Decision` and not a boolean, because
 criterion 10 needs the `Filter` and because an adapter over the shared client
-is then one method deep. `events.LimitOf(decision)` reads
+is then one method deep. The adapter is `internal/api`'s `eventGuard`, which
+reads the caller off the request context and translates
+`auth.Authorizer.Decide`: that seam collapses a deny and an outage into
+errors, and this one reads a deny as a decision and an error as no decision
+at all. `refuse` is the second seam, `events.Refuser`: the handler names a
+row of [[013-api]]'s error table and the developer detail, and the frame
+writes the status, the one user sentence and the request id.
+`events.LimitOf(decision)` reads
 `limits.quota_bytes` off the same answer for the write paths of
 [[005-files]] and [[007-uploads]].
 
@@ -91,11 +102,11 @@ is then one method deep. `events.LimitOf(decision)` reads
 | 3 | Holds at the ledger: `TestStoreUsageAdmitsTheLimitAndRefusesTheByteAfterIt` against Postgres carries the used and limit figures. The `413` itself waits on a write route ([[005-files]], [[013-api]]) |
 | 4 | Holds. The same test releases bytes on a space over the limit |
 | 5 | Holds. `TestDeltaChargesWhatAWriteAdds`, one row per case of the admission table |
-| 6 | Holds. `TestUsageFailsClosed` at the seam and `TestStoreUsageFailsClosed` against Postgres, where the refused charge rolls back with the row. The `storage_unavailable` rendering waits on [[013-api]] |
+| 6 | Holds. `TestUsageFailsClosed` at the seam and `TestStoreUsageFailsClosed` against Postgres, where the refused charge rolls back with the row. The `storage_unavailable` rendering is `TestTheTailAnswersEveryRowThroughTheFrame` |
 | 7 | Deferred to [[007-uploads]], which creates `upload_sessions`. The recomputation sums two tables and says so, and a space with an open session will reconcile low until the third term joins it |
 | 8 | Holds. `TestEveryAppendedActionIsInTheTable` walks every Go file of the tree for an action built out of a literal |
 | 9 | Holds. `TestStoreTheTailIsGaplessAcrossABurst`, eight writers and a keyset walk that reads each row once |
-| 10 | Holds. `TestEventFilter`. The conformance row is [[017-conformance-suite]]'s |
+| 10 | Holds. `TestEventFilter`, and `TestTheEventTailAnswersThroughTheFrame` over the registered route. The conformance row is [[017-conformance-suite]]'s |
 | 11 | Holds. `TestStoreAPutThatFailedAfterTheBucketWriteIsReapedAfterTheWindow` against MinIO |
 | 12 | Holds. `TestStoreADeleteThatFailedAfterTheRowIsReaped` |
 | 13 | Deferred to [[007-uploads]]. The union `store.ObjectReferenced` asks is held to the schema by a test, so the table joins it with the migration that creates it |
@@ -158,10 +169,11 @@ Each is a decision rather than a gap.
   space rather than an object. The predecessor answered 404.
 - **A tail whose query failed is `503 storage_unavailable`.** The database
   did not answer, which is retryable, and a 500 says otherwise.
-- **The handler carries four rows of [[013-api]]'s error table** in an
-  unexported writer, so it is complete on its own. `internal/api` deletes one
-  function when it registers the route. No `details.request_id` is written,
-  because the middleware that mints one is [[013-api]]'s.
+- **The handler names rows of [[013-api]]'s error table and writes none of
+  them.** It carried an unexported writer of its own while no mux registered
+  it; registering the route deleted that function, and the five rows it
+  answers go out through `events.Refuser` in the frame's envelope, with the
+  `details.request_id` the middleware that mints one puts there.
 - **`events.id` is allocated before its transaction commits.** A row with a
   lower id can therefore become visible after a higher one, and a tail
   reading at that instant would step past it. The window is one statement

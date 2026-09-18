@@ -217,6 +217,11 @@ func newHarness(t *testing.T, rows []route, opts ...func(*Options)) *harness {
 	o := Options{
 		Verifier: id.Verifier, Authorizer: id.Authorizer,
 		PublicURL: "https://storage.example",
+		// The node wires the log of spec 010 and the database it reads
+		// through; a test of the frame wires a log that answers an empty
+		// page and no database, because what the tail reads is that
+		// package's own business.
+		Events: &fakeLog{},
 	}
 	for _, opt := range opts {
 		opt(&o)

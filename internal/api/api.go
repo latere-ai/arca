@@ -32,6 +32,8 @@ import (
 
 	"latere.ai/x/arca/internal/apidocs"
 	"latere.ai/x/arca/internal/auth"
+	"latere.ai/x/arca/internal/events"
+	"latere.ai/x/arca/internal/store"
 )
 
 // The identity of the OpenAPI document, shared by the one GET /openapi.json
@@ -58,6 +60,13 @@ type Options struct {
 	PublicURL                        string
 	RequestsPerMinute                int
 	UnauthenticatedRequestsPerMinute int
+	// Events is the log GET /v1/events tails and Querier the database it
+	// reads through, both spec 010's. The log is required, because the route
+	// is registered and a surface that registers a route it cannot answer
+	// would serve what nobody wrote; the querier is the log's own business,
+	// and a log that reaches no database takes none.
+	Events  events.Log
+	Querier store.Querier
 	// Now is the clock request ids are minted on. time.Now when nil.
 	Now func() time.Time
 }
@@ -72,6 +81,9 @@ type API struct {
 	perAddress *ratelimit.Buckets
 	clock      func() time.Time
 	document   []byte
+	// eventTail is the handler of spec 010, built once over the log and the
+	// database of this build.
+	eventTail http.Handler
 }
 
 // New builds the surface. It refuses to build without the two of spec 006,
@@ -84,12 +96,16 @@ func New(o Options) (*API, error) {
 	if o.Authorizer == nil {
 		return nil, errors.New("api: no authorizer, and every route asks before it acts")
 	}
+	if o.Events == nil {
+		return nil, errors.New("api: no event log, and GET /v1/events is a route of this surface")
+	}
 	a := &API{
 		verifier: o.Verifier, authorizer: o.Authorizer,
 		publicURL: o.PublicURL, clock: o.Now,
 		perSubject: buckets(o.RequestsPerMinute),
 		perAddress: buckets(o.UnauthenticatedRequestsPerMinute),
 	}
+	a.eventTail = events.Handler(o.Events, o.Querier, eventGuard{api: a}, refuseEvent)
 	a.document = a.build(routeTable)
 	return a, nil
 }

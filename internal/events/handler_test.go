@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"latere.ai/x/pkg/authz"
+	"latere.ai/x/pkg/httpjson"
 
 	"latere.ai/x/arca/internal/store"
 )
@@ -57,12 +58,46 @@ func (l *fakeLog) Tail(_ context.Context, _ store.Querier, t Query) (Page, error
 // allowed is the answer of an authorizer that says yes and narrows nothing.
 func allowed() authz.Decision { return authz.Decision{Allow: true, TTL: authz.DefaultTTL} }
 
+// frame stands in for internal/api's envelope: the status and the user
+// sentence of the row this handler named, with the developer detail and the
+// fields beside them. The rows are spec 013's table, which internal/api
+// holds; the cases here read a status and a code, so the test carries the
+// two columns it reads and nothing else.
+//
+// TestTheTailAnswersEveryRowThroughTheFrame in internal/api drives the same
+// handler through the real table, so the pairing below cannot quietly differ
+// from the one a caller meets.
+func frame(w http.ResponseWriter, _ *http.Request, err error) {
+	rows := map[string]int{
+		codeUnauthenticated:       http.StatusUnauthorized,
+		codeInvalidField:          http.StatusBadRequest,
+		codeForbidden:             http.StatusForbidden,
+		codeAuthorizerUnavailable: http.StatusServiceUnavailable,
+		codeStorageUnavailable:    http.StatusServiceUnavailable,
+	}
+	var refusal *Error
+	if !errors.As(err, &refusal) {
+		panic("the handler refused with something that is not a row of the table: " + err.Error())
+	}
+	status, ok := rows[refusal.Code]
+	if !ok {
+		panic("the handler named the code " + refusal.Code + ", which is no row this route answers")
+	}
+	details := map[string]any{"detail": refusal.Detail}
+	if len(refusal.Fields) > 0 {
+		details["fields"] = refusal.Fields
+	}
+	httpjson.WriteError(w, status, httpjson.Error{
+		Code: refusal.Code, Message: "the sentence of the row is internal/api's", Details: details,
+	})
+}
+
 // ask drives the handler over one query string and answers the response.
 func ask(t *testing.T, log Log, g Guard, query string) *httptest.ResponseRecorder {
 	t.Helper()
 	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/events?"+query, nil)
 	w := httptest.NewRecorder()
-	Handler(log, &fakeQuerier{}, g).ServeHTTP(w, r)
+	Handler(log, &fakeQuerier{}, g, frame).ServeHTTP(w, r)
 	return w
 }
 
@@ -125,12 +160,12 @@ func TestTheTailAsksEventReadAboutTheSpaceTheCallerNamed(t *testing.T) {
 }
 
 func TestTheTailRefusesACursorOrALimitItCannotRead(t *testing.T) {
-	for _, c := range []struct{ name, query string }{
-		{"a cursor that is no id", "cursor=yesterday"},
-		{"a cursor before the start of the log", "cursor=-1"},
-		{"a limit that is no number", "limit=all"},
-		{"a limit of nothing", "limit=0"},
-		{"a limit above the cap", "limit=5000"},
+	for _, c := range []struct{ name, query, field string }{
+		{"a cursor that is no id", "cursor=yesterday", "cursor"},
+		{"a cursor before the start of the log", "cursor=-1", "cursor"},
+		{"a limit that is no number", "limit=all", "limit"},
+		{"a limit of nothing", "limit=0", "limit"},
+		{"a limit above the cap", "limit=5000", "limit"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			g := &fakeGuard{caller: aSpace, decision: allowed()}
@@ -138,6 +173,11 @@ func TestTheTailRefusesACursorOrALimitItCannotRead(t *testing.T) {
 			w := ask(t, log, g, c.query)
 			if w.Code != http.StatusBadRequest || errorOf(t, w) != "invalid_field" {
 				t.Fatalf("the request answered %d %s", w.Code, w.Body)
+			}
+			// The row of invalid_field names the field at fault, so a
+			// client shows the caller which one it was.
+			if !strings.Contains(w.Body.String(), `"`+c.field+`"`) {
+				t.Errorf("the refusal names no field: %s", w.Body)
 			}
 			// A request that cannot be read is refused before anything is
 			// asked of the authorizer or of the store.
@@ -176,14 +216,35 @@ func TestTheTailFailsClosedOnAnAuthorizerThatAnswersNothing(t *testing.T) {
 }
 
 func TestTheTailRefusesADeny(t *testing.T) {
-	g := &fakeGuard{caller: aSpace, decision: authz.Decision{Reason: "the caller is not a member"}}
-	log := &fakeLog{}
-	w := ask(t, log, g, "owner="+anotherSpace)
-	if w.Code != http.StatusForbidden || errorOf(t, w) != "forbidden" {
-		t.Fatalf("a deny answered %d %s", w.Code, w.Body)
+	for _, c := range []struct{ name, reason, says string }{
+		{"a deny with a reason", "the caller is not a member", "the caller is not a member"},
+		// A log line that says nothing is a refusal an operator cannot read,
+		// so a deny that named no reason still carries a word.
+		{"a deny that named none", "", "named no reason"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			g := &fakeGuard{caller: aSpace, decision: authz.Decision{Reason: c.reason}}
+			log := &fakeLog{}
+			w := ask(t, log, g, "owner="+anotherSpace)
+			if w.Code != http.StatusForbidden || errorOf(t, w) != "forbidden" {
+				t.Fatalf("a deny answered %d %s", w.Code, w.Body)
+			}
+			if !strings.Contains(w.Body.String(), c.says) {
+				t.Errorf("the developer detail is %s", w.Body)
+			}
+			if log.tailed != 0 {
+				t.Fatal("the log was read after a deny")
+			}
+		})
 	}
-	if log.tailed != 0 {
-		t.Fatal("the log was read after a deny")
+}
+
+// TestARefusalReadsAsItsRowAndItsDetail: the error a handler hands the frame
+// says which row it named, for a log line and for a test that reads one.
+func TestARefusalReadsAsItsRowAndItsDetail(t *testing.T) {
+	err := error(&Error{Code: codeForbidden, Detail: "event.read: the caller is not a member"})
+	if got := err.Error(); got != "forbidden: event.read: the caller is not a member" {
+		t.Errorf("the refusal reads %q", got)
 	}
 }
 

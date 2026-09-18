@@ -28,6 +28,7 @@ import (
 	"latere.ai/x/arca/internal/auth"
 	"latere.ai/x/arca/internal/blob"
 	"latere.ai/x/arca/internal/config"
+	"latere.ai/x/arca/internal/events"
 	"latere.ai/x/arca/internal/reaper"
 	"latere.ai/x/arca/internal/store"
 	"latere.ai/x/arca/internal/version"
@@ -264,6 +265,9 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		PublicURL:                        cfg.PublicURL,
 		RequestsPerMinute:                cfg.RequestsPerMinute,
 		UnauthenticatedRequestsPerMinute: cfg.UnauthenticatedRequestsPerMinute,
+		// The log of spec 010 and the database it reads through, which is
+		// what GET /v1/events tails.
+		Events: events.NewLog(), Querier: db.Querier(),
 	})
 	if err != nil {
 		return fail(stderr, err)

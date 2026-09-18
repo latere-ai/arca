@@ -37,6 +37,44 @@ type Guard interface {
 	Ask(r *http.Request, action string, resource authz.Resource) (authz.Decision, error)
 }
 
+// Refuser writes the refusal this handler decided. The error table of spec
+// 013, the status line it carries, the one user sentence of its row and the
+// request id beside it are internal/api's, so this package names the row and
+// the developer detail and writes no envelope of its own. It is the shape
+// internal/auth's refusals already take, one layer over.
+//
+// internal/api binds the implementation when it registers the route.
+type Refuser func(w http.ResponseWriter, r *http.Request, err error)
+
+// Error is one refusal: the row of spec 013's error table this route
+// answers, the developer detail, and the field paths at fault where the row
+// names fields. It is an error, so the handler decides one and one place
+// writes it.
+type Error struct {
+	// Code is the row of the table. It is one of the five below.
+	Code string
+	// Detail is the developer sentence. It names values and reasons and
+	// never reaches the user sentence, and nothing above 499 names a store,
+	// a query or a key.
+	Detail string
+	// Fields are the field paths at fault, for a code whose row says a
+	// refusal carries them.
+	Fields []string
+}
+
+func (e *Error) Error() string { return e.Code + ": " + e.Detail }
+
+// The five rows of spec 013's error table this route answers. The table
+// itself is internal/api's, which is where the status and the user sentence
+// of each live; a row is named here and rendered there.
+const (
+	codeUnauthenticated       = "unauthenticated"
+	codeInvalidField          = "invalid_field"
+	codeForbidden             = "forbidden"
+	codeAuthorizerUnavailable = "authorizer_unavailable"
+	codeStorageUnavailable    = "storage_unavailable"
+)
+
 // The question this route asks. The vocabulary is spec 006's and the kind is
 // the row of its table that carries one field, the space.
 const (
@@ -68,12 +106,14 @@ const meAlias = "me"
 //
 // It is a handler and not a route. Spec 013 owns the mux and registers this
 // on the path, with the verifier of spec 006 in front of it, so nothing here
-// names a method or a pattern.
-func Handler(log Log, q store.Querier, g Guard) http.Handler {
+// names a method or a pattern. It owns no envelope either: every refusal
+// goes out through refuse, which is the frame's.
+func Handler(log Log, q store.Querier, g Guard, refuse Refuser) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		caller := g.Caller(r)
 		if caller == "" {
-			writeError(w, http.StatusUnauthorized, "unauthenticated", "Sign in and send a valid token.", "")
+			refuse(w, r, &Error{Code: codeUnauthenticated,
+				Detail: "the request reached the tail with no verified caller on it"})
 			return
 		}
 		owner := r.URL.Query().Get("owner")
@@ -81,20 +121,20 @@ func Handler(log Log, q store.Querier, g Guard) http.Handler {
 			owner = caller
 		}
 		query, problem := parseQuery(r, owner)
-		if problem != "" {
-			writeError(w, http.StatusBadRequest, "invalid_field", "A field has a value it cannot take.", problem)
+		if problem != nil {
+			refuse(w, r, problem)
 			return
 		}
 
 		decision, err := g.Ask(r, ActionEventRead, authz.NewResource(KindEvent, "", map[string]any{"owner": owner}))
 		switch {
 		case err != nil:
-			writeError(w, http.StatusServiceUnavailable, "authorizer_unavailable",
-				"The permission service is unavailable; retry shortly.", err.Error())
+			refuse(w, r, &Error{Code: codeAuthorizerUnavailable, Detail: err.Error()})
 			return
 		case !decision.Allow:
-			writeError(w, http.StatusForbidden, "forbidden",
-				"You do not have permission to do this.", decision.Reason)
+			// The reason is the answer's own, verbatim. What asked is the
+			// guard's to say, and it says it once.
+			refuse(w, r, &Error{Code: codeForbidden, Detail: reasonOf(decision)})
 			return
 		}
 		// A filter narrows the page and never refuses it: a selector outside
@@ -107,34 +147,45 @@ func Handler(log Log, q store.Querier, g Guard) http.Handler {
 
 		page, err := log.Tail(r.Context(), q, query)
 		if err != nil {
-			writeError(w, http.StatusServiceUnavailable, "storage_unavailable",
-				"Storage is unavailable right now; retry shortly.", "")
+			refuse(w, r, &Error{Code: codeStorageUnavailable,
+				Detail: "the log did not answer"})
 			return
 		}
 		writePage(w, page)
 	})
 }
 
-// parseQuery reads the cursor and the limit, answering the developer
-// sentence of the first field at fault.
-func parseQuery(r *http.Request, owner string) (Query, string) {
+// parseQuery reads the cursor and the limit, answering the refusal of the
+// first field at fault.
+func parseQuery(r *http.Request, owner string) (Query, *Error) {
 	q := Query{Owner: owner, Limit: DefaultLimit}
 	if raw := r.URL.Query().Get("cursor"); raw != "" {
 		cursor, err := strconv.ParseInt(raw, 10, 64)
 		if err != nil || cursor < 0 {
-			return Query{}, "cursor is " + strconv.Quote(raw) + "; a cursor is an event id this server answered"
+			return Query{}, &Error{Code: codeInvalidField, Fields: []string{"cursor"},
+				Detail: "cursor is " + strconv.Quote(raw) + "; a cursor is an event id this server answered"}
 		}
 		q.Cursor = cursor
 	}
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		limit, err := strconv.Atoi(raw)
 		if err != nil || limit < 1 || limit > MaxLimit {
-			return Query{}, "limit is " + strconv.Quote(raw) + "; a page holds between 1 and " +
-				strconv.Itoa(MaxLimit) + " rows"
+			return Query{}, &Error{Code: codeInvalidField, Fields: []string{"limit"},
+				Detail: "limit is " + strconv.Quote(raw) + "; a page holds between 1 and " +
+					strconv.Itoa(MaxLimit) + " rows"}
 		}
 		q.Limit = limit
 	}
-	return q, ""
+	return q, nil
+}
+
+// reasonOf is the reason a deny carried, or a word when it named none, so a
+// log line always says something.
+func reasonOf(d authz.Decision) string {
+	if d.Reason == "" {
+		return "the authorizer named no reason"
+	}
+	return d.Reason
 }
 
 // outsideFilter reports whether the answer's filter excludes the space the
@@ -193,21 +244,6 @@ func detailJSON(detail map[string]any) json.RawMessage {
 		return nil
 	}
 	return b
-}
-
-// writeError answers one error of spec 013's table: one code, one status,
-// one fixed sentence, and everything that varies in the developer detail.
-//
-// The table is spec 013's and lives in internal/api once that package
-// exists; these are the four codes this route answers, written here so the
-// handler is complete on its own. Nothing above 499 names a store, a query,
-// or a key.
-func writeError(w http.ResponseWriter, status int, code, message, detail string) {
-	e := httpjson.Error{Code: code, Message: message}
-	if detail != "" {
-		e.Details = map[string]any{"detail": detail}
-	}
-	httpjson.WriteError(w, status, e)
 }
 
 // AsOverLimit reads an over-limit refusal out of an error, so a write
