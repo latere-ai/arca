@@ -192,7 +192,7 @@ func (p *OwnerPolicy) decide(ctx context.Context, req authz.Request) (authz.Deci
 		return authz.Decision{Reason: ReasonUnknownAction}, nil
 	}
 	frame := authz.Policy{Admins: p.Admins}
-	switch d := frame.Decide(req, object(req.Resource)); {
+	switch d := frame.Decide(req, object(req.Action, req.Resource)); {
 	case d.Allow:
 		return d, nil
 	case d.Reason == authz.ReasonProbe:
@@ -271,7 +271,20 @@ func grantPath(res authz.Resource) string {
 // resource it built. Every question about a space carries its owner, so an
 // object with no owner is one no space claims, which only the administrative
 // overview across spaces asks about.
-func object(res authz.Resource) authz.Object {
+//
+// space.admin is the one action the owner rung does not reach. Administration
+// is a capability and not ownership: a space's owner is not an administrator
+// of its own space, and the routes under /v1/admin read across other people's
+// spaces and restore across owners, which the owner's own routes of specs 005
+// and 009 do without asking this action (spec 012). The frame admits an owner
+// for every action it is handed an owned object for, so this action is handed
+// none and the administrator list decides it alone. The probe is unaffected:
+// the frame refuses the reserved id before it reads the object, so no listed
+// subject reaches past it.
+func object(action string, res authz.Resource) authz.Object {
+	if action == authorizer.ActionSpaceAdmin {
+		return authz.Object{}
+	}
 	owner := res.String("owner")
 	return authz.Object{Exists: owner != "", Owner: owner}
 }

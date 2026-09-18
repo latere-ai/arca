@@ -251,6 +251,15 @@ on a subtree does not confer them. `link.read` sits on that list and is
 still the one action an anonymous caller reaches, because the link step
 of the flowchart answers it and no grant does.
 
+`space.admin` is the administrator's alone, and is the one action of the
+table the owner step does not reach either. Administration is a
+capability and not ownership: a space's owner is not an administrator of
+its own space, and the owner's own equivalents of what `/v1/admin` serves
+ask the actions they always ask ([[012-administration]]). This policy
+admits the action for a subject in `ARCA_ADMIN_SUBJECTS` and denies it to
+everyone else, the space's own owner included, so the flowchart's first
+step is the only one that answers it.
+
 A grant names a path prefix, and a workspace names a slug rather than a
 path, so the prefix a grant on a workspace is read against is
 `workspaces/<slug>`, the subtree of the workspaces plane
