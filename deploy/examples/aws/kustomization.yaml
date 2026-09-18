@@ -1,0 +1,29 @@
+# An installation on EKS with an S3 bucket behind an Application Load
+# Balancer.
+#
+# Copy this directory, change the names marked below, create the three
+# Secrets (deploy/bootstrap/secrets.example.yaml), run the migration Job,
+# and apply it. Nothing here is applied by CI: this repository has no cloud
+# account, so the overlay is proved by a kustomize render and by an
+# operator's own cluster.
+#
+# What to change:
+#   ingress.yaml     the hostname and the certificate ARN
+#   public-url.yaml  the same hostname
+#   the Secret arcad-bucket: the region and the bucket, and the keys unless
+#     the cluster gives the pods a role
+#   the Secret arcad-database: the RDS endpoint
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: arca
+
+resources:
+  - ../../base
+  # The Ingress is a resource and not a patch: the base holds none, because
+  # an ingress class is an installation's choice (spec 016).
+  - ingress.yaml
+
+patches:
+  - path: public-url.yaml
+  - path: replicas.yaml

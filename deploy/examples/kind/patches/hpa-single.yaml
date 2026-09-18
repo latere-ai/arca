@@ -1,0 +1,14 @@
+# One replica and no autoscaling. The base allows 2 to 32, which one kind
+# node has no room for, and a stack whose replica count moved under load
+# would make a conformance run's failures hard to read.
+#
+# No metrics-server is installed either, so an autoscaler left at the
+# base's bounds would report unknown metrics and hold the Deployment at its
+# minimum anyway. Holding it here says so on purpose.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: arcad
+spec:
+  minReplicas: 1
+  maxReplicas: 1

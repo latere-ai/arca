@@ -1,0 +1,24 @@
+# The origin clients reach, which must be the hostname in ingress.yaml.
+# Every URL the server writes is built from it, a presigned redirect
+# included, so a value that does not match the ingress sends a client to an
+# address that answers nothing.
+#
+# ARCA_BUCKET_PREFIX is set here rather than left to its default, so a
+# bucket shared with something else is partitioned by a name this
+# installation chose. ARCA_AUTHORIZER_URL is left out: without it the owner
+# policy applies and ARCA_ADMIN_SUBJECTS names the administrators, which is
+# what a single-tenant installation wants.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: arcad
+spec:
+  template:
+    spec:
+      containers:
+        - name: arcad
+          env:
+            - name: ARCA_PUBLIC_URL
+              value: https://arca.example.com
+            - name: ARCA_BUCKET_PREFIX
+              value: arca/

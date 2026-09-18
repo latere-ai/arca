@@ -1,0 +1,10 @@
+# Replica bounds for a small installation: two always, up to eight under
+# load. The autoscaler scales on CPU alone, so the cluster needs
+# metrics-server; EKS does not install one by default.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: arcad
+spec:
+  minReplicas: 2
+  maxReplicas: 8

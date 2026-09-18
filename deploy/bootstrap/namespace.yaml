@@ -1,0 +1,14 @@
+# Created once by hand and never part of a release: creating a namespace
+# needs a broader grant than the identity a pipeline deploys with holds.
+#
+# Pod Security admission is at restricted, which is what the base is already
+# written for: no privilege escalation, every capability dropped, a
+# non-root user, and the default seccomp profile. A pod that asked for more
+# is refused at admission rather than at runtime.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: arca
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted

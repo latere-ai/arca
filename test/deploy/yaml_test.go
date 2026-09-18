@@ -210,6 +210,13 @@ func entry(content string) (key, value string, err error) {
 	if key == "<<" || strings.ContainsAny(key, "{}&*|>") {
 		return "", "", fmt.Errorf("the key %q uses a construct this reader does not read", key)
 	}
+	// The empty mapping is the one flow mapping the tree is written with,
+	// for a volume that is an emptyDir and a list of alert groups that is
+	// still empty. It reads as a mapping with nothing in it, which is what
+	// it is.
+	if value == "{}" {
+		return key, "", nil
+	}
 	// An anchor, an alias, a flow mapping, and a block scalar each mean
 	// something this reader would otherwise read as a plain string.
 	if strings.HasPrefix(value, "{") || strings.HasPrefix(value, "&") ||

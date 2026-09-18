@@ -1,0 +1,86 @@
+# Postgres as the stack's metadata store: one pod, an emptyDir, and the
+# role and database arcad connects as. Reached in the cluster as
+# postgres:5432 and from the runner as localhost:30432, which is what lets
+# a test open the database directly and read what a request wrote.
+#
+# The version is at or above the floor spec 004 names. It is pinned by tag
+# and not yet by digest: a digest is written here from the first CI run
+# that pulls it, so the value is one a reader can verify rather than one
+# copied from somewhere else.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  labels:
+    app.kubernetes.io/name: postgres
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: postgres:18-alpine
+          env:
+            - name: POSTGRES_USER
+              value: arca
+            - name: POSTGRES_PASSWORD
+              value: arca
+            - name: POSTGRES_DB
+              value: arca
+            # The data directory must be under the mount rather than the
+            # mount itself: initdb refuses a directory it did not create.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: postgres
+              containerPort: 5432
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "arca", "-d", "arca"]
+            periodSeconds: 2
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  labels:
+    app.kubernetes.io/name: postgres
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+      nodePort: 30432
