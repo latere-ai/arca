@@ -11,7 +11,10 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -19,7 +22,13 @@ import (
 const (
 	DefaultPublicAddr   = ":8080"
 	DefaultInternalAddr = ":8081"
+	DefaultBucketPrefix = "arca/"
 )
+
+// prefixShape is what a bucket prefix may hold: the characters a key is
+// built from, and no others, so a prefix cannot smuggle a query string or a
+// path traversal into a key.
+var prefixShape = regexp.MustCompile(`^[A-Za-z0-9._/-]*$`)
 
 // Getenv is the environment lookup Load reads through, so a test passes a
 // map and never touches the process environment.
@@ -34,14 +43,40 @@ type Config struct {
 	PublicAddr string
 	// InternalAddr is where the four probes listen for the cluster.
 	InternalAddr string
+	// Bucket is the bucket every key is written to.
+	Bucket string
+	// BucketEndpoint is the S3 endpoint. Empty leaves the SDK to derive one
+	// from the region, so no provider is named here.
+	BucketEndpoint string
+	// BucketRegion is the signing region.
+	BucketRegion string
+	// BucketPrefix is what every key carries, ending in a slash. Several
+	// installations share one bucket by taking a prefix each.
+	BucketPrefix string
+	// BucketPathStyle addresses the bucket in the path rather than in the
+	// host, for a store without virtual hosts.
+	BucketPathStyle bool
+	// BucketAccessKey and BucketSecretKey are static credentials. Both
+	// empty falls through to the SDK's credential chain.
+	BucketAccessKey, BucketSecretKey string
+	// PublicCDNURL is the base a public object's redirect points at, with
+	// no trailing slash. Empty answers the ordinary presigned redirect.
+	PublicCDNURL string
 }
 
 // Load reads every variable through getenv and returns the configuration,
 // or one error naming every problem found, sorted by variable name.
 func Load(getenv Getenv) (Config, error) {
 	c := Config{
-		PublicAddr:   withDefault(getenv("ARCA_PUBLIC_ADDR"), DefaultPublicAddr),
-		InternalAddr: withDefault(getenv("ARCA_INTERNAL_ADDR"), DefaultInternalAddr),
+		PublicAddr:      withDefault(getenv("ARCA_PUBLIC_ADDR"), DefaultPublicAddr),
+		InternalAddr:    withDefault(getenv("ARCA_INTERNAL_ADDR"), DefaultInternalAddr),
+		Bucket:          value(getenv("ARCA_BUCKET")),
+		BucketEndpoint:  value(getenv("ARCA_BUCKET_ENDPOINT")),
+		BucketRegion:    value(getenv("ARCA_BUCKET_REGION")),
+		BucketPrefix:    withDefault(getenv("ARCA_BUCKET_PREFIX"), DefaultBucketPrefix),
+		BucketAccessKey: value(getenv("ARCA_BUCKET_ACCESS_KEY")),
+		BucketSecretKey: value(getenv("ARCA_BUCKET_SECRET_KEY")),
+		PublicCDNURL:    strings.TrimRight(value(getenv("ARCA_PUBLIC_CDN_URL")), "/"),
 	}
 	var problems []string
 	if err := checkAddr(c.PublicAddr); err != nil {
@@ -53,6 +88,37 @@ func Load(getenv Getenv) (Config, error) {
 	if sameEndpoint(c.PublicAddr, c.InternalAddr) {
 		problems = append(problems, "ARCA_INTERNAL_ADDR must differ from ARCA_PUBLIC_ADDR; both are "+c.PublicAddr)
 	}
+	if c.Bucket == "" {
+		problems = append(problems, "ARCA_BUCKET is unset, and the server writes every object to one bucket")
+	}
+	if c.BucketRegion == "" {
+		problems = append(problems, "ARCA_BUCKET_REGION is unset, and a request to the store is signed for a region")
+	}
+	if c.BucketEndpoint != "" {
+		if err := checkURL(c.BucketEndpoint); err != nil {
+			problems = append(problems, "ARCA_BUCKET_ENDPOINT "+err.Error())
+		}
+	}
+	prefix, err := normalisePrefix(c.BucketPrefix)
+	if err != nil {
+		problems = append(problems, "ARCA_BUCKET_PREFIX "+err.Error())
+	}
+	c.BucketPrefix = prefix
+	if raw := value(getenv("ARCA_BUCKET_PATH_STYLE")); raw != "" {
+		pathStyle, err := strconv.ParseBool(raw)
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("ARCA_BUCKET_PATH_STYLE is %q, not a true or false value", raw))
+		}
+		c.BucketPathStyle = pathStyle
+	}
+	if (c.BucketAccessKey == "") != (c.BucketSecretKey == "") {
+		problems = append(problems, "ARCA_BUCKET_ACCESS_KEY and ARCA_BUCKET_SECRET_KEY are set as a pair; unset both to use the credentials of the environment")
+	}
+	if c.PublicCDNURL != "" {
+		if err := checkURL(c.PublicCDNURL); err != nil {
+			problems = append(problems, "ARCA_PUBLIC_CDN_URL "+err.Error())
+		}
+	}
 	if len(problems) > 0 {
 		sort.Strings(problems)
 		return Config{}, errors.New("configuration: " + strings.Join(problems, "; "))
@@ -61,10 +127,44 @@ func Load(getenv Getenv) (Config, error) {
 }
 
 func withDefault(v, def string) string {
-	if strings.TrimSpace(v) == "" {
+	if value(v) == "" {
 		return def
 	}
 	return v
+}
+
+// value is the variable as the server reads it: a blank value is unset.
+func value(v string) string { return strings.TrimSpace(v) }
+
+// normalisePrefix is spec 003's rule: a missing trailing slash is appended,
+// a leading slash is a configuration error, and the value holds only the
+// characters a key is built from.
+func normalisePrefix(prefix string) (string, error) {
+	if strings.HasPrefix(prefix, "/") {
+		return "", fmt.Errorf("is %q, and a key is not rooted, so the prefix carries no leading slash", prefix)
+	}
+	if !prefixShape.MatchString(prefix) {
+		return "", fmt.Errorf("is %q, and a prefix holds letters, digits, and the characters . _ - /", prefix)
+	}
+	if prefix != "" && !strings.HasSuffix(prefix, "/") {
+		prefix += "/"
+	}
+	return prefix, nil
+}
+
+// checkURL accepts an absolute http or https address and nothing else.
+func checkURL(raw string) error {
+	u, err := url.Parse(raw)
+	switch {
+	case err != nil:
+		return fmt.Errorf("is %q, which is no URL: %w", raw, err)
+	case u.Scheme != "http" && u.Scheme != "https":
+		return fmt.Errorf("is %q, and an address carries the scheme http or https", raw)
+	case u.Host == "":
+		return fmt.Errorf("is %q, which names no host", raw)
+	default:
+		return nil
+	}
 }
 
 // sameEndpoint reports whether two valid addresses name one socket. Port

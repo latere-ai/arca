@@ -24,6 +24,7 @@ import (
 
 	"latere.ai/x/pkg/health"
 
+	"latere.ai/x/arca/internal/blob"
 	"latere.ai/x/arca/internal/config"
 	"latere.ai/x/arca/internal/version"
 )
@@ -90,9 +91,28 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		return fail(stderr, err)
 	}
 
+	// The bucket client opens no connection here: it is built from the
+	// configuration, and the readiness check below is what reaches the
+	// store. A store that is briefly unreachable at start-up therefore
+	// delays readiness rather than crashing the process.
+	bucket, err := blob.NewS3(ctx, blob.Options{
+		Bucket:    cfg.Bucket,
+		Endpoint:  cfg.BucketEndpoint,
+		Region:    cfg.BucketRegion,
+		AccessKey: cfg.BucketAccessKey,
+		SecretKey: cfg.BucketSecretKey,
+		PathStyle: cfg.BucketPathStyle,
+	})
+	if err != nil {
+		return fail(stderr, err)
+	}
+
 	draining := make(chan struct{})
 	probes := health.Handler(health.Options{
-		Ready:     health.Checks(health.Check{Name: "draining", Run: notDraining(draining)}),
+		Ready: health.Checks(
+			health.Check{Name: "draining", Run: notDraining(draining)},
+			health.Check{Name: "bucket", Run: bucket.HeadBucket},
+		),
 		Timeout:   2 * time.Second,
 		Version:   version.Version,
 		Commit:    version.Commit,

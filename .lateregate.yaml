@@ -47,12 +47,34 @@ depcheck:
   packages:
     latere.ai/x/arca/cmd/arcad:
       decision: >-
-        the server reaches latere.ai/x/pkg and the standard library; the
-        S3 client joins the list with spec 003, the Postgres driver with
-        spec 004, the OpenTelemetry SDK with spec 006, and nothing else
-        does without a row here (spec 001)
+        the server reaches latere.ai/x/pkg, the standard library, and the
+        S3 client of spec 003 with the modules the SDK splits itself
+        into; the Postgres driver joins the list with spec 004, the
+        OpenTelemetry SDK with spec 006, and nothing else does without a
+        row here (spec 001). The SDK is the one cloud dependency
+        invariant 9 admits, because it speaks the S3 API and nothing
+        else: no cloud control plane, no Kubernetes client.
       allow:
         latere.ai/x/pkg: the shared library every Latere service is built on (spec 002)
+        github.com/aws/aws-sdk-go-v2: the SDK's core, its signer, and its retry, under the S3 client of spec 003
+        github.com/aws/aws-sdk-go-v2/service/s3: the S3 API itself, which spec 003 names as the one bucket contract
+        github.com/aws/aws-sdk-go-v2/config: the credential chain, which a deployment uses when ARCA_BUCKET_ACCESS_KEY and ARCA_BUCKET_SECRET_KEY are unset
+        github.com/aws/aws-sdk-go-v2/credentials: the static credentials of those two variables, and the providers the chain resolves
+        github.com/aws/smithy-go: the SDK's transport and error types; the API error code internal/blob classifies a refusal by
+        github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream: an S3 response framing, reached by the S3 client
+        github.com/aws/aws-sdk-go-v2/feature/ec2/imds: the instance metadata credentials of the chain
+        github.com/aws/aws-sdk-go-v2/internal/configsources: shared endpoint resolution, reached by the S3 client
+        github.com/aws/aws-sdk-go-v2/internal/endpoints/v2: shared endpoint resolution, reached by the S3 client
+        github.com/aws/aws-sdk-go-v2/internal/ini: the credential file parser of the chain
+        github.com/aws/aws-sdk-go-v2/internal/v4a: an S3 signing variant, reached by the S3 client
+        github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding: response decoding, reached by the S3 client
+        github.com/aws/aws-sdk-go-v2/service/internal/checksum: the trailing sha256 a put carries over TLS (spec 003)
+        github.com/aws/aws-sdk-go-v2/service/internal/presigned-url: the presigned reads and part uploads of spec 003
+        github.com/aws/aws-sdk-go-v2/service/internal/s3shared: S3 request middleware, reached by the S3 client
+        github.com/aws/aws-sdk-go-v2/service/signin: reached by the credential chain
+        github.com/aws/aws-sdk-go-v2/service/sso: reached by the credential chain
+        github.com/aws/aws-sdk-go-v2/service/ssooidc: reached by the credential chain
+        github.com/aws/aws-sdk-go-v2/service/sts: reached by the credential chain
 
 license:
   spdx: MIT

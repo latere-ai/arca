@@ -7,8 +7,10 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"maps"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"regexp"
 	"strings"
 	"sync"
@@ -18,6 +20,28 @@ import (
 
 func env(m map[string]string) func(string) string {
 	return func(k string) string { return m[k] }
+}
+
+// stores is the environment of a server that starts: the variables every
+// spec so far marks required, with the bucket pointing at an endpoint that
+// answers the readiness probe. The e2e tier of spec 014 runs the same server
+// against a real store.
+func stores(t *testing.T, overrides map[string]string) func(string) string {
+	t.Helper()
+	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(endpoint.Close)
+	m := map[string]string{
+		"ARCA_BUCKET":            "arca",
+		"ARCA_BUCKET_REGION":     "us-east-1",
+		"ARCA_BUCKET_ENDPOINT":   endpoint.URL,
+		"ARCA_BUCKET_PATH_STYLE": "true",
+		"ARCA_BUCKET_ACCESS_KEY": "key",
+		"ARCA_BUCKET_SECRET_KEY": "secret",
+	}
+	maps.Copy(m, overrides)
+	return env(m)
 }
 
 func TestVersionFlagPrintsTheIdentityAndExitsZero(t *testing.T) {
@@ -79,7 +103,7 @@ func TestOccupiedAddressExitsOne(t *testing.T) {
 		{"internal", "127.0.0.1:0", ln.Addr().String()},
 	} {
 		var errOut bytes.Buffer
-		code := run(t.Context(), nil, env(map[string]string{
+		code := run(t.Context(), nil, stores(t, map[string]string{
 			"ARCA_PUBLIC_ADDR":   tc.public,
 			"ARCA_INTERNAL_ADDR": tc.internal,
 		}), io.Discard, &errOut)
@@ -111,17 +135,16 @@ var listening = regexp.MustCompile(`listening public=(\S+) internal=(\S+)`)
 
 // startServe runs serve on loopback ports and returns the two base URLs
 // and a stop function that cancels the context and returns the exit code.
-func startServe(t *testing.T) (publicURL, internalURL string, stop func() int) {
+func startServe(t *testing.T, overrides map[string]string) (publicURL, internalURL string, stop func() int) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
 	var out syncBuffer
 	var errOut bytes.Buffer
 	codec := make(chan int, 1)
 	go func() {
-		codec <- run(ctx, nil, env(map[string]string{
-			"ARCA_PUBLIC_ADDR":   "127.0.0.1:0",
-			"ARCA_INTERNAL_ADDR": "127.0.0.1:0",
-		}), &out, &errOut)
+		addresses := map[string]string{"ARCA_PUBLIC_ADDR": "127.0.0.1:0", "ARCA_INTERNAL_ADDR": "127.0.0.1:0"}
+		maps.Copy(addresses, overrides)
+		codec <- run(ctx, nil, stores(t, addresses), &out, &errOut)
 	}()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
@@ -168,7 +191,7 @@ func get(t *testing.T, url string) (int, string) {
 }
 
 func TestServeAnswersTheProbesOnBothListenersAndStopsCleanly(t *testing.T) {
-	publicURL, internalURL, stop := startServe(t)
+	publicURL, internalURL, stop := startServe(t, nil)
 
 	for _, base := range []string{publicURL, internalURL} {
 		for _, p := range []string{"/livez", "/readyz"} {
@@ -189,6 +212,33 @@ func TestServeAnswersTheProbesOnBothListenersAndStopsCleanly(t *testing.T) {
 
 	if code := stop(); code != 0 {
 		t.Fatalf("exit %d", code)
+	}
+}
+
+// TestReadinessNamesTheStoreItCannotReach is what an operator reads when a
+// bucket is misconfigured: the probe says which check failed, in the
+// developer's register, and the process keeps serving so the answer is
+// readable at all.
+func TestReadinessNamesTheStoreItCannotReach(t *testing.T) {
+	unreachable, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := unreachable.Addr().String()
+	_ = unreachable.Close()
+
+	publicURL, _, stop := startServe(t, map[string]string{"ARCA_BUCKET_ENDPOINT": "http://" + address})
+	defer func() {
+		if code := stop(); code != 0 {
+			t.Errorf("exit %d", code)
+		}
+	}()
+	if code, body := get(t, publicURL+"/livez"); code != 200 {
+		t.Errorf("GET /livez = %d %q; liveness touches no dependency", code, body)
+	}
+	code, body := get(t, publicURL+"/readyz")
+	if code != 503 || !strings.HasPrefix(body, "not ready: bucket: ") {
+		t.Fatalf("GET /readyz = %d %q", code, body)
 	}
 }
 
