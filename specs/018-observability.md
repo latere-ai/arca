@@ -11,10 +11,10 @@ depends_on:
   - specs/009-workspaces.md
   - specs/010-events-and-reaper.md
   - specs/013-api.md
-affects: [internal/metrics/, internal/api/, internal/blob/, internal/store/, internal/auth/, internal/events/, internal/reaper/, cmd/arcad/, tools/rules/, deploy/base/prometheusrule.yaml, .github/workflows/verify.yml]
+affects: [internal/metrics/, internal/api/, internal/blob/, internal/store/, internal/auth/, internal/events/, internal/files/, internal/uploads/, internal/workspaces/, internal/reaper/, cmd/arcad/, tools/rules/, deploy/base/prometheusrule.yaml, .github/workflows/verify.yml]
 effort: medium
 created: 2026-09-18
-updated: 2026-09-18
+updated: 2026-09-19
 author: changkun
 ---
 
@@ -40,12 +40,14 @@ leaves the process until an operator sets an endpoint.
 ## Current state
 
 Built and in the tree on 2026-09-18, for everything the packages of phases 1
-to 5 can record. `internal/metrics` holds the table and the one registry;
+to 5 can record, and wired through on 2026-09-19 to the two planes that were
+seams at the time: `internal/files`, `internal/uploads` and the two live
+counts `internal/workspaces` and `internal/uploads` answer. `internal/metrics` holds the table and the one registry;
 `cmd/arcad` bootstraps the exporter and serves `GET /metrics` on the internal
 listener; `internal/api` counts, times and logs every request;
-`internal/auth`, `internal/workspaces` and `internal/reaper` record through
-seams; `tools/rules` holds the alert table and renders
-`deploy/base/prometheusrule.yaml`. The commits are `f502744` (the table and
+`internal/auth`, `internal/files`, `internal/uploads`, `internal/workspaces`
+and `internal/reaper` record through seams; `tools/rules` holds the alert
+table and renders `deploy/base/prometheusrule.yaml`. The commits are `f502744` (the table and
 the registry), `e884c2f` (the exporter and the listener), `0b0e9e5` (the
 instrumentation), `2c8e9f3` (the alerts and the tool) and `91542ac` (the
 documentation). The gate passes at each of them.
@@ -66,12 +68,20 @@ differs is whether a package writes to it yet.
 | `arca_lease_expiries_total` | recorded, at pass 3's binding |
 | `arca_events_appended_total` | recorded, where a workspace's mutation becomes a row of the log |
 | `arca_bytes_in_total{kind="sync"}`, `arca_bytes_out_total{kind="materialize"}` | recorded, at the boundary of [[009-workspaces]] |
-| `arca_bytes_in_total{kind="inline"}`, `arca_bytes_out_total{kind="inline"}` | waits on [[005-files]] |
-| `arca_bytes_in_total{kind="part"}`, `arca_upload_sessions_total`, `arca_upload_sessions_open`, `arca_upload_parts_total` | registered, with the three seams [[007-uploads]] records through (`UploadSession`, `UploadPart`, `SessionsOpen`) waiting for that spec |
-| `arca_limit_rejections_total` | waits on the first write path that charges the ledger, [[005-files]] |
-| `arca_leases_held` | waits on a count of live leases; the sweep of [[009-workspaces]] reports what it ended and not what is held |
+| `arca_bytes_in_total{kind="inline"}`, `arca_bytes_out_total{kind="inline"}` | recorded, at the put and the inline read of [[005-files]]. What is counted out is what left, so a read that ended early counts fewer bytes than the row holds, and a read answered as a redirect counts none |
+| `arca_bytes_in_total{kind="part"}`, `arca_upload_sessions_total`, `arca_upload_sessions_open`, `arca_upload_parts_total` | recorded, by the session API of [[007-uploads]] through the three seams. A session is counted once by what became of it, and the bytes are the assembled object's head and not the client's declaration |
+| `arca_limit_rejections_total` | recorded, where the ledger refuses a charge: the put of [[005-files]] and the session open of [[007-uploads]], which charges the declared bytes up front |
+| `arca_leases_held` | recorded, from `store.Workspaces.CountHeldLeases`, read at every scrape. It is the exact complement of the sweep's own predicate, so a lease is held or lapsed and never both |
 | `arca_stored_bytes` | waits on a per-plane ledger read; see the divergence below |
 | `arca_db_query_seconds`, `arca_db_conns` | waits on [[004-metadata-store]] exposing the pool's statistics and a timed querier |
+
+The two gauges that read a store rather than a number this process keeps —
+`arca_leases_held` and `arca_upload_sessions_open` — are bound in `cmd/arcad`
+through one helper, because a lease taken on one replica is held on all of
+them and no replica's own count would be the installation's. A gauge carries
+no context, so each read is given a bounded one at the readiness probe's
+budget and a store that will not answer reads zero with a line naming the
+gauge: a scrape is not where a store outage is reported from.
 
 Share and link counters have no row in the table and need none: what
 [[008-shares-and-links]] does is already counted as requests by route, as
@@ -102,12 +112,20 @@ decisions by outcome, and as `arca_reaper_findings_total{kind="share_expired"}`.
   standard output. An installation that wants the series runs the reconciler
   on the replicas, which is the default. A bridge belongs in the shared
   package, not here.
-- **`arca_stored_bytes` has no source.** The Design says it is the reaper's
-  sample summed over the installation and split by plane, and the ledger row
-  the reaper reads (`events.Space`) carries one total per space with no plane
-  in it. Splitting it is a change to [[010-events-and-reaper]]'s ledger read
-  rather than to this spec, so the gauge stays registered at zero and no
-  alert reads it.
+- **`arca_stored_bytes` has no source**, and still has none now that the two
+  planes record their bytes. The Design says it is the reaper's sample summed
+  over the installation and split by plane. The ledger the reaper reads is
+  `space_usage (owner, bytes)`, one total per space with no plane in it, and
+  `events.Space` carries the same two fields, so there is nothing cheap to
+  split: a per-plane total would be a sum over `files.size_bytes` partitioned
+  by whether the path sits under `workspaces/`, plus the workspace objects,
+  which is a scan of the object tables per run and a new ledger read. That is
+  a change to [[010-events-and-reaper]]'s ledger rather than to this spec, so
+  the gauge stays registered at zero and no alert reads it. The counters that
+  did land are rates of bytes moving, which is the question an operator
+  actually alerts on; how much is stored is answered per space by
+  [[012-administration]]'s overview and in aggregate by
+  `arca_space_usage_bytes`.
 - **Two alerts read what Arca publishes rather than what the table's words
   say.** `ArcaReaperFailing` fires at fifteen minutes, three times the
   default `ARCA_REAP_INTERVAL`, spelled in the annotation, because a rules

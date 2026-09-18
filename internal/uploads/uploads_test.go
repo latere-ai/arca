@@ -410,10 +410,19 @@ func TestAStoreThatAnswersNothingIsAnOutageAndNeverAVerdict(t *testing.T) {
 // TestTheDefaultsOfABuildWithNoQuerySetsBound: the node binds the ones over
 // Postgres, and a session surface built with none still builds.
 func TestTheDefaultsOfABuildWithNoQuerySetsBound(t *testing.T) {
-	s := New(Options{files.Options{DB: newMemory()}, nil})
+	s := New(Options{DB: newMemory()})
 	if s.sessions == nil || s.now == nil || s.content == nil {
 		t.Fatal("a session surface built with no query sets bound none")
 	}
+	// A node that bound no registry records nothing, and every call site is
+	// still one line rather than a branch (spec 018).
+	if s.metrics == nil {
+		t.Fatal("a session surface built with no recording surface bound none")
+	}
+	s.metrics.UploadSession(sessionCreated)
+	s.metrics.UploadPart(partPresigned)
+	s.metrics.LimitRejected()
+	s.metrics.In("part", 1)
 	if parts(1) != 1 || parts(PartSize) != 1 || parts(PartSize+1) != 2 {
 		t.Errorf("the part count of one part, one full part and one byte more is %d, %d, %d",
 			parts(1), parts(PartSize), parts(PartSize+1))

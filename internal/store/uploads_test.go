@@ -101,6 +101,25 @@ func TestClosingASessionIsIdempotentAndTakesNonsenseAsNothing(t *testing.T) {
 	}
 }
 
+// TestTheOpenSessionsAreCountedByTheSweepsOwnPredicate:
+// arca_upload_sessions_open of spec 018 reads one number, and it is the
+// complement of the sweep below, so the statement reads the same column and
+// compares it the other way.
+func TestTheOpenSessionsAreCountedByTheSweepsOwnPredicate(t *testing.T) {
+	q := &fakeQuerier{row: values(int64(2))}
+	open, err := NewSessions().CountOpen(t.Context(), q, time.Now())
+	if err != nil || open != 2 {
+		t.Fatalf("CountOpen = %d, %v", open, err)
+	}
+	if !strings.Contains(q.statements[0], "expires_at > $1") {
+		t.Fatalf("the count does not read the deadline:\n%s", q.statements[0])
+	}
+	broken := &fakeQuerier{row: failing(errFault)}
+	if _, err := NewSessions().CountOpen(t.Context(), broken, time.Now()); err == nil {
+		t.Fatal("a connection failure counted as no session open")
+	}
+}
+
 func TestTheExpiredSessionsAreTheReapersQueryAndAreOldestFirst(t *testing.T) {
 	rows := &fakeRows{scans: []func(...any) error{sessionScan(aSession())}}
 	listed := &fakeQuerier{rows: rows}

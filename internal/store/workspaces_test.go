@@ -391,6 +391,25 @@ func TestACompletedSyncStampsTheBoundaryItTook(t *testing.T) {
 	}
 }
 
+// TestTheLeasesHeldAreCountedByTheSweepsOwnPredicate: arca_leases_held of
+// spec 018 reads one number, and it is the complement of the sweep above, so
+// the statement names the same two columns and compares them the other way.
+func TestTheLeasesHeldAreCountedByTheSweepsOwnPredicate(t *testing.T) {
+	q := &fakeQuerier{row: values(int64(3))}
+	held, err := NewWorkspaces().CountHeldLeases(t.Context(), q, time.Now())
+	if err != nil || held != 3 {
+		t.Fatalf("CountHeldLeases = %d, %v", held, err)
+	}
+	if !strings.Contains(q.statements[0], "writer_expires_at >= $1") ||
+		!strings.Contains(q.statements[0], "writer_holder IS NOT NULL") {
+		t.Errorf("the count does not read the lease: %s", q.statements[0])
+	}
+	broken := &fakeQuerier{row: failing(errors.New("the connection failed"))}
+	if _, err := NewWorkspaces().CountHeldLeases(t.Context(), broken, time.Now()); err == nil {
+		t.Fatal("a connection failure counted as no lease held")
+	}
+}
+
 func TestTheReaperReadsTheLeasesAndTheAttachmentsWhoseTimeHasPassed(t *testing.T) {
 	want := aWorkspace()
 	leases := &fakeQuerier{rows: workspaceRowsOf(want)}

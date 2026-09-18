@@ -240,7 +240,11 @@ func (s *Service) stream(w http.ResponseWriter, r *http.Request, key, media stri
 	}
 	s.headers(w, media, size, time.Time{})
 	w.WriteHeader(http.StatusOK)
-	if _, err := io.Copy(w, body); err != nil {
+	sent, err := io.Copy(w, body)
+	// What is counted is what left, and never what the row said: a read that
+	// ended early served fewer bytes than the object holds (spec 018).
+	s.metrics.Out("inline", sent)
+	if err != nil {
 		// The status is committed, so the client reads a truncated body
 		// under a 200 and this is the only place the truncation is
 		// recorded.

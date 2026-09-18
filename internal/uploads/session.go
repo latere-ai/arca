@@ -99,7 +99,7 @@ func (s *Service) create(w http.ResponseWriter, r *http.Request) {
 		// caller cannot hold a thousand sessions open and fit them all under
 		// one limit (spec 010).
 		if _, err := s.content.Ledger().Charge(ctx, q, t.Owner, in.Size, limit); err != nil {
-			return charged(ctx, err)
+			return s.charged(ctx, err)
 		}
 		written, err = s.sessions.Insert(ctx, q, store.Session{
 			Owner: t.Owner, Path: t.Path, ObjectID: id, UploadID: uploadID,
@@ -120,6 +120,8 @@ func (s *Service) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.metrics.UploadSession(sessionCreated)
+
 	urls := make([]string, 0, parts(in.Size))
 	for n := range parts(in.Size) {
 		url, err := s.content.Bucket().PresignPart(ctx, key, uploadID, int32(n+1))
@@ -128,6 +130,7 @@ func (s *Service) create(w http.ResponseWriter, r *http.Request) {
 			api.WriteError(w, r, fault(ctx, "sign a part of the upload", err))
 			return
 		}
+		s.metrics.UploadPart(partPresigned)
 		urls = append(urls, url)
 	}
 	httpjson.Write(w, http.StatusCreated, Session{
@@ -236,6 +239,7 @@ func (s *Service) abort(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, r, err)
 		return
 	}
+	s.metrics.UploadSession(sessionAborted)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -246,9 +250,12 @@ func fault(ctx context.Context, what string, err error) error {
 }
 
 // charged renders a charge the answer's limit did not admit.
-func charged(ctx context.Context, err error) error {
+func (s *Service) charged(ctx context.Context, err error) error {
 	var over *files.OverLimit
 	if errors.As(err, &over) {
+		// The declared bytes are charged when the session opens, so a space
+		// with no room left is refused here and nowhere later (spec 018).
+		s.metrics.LimitRejected()
 		return api.Refuse(api.CodeQuotaExceeded, "%s", over.Error())
 	}
 	if _, ok := errors.AsType[*api.Refusal](err); ok {

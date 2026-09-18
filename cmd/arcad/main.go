@@ -565,6 +565,9 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	content := files.Options{
 		DB: db, Bucket: bucket, Decide: identity.Authorizer, Config: cfg,
 		Ledger: fileLedger{log: log, usage: events.NewLedger()},
+		// Spec 018's seam for the bytes a put takes in, the bytes a read
+		// streams out, and the writes a limit refused.
+		Metrics: recorder,
 		// The liveness rule of spec 009, which spec 005 applies: a path
 		// under workspaces/<slug>/ whose workspace is gone or soft deleted
 		// is a missing object to everyone. The query set of spec 004
@@ -572,7 +575,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		Workspaces: store.NewWorkspaces(),
 	}
 	object := files.New(content)
-	session := uploads.New(uploads.Options{Options: content})
+	session := uploads.New(uploads.Options{Options: content, Metrics: recorder})
 
 	// The shares and links of spec 008. The log of spec 010 is bound below,
 	// so a grant made and a grant revoked are rows of it, and the read path
@@ -604,6 +607,13 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	if err != nil {
 		return fail(stderr, err)
 	}
+	// The two gauges of spec 018 that no process keeps a number for: a lease
+	// and a session are held across replicas, so what each reads at a scrape
+	// is the database's count at that instant and not this replica's share
+	// of it.
+	recorder.LeasesHeld.Bind(sampling(ctx, "arca_leases_held", durable.HeldLeases))
+	recorder.SessionsOpen(sampling(ctx, "arca_upload_sessions_open", session.Open))
+
 	// The administration of spec 012, with both of its seams bound. The
 	// restore across owners returns rows the trash of spec 005 and the
 	// deleted workspaces of spec 009 own, and both are in this build, so the

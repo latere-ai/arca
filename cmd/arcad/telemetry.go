@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"time"
 
 	"latere.ai/x/pkg/otel"
 
@@ -81,4 +82,33 @@ func observe(ctx context.Context, cfg config.Config, stderr io.Writer) (*metrics
 	// takes its handle from here, and no package registers a metric of its
 	// own.
 	return metrics.Register(nil), flush
+}
+
+// gaugeBudget is how long a gauge's query may take. It is the readiness
+// probe's budget: a store that cannot count a row in two seconds is one this
+// replica is already failing readiness on, and a scrape must not be the call
+// that waits for it.
+const gaugeBudget = 2 * time.Second
+
+// sampling turns a counting query into the source of a gauge.
+//
+// A gauge is read at scrape time and carries no context of its own, so each
+// read derives one from the process's, bounded by the budget above. A store
+// that will not answer reads as zero with a line saying which gauge went
+// unread: the series says what the installation holds, and a scrape is not
+// the place a store outage is reported from. That is readiness', and the
+// reader of this endpoint sees it there.
+func sampling(parent context.Context, gauge string,
+	count func(context.Context, time.Time) (int64, error),
+) func() float64 {
+	return func() float64 {
+		ctx, cancel := context.WithTimeout(parent, gaugeBudget)
+		defer cancel()
+		n, err := count(ctx, time.Now())
+		if err != nil {
+			slog.WarnContext(ctx, "telemetry: a gauge went unread", "gauge", gauge, "error", err)
+			return 0
+		}
+		return float64(n)
+	}
 }

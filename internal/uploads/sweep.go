@@ -52,7 +52,16 @@ func (s *Service) Sweep(ctx context.Context, q store.Querier, now time.Time, dry
 			errs = append(errs, err)
 			continue
 		}
+		s.metrics.UploadSession(sessionExpired)
 		closed++
 	}
 	return closed, errors.Join(errs...)
+}
+
+// Open answers how many sessions are open at that instant, which is what
+// arca_upload_sessions_open reads at every scrape (spec 018). It changes
+// nothing and holds no state: the number is the database's, because a
+// session opened on one replica is open on all of them.
+func (s *Service) Open(ctx context.Context, now time.Time) (int64, error) {
+	return s.sessions.CountOpen(ctx, s.content.Querier(), now)
 }

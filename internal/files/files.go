@@ -95,6 +95,34 @@ const (
 	EventRestore = "restore"
 )
 
+// Metrics is where the object plane's half of spec 018's table goes. That
+// spec owns the registry and the names; this is the seam it binds, so this
+// package registers nothing and a replica exporting nothing still serves.
+//
+// Only the bytes this server carried are recorded here. A read above the
+// inline size is answered with a presigned URL and the transfer is between
+// the client and the bucket, which is invariant 4 of spec 001: what a
+// redirect hands out is counted as a signed URL and never as bytes out.
+type Metrics interface {
+	// In records bytes accepted into a space, by spec 018's vocabulary.
+	In(kind string, n int64)
+	// Out records bytes served out of a space.
+	Out(kind string, n int64)
+	// LimitRejected records one write refused against the limit the
+	// authorizer's answer carried.
+	LimitRejected()
+}
+
+// uncounted is the seam of a node that bound none, so every call site is one
+// line rather than a branch.
+type uncounted struct{}
+
+func (uncounted) In(string, int64) {}
+
+func (uncounted) Out(string, int64) {}
+
+func (uncounted) LimitRejected() {}
+
 // References answers whether an object id is still named by a row of any
 // table that holds one, which is the statement of spec 004 and the one thing
 // every delete of bytes checks first. It is a seam so the unit tier can
@@ -185,6 +213,9 @@ type Options struct {
 	// Ledger is the usage ledger and the log of spec 010. Nil counts
 	// nothing and records nothing.
 	Ledger Ledger
+	// Metrics is spec 018's seam for the bytes this plane moves and the
+	// writes a limit refused. Nil records nothing.
+	Metrics Metrics
 	// Workspaces is the liveness check of spec 009. Nil answers that every
 	// workspace is live.
 	Workspaces Workspaces
@@ -211,6 +242,7 @@ type Service struct {
 	ledger     Ledger
 	workspaces Workspaces
 	references References
+	metrics    Metrics
 	cfg        config.Config
 	clock      func() time.Time
 }
@@ -222,6 +254,7 @@ func New(o Options) *Service {
 		files: o.Files, versions: o.Versions, stars: o.Stars,
 		decide: o.Decide, ledger: o.Ledger, workspaces: o.Workspaces,
 		references: o.References, cfg: o.Config, clock: o.Now,
+		metrics: o.Metrics,
 	}
 	if s.references == nil {
 		s.references = schemaReferences{}
@@ -240,6 +273,9 @@ func New(o Options) *Service {
 	}
 	if s.workspaces == nil {
 		s.workspaces = everyWorkspaceLive{}
+	}
+	if s.metrics == nil {
+		s.metrics = uncounted{}
 	}
 	return s
 }

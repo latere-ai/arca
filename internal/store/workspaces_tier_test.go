@@ -475,6 +475,32 @@ func TestStoreTheReaperReadsWhatOutlivedItsDeadline(t *testing.T) {
 	if taken, err := NewWorkspaces().TakeLease(t.Context(), q, ws.ID, "sbx_next", time.Now(), future); err != nil || !taken {
 		t.Fatalf("a lapsed lease blocked the next writer: %v, %v", taken, err)
 	}
+
+	// The count arca_leases_held reads is the sweep's complement, at the
+	// same instant: the lease just taken runs until future, so it is held
+	// and the sweep will not take it (spec 018).
+	held, err := NewWorkspaces().CountHeldLeases(t.Context(), q, time.Now())
+	if err != nil || held != 1 {
+		t.Fatalf("CountHeldLeases = %d, %v", held, err)
+	}
+	if swept, err := NewWorkspaces().ExpiredLeases(t.Context(), q, time.Now(), 100); err != nil || len(swept) != 0 {
+		t.Fatalf("a held lease was swept: %+v, %v", swept, err)
+	}
+	// Past its deadline the same row is expired and held by nobody, which is
+	// what makes the two queries a partition rather than two opinions.
+	after := future.Add(time.Hour)
+	if held, err := NewWorkspaces().CountHeldLeases(t.Context(), q, after); err != nil || held != 0 {
+		t.Fatalf("a lapsed lease read as held: %d, %v", held, err)
+	}
+	if swept, err := NewWorkspaces().ExpiredLeases(t.Context(), q, after, 100); err != nil || len(swept) != 1 {
+		t.Fatalf("a lapsed lease was not swept: %+v, %v", swept, err)
+	}
+	if freed, err := NewWorkspaces().ReleaseLease(t.Context(), q, ws.ID, "sbx_next"); err != nil || !freed {
+		t.Fatalf("ReleaseLease = %v, %v", freed, err)
+	}
+	if held, err := NewWorkspaces().CountHeldLeases(t.Context(), q, time.Now()); err != nil || held != 0 {
+		t.Fatalf("a freed lease read as held: %d, %v", held, err)
+	}
 }
 
 // TestStoreASubtreeMovesItsRowsAndItsBookmarksAndReachesNoBucket is

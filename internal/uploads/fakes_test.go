@@ -288,6 +288,23 @@ func (m *memory) DeleteSession(_ context.Context, _ store.Querier, id string) (b
 	return held, nil
 }
 
+// CountOpen is the complement of Expired below, over the same map: what
+// arca_upload_sessions_open reads (spec 018).
+func (m *memory) CountOpen(_ context.Context, _ store.Querier, at time.Time) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.failExpired != nil {
+		return 0, m.failExpired
+	}
+	var open int64
+	for _, s := range m.sessions {
+		if s.ExpiresAt.After(at) {
+			open++
+		}
+	}
+	return open, nil
+}
+
 func (m *memory) Expired(_ context.Context, _ store.Querier, at time.Time, limit int) ([]store.Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

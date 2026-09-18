@@ -56,6 +56,11 @@ type Sessions interface {
 	// the reaper's fourth pass (spec 010). It is the query this spec
 	// exposes; the sweep that runs it is that spec's.
 	Expired(ctx context.Context, q Querier, at time.Time, limit int) ([]Session, error)
+	// CountOpen answers how many sessions are open at that instant: started,
+	// not yet completed or aborted, and not yet past their deadline. It is
+	// the exact complement of Expired, and what arca_upload_sessions_open
+	// reads (spec 018).
+	CountOpen(ctx context.Context, q Querier, at time.Time) (int64, error)
 }
 
 // sessions is the query set over Postgres.
@@ -145,6 +150,21 @@ func (sessions) Expired(ctx context.Context, q Querier, at time.Time, limit int)
 		return nil, fmt.Errorf("store: list the expired uploads: %w", err)
 	}
 	return page, nil
+}
+
+// CountOpen counts the sessions still open at that instant.
+//
+// A completed or aborted session has no row: both paths delete it inside the
+// transaction that finishes them. What is left is a session still running or
+// one the reaper has not swept yet, and the deadline tells the two apart.
+func (sessions) CountOpen(ctx context.Context, q Querier, at time.Time) (int64, error) {
+	var n int64
+	err := q.QueryRow(ctx, `
+		SELECT COUNT(*) FROM upload_sessions WHERE expires_at > $1`, at).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("store: count the open uploads: %w", err)
+	}
+	return n, nil
 }
 
 // notAnIdentifier reports SQLSTATE 22P02, which is what a path parameter

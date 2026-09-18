@@ -80,6 +80,10 @@ func (s *Service) complete(w http.ResponseWriter, r *http.Request) {
 		// database. If the object is there the completion resumes from the
 		// row write; if it is not, the parts really were wrong.
 		if _, head := s.content.Bucket().Head(ctx, key); head != nil {
+			// The store does not say which part it could not find, so the
+			// completion is counted as one missing part rather than as a
+			// number this package would be inventing (spec 018).
+			s.metrics.UploadPart(partMissing)
 			slog.ErrorContext(ctx, "uploads: the parts did not assemble", "error", err)
 			api.WriteError(w, r, api.Refuse(api.CodeBadRequest,
 				"the parts did not assemble; check every part's number and the label the store answered for it"))
@@ -123,6 +127,15 @@ func (s *Service) complete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.content.Settle(ctx, out)
+
+	// The row is written, so the parts are an object in the space. The bytes
+	// are the head's and not the declaration's, which is the same number the
+	// charge above was corrected to (spec 018).
+	s.metrics.UploadSession(sessionCompleted)
+	for range assembled {
+		s.metrics.UploadPart(partCompleted)
+	}
+	s.metrics.In("part", out.File.SizeBytes)
 
 	s.content.Ledger().Append(ctx, s.content.Querier(), files.Event{
 		Owner: held.Owner, Path: held.Path, Action: files.EventPut, Actor: files.Caller(ctx),

@@ -23,6 +23,7 @@ import (
 	"latere.ai/x/arca/internal/config"
 	"latere.ai/x/arca/internal/events"
 	"latere.ai/x/arca/internal/files"
+	"latere.ai/x/arca/internal/metrics"
 	"latere.ai/x/arca/internal/store"
 )
 
@@ -33,11 +34,14 @@ import (
 
 // harness is one mounted surface with the stubs behind it.
 type harness struct {
-	mux      *http.ServeMux
-	store    *memory
-	objects  *blob.Memory
-	bucket   *blob.Counting
-	ledger   *counted
+	mux     *http.ServeMux
+	store   *memory
+	objects *blob.Memory
+	bucket  *blob.Counting
+	ledger  *counted
+	// recorder is spec 018's one registry, on a set of its own so a case
+	// reads the counters this surface moved and no other's.
+	recorder *metrics.Set
 	issuer   *issuertest.Server
 	endpoint *stub.Server
 	owner    string
@@ -67,11 +71,12 @@ func newHarness(t *testing.T, opts ...func(*Options)) *harness {
 	objects := blob.NewMemory()
 	h := &harness{
 		store: m, objects: objects, bucket: blob.NewCounting(objects),
-		ledger: &counted{memory: m}, issuer: iss, endpoint: endpoint,
+		ledger: &counted{memory: m}, recorder: metrics.Register(nil),
+		issuer: iss, endpoint: endpoint,
 		owner: iss.URL() + "|9ab3", clock: time.Now(),
 	}
 	o := Options{
-		files.Options{
+		Options: files.Options{
 			DB: m, Bucket: h.bucket,
 			Files: filesOf{m}, Versions: versionsOf{m}, Stars: starsOf{m}, References: m,
 			Decide: id.Authorizer, Ledger: h.ledger,
@@ -79,9 +84,11 @@ func newHarness(t *testing.T, opts ...func(*Options)) *harness {
 				BucketPrefix: "arca/", InlineBytes: 16 << 20, MaxUploadBytes: 5 << 30,
 				TrashRetention: 720 * time.Hour,
 			},
-			Now: func() time.Time { return h.clock },
+			Now:     func() time.Time { return h.clock },
+			Metrics: h.recorder,
 		},
-		sessionsOf{m},
+		Sessions: sessionsOf{m},
+		Metrics:  h.recorder,
 	}
 	for _, opt := range opts {
 		opt(&o)

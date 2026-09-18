@@ -35,6 +35,7 @@ import (
 	"latere.ai/x/arca/internal/config"
 	"latere.ai/x/arca/internal/events"
 	"latere.ai/x/arca/internal/files"
+	"latere.ai/x/arca/internal/metrics"
 	"latere.ai/x/arca/internal/store"
 )
 
@@ -74,19 +75,21 @@ func tier(t *testing.T) (*harness, *tierStores) {
 		t.Fatalf("the node would not start: %v", err)
 	}
 	h := &harness{
-		bucket: blob.NewCounting(bucket), issuer: iss, endpoint: endpointStub,
+		bucket: blob.NewCounting(bucket), recorder: metrics.Register(nil),
+		issuer: iss, endpoint: endpointStub,
 		owner: iss.URL() + "|9ab3", clock: time.Now(),
 	}
 	o := Options{
-		files.Options{
+		Options: files.Options{
 			DB: db, Bucket: h.bucket, Decide: id.Authorizer,
 			Config: config.Config{
 				BucketPrefix: prefix, InlineBytes: 16 << 20, MaxUploadBytes: 5 << 30,
 				TrashRetention: 720 * time.Hour,
 			},
-			Now: func() time.Time { return h.clock },
+			Now:     func() time.Time { return h.clock },
+			Metrics: h.recorder,
 		},
-		nil,
+		Metrics: h.recorder,
 	}
 	surface, err := api.New(api.Options{
 		Verifier: id.Verifier, Authorizer: id.Authorizer,

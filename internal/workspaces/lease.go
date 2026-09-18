@@ -277,6 +277,16 @@ func (s *Service) ExpireLeases(ctx context.Context, now time.Time) (int, error) 
 	return ended, nil
 }
 
+// HeldLeases answers how many writer leases are running at that instant,
+// which is what arca_leases_held reads at every scrape (spec 018).
+//
+// It is the sweep above read the other way and at the same instant: a lease
+// is held or it has lapsed, never both. It changes nothing and holds no
+// state, because a lease taken on one replica is held on all of them.
+func (s *Service) HeldLeases(ctx context.Context, now time.Time) (int64, error) {
+	return s.workspaces.CountHeldLeases(ctx, s.db.Querier(), now)
+}
+
 // expire ends one attachment whose time ran out, with the lease it held and
 // the row in the log, in one transaction.
 func (s *Service) expire(ctx context.Context, a store.Attachment) (bool, error) {

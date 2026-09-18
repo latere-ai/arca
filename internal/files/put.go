@@ -92,6 +92,11 @@ func (s *Service) put(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Settle(ctx, out)
 
+	// The bytes are in the space now, and not before: a write the commit
+	// refused left the bucket holding a key nothing points at, which is a
+	// finding for the reaper and not an arrival (spec 018).
+	s.metrics.In("inline", out.File.SizeBytes)
+
 	s.ledger.Append(ctx, s.db.Querier(), Event{
 		Owner: t.Owner, Path: t.Path, Action: EventPut, Actor: Caller(ctx),
 		Detail: map[string]any{"size": out.File.SizeBytes},

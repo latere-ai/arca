@@ -158,6 +158,12 @@ type Workspaces interface {
 	// ExpiredLeases answers the leases whose deadline had passed at now,
 	// which is what the reaper of spec 010 sweeps. It changes nothing.
 	ExpiredLeases(ctx context.Context, q Querier, now time.Time, limit int) ([]Workspace, error)
+	// CountHeldLeases answers how many writer leases are held at now, which
+	// is the exact complement of ExpiredLeases: a lease whose deadline has
+	// not passed. It is what arca_leases_held reads (spec 018), so a
+	// platform sees the leases an installation is holding rather than only
+	// the rate at which the reaper ends them.
+	CountHeldLeases(ctx context.Context, q Querier, now time.Time) (int64, error)
 	// Tombstones answers the workspaces soft deleted before the cutoff,
 	// which is what pass 6 of spec 010 purges. It changes nothing.
 	Tombstones(ctx context.Context, q Querier, before time.Time, limit int) ([]Workspace, error)
@@ -430,6 +436,23 @@ func (workspaces) ExpiredLeases(ctx context.Context, q Querier, now time.Time, l
 		return nil, fmt.Errorf("store: read the expired leases: %w", err)
 	}
 	return out, nil
+}
+
+// CountHeldLeases counts the leases still running at now.
+//
+// The predicate is the complement of the sweep's above, so a lease is either
+// held or expired and never both: a row counted here is a row that sweep
+// will not take, at the same instant.
+func (workspaces) CountHeldLeases(ctx context.Context, q Querier, now time.Time) (int64, error) {
+	var n int64
+	err := q.QueryRow(ctx, `
+		SELECT COUNT(*)
+		  FROM workspaces
+		 WHERE writer_holder IS NOT NULL AND writer_expires_at >= $1`, now).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("store: count the leases held: %w", err)
+	}
+	return n, nil
 }
 
 // attachmentColumns is the column list every read of an attachment shares.

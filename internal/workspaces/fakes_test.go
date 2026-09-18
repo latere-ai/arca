@@ -389,6 +389,24 @@ func (m *memory) StampSync(_ context.Context, q store.Querier, id string) (time.
 	return at, nil
 }
 
+// CountHeldLeases is the complement of ExpiredLeases below, over the same
+// map: what arca_leases_held reads (spec 018).
+func (m *memory) CountHeldLeases(_ context.Context, q store.Querier, now time.Time) (int64, error) {
+	m.use(q)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.refuse("CountHeldLeases"); err != nil {
+		return 0, err
+	}
+	var held int64
+	for _, w := range m.workspaces {
+		if w.WriterHolder != nil && w.WriterExpiresAt != nil && !w.WriterExpiresAt.Before(now) {
+			held++
+		}
+	}
+	return held, nil
+}
+
 func (m *memory) ExpiredLeases(_ context.Context, q store.Querier, now time.Time, limit int) ([]store.Workspace, error) {
 	m.use(q)
 	m.mu.Lock()

@@ -22,6 +22,7 @@ import (
 	"latere.ai/x/arca/internal/blob"
 	"latere.ai/x/arca/internal/config"
 	"latere.ai/x/arca/internal/events"
+	"latere.ai/x/arca/internal/metrics"
 	"latere.ai/x/arca/internal/store"
 	"latere.ai/x/arca/object"
 )
@@ -46,6 +47,9 @@ type harness struct {
 	issuer   *issuertest.Server
 	endpoint *stub.Server
 	asked    *recorder
+	// counters is spec 018's one registry, on a set of its own so a case
+	// reads the series this surface moved and no other's.
+	counters *metrics.Set
 	owner    string
 	clock    time.Time
 	// service is the one the routes are bound to, so a case reaches a
@@ -85,15 +89,16 @@ func newHarness(t *testing.T, opts ...func(*Options)) *harness {
 	h := &harness{
 		store: m, objects: objects, bucket: blob.NewCounting(objects),
 		ledger: &counted{memory: m}, issuer: iss, endpoint: endpoint,
-		asked: &recorder{inner: id.Authorizer},
+		asked: &recorder{inner: id.Authorizer}, counters: metrics.Register(nil),
 		owner: iss.URL() + "|9ab3", clock: time.Now(),
 	}
 	o := Options{
 		DB: m, Bucket: h.bucket,
 		Files: filesOf{m}, Versions: versionsOf{m}, Stars: starsOf{m}, References: m,
 		Decide: h.asked, Ledger: h.ledger,
-		Config: configOf(inlineBytes, 1<<20),
-		Now:    func() time.Time { return h.clock },
+		Config:  configOf(inlineBytes, 1<<20),
+		Now:     func() time.Time { return h.clock },
+		Metrics: h.counters,
 	}
 	for _, opt := range opts {
 		opt(&o)

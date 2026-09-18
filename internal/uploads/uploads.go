@@ -52,8 +52,55 @@ const (
 type Service struct {
 	content  *files.Service
 	sessions store.Sessions
+	metrics  Metrics
 	now      func() time.Time
 }
+
+// Metrics is where the session API's half of spec 018's table goes. That
+// spec owns the registry and the names; this is the seam it binds, so this
+// package registers nothing.
+//
+// The bytes are the assembled object's and never a transfer this process
+// saw: a part goes from the client to the bucket against a presigned URL,
+// which is invariant 4 of spec 001, so what is counted in is what the
+// completion wrote a row for.
+type Metrics interface {
+	// In records bytes accepted into a space, by spec 018's vocabulary.
+	In(kind string, n int64)
+	// UploadSession records one session by what became of it.
+	UploadSession(outcome string)
+	// UploadPart records one part by what became of it.
+	UploadPart(outcome string)
+	// LimitRejected records one session refused against the limit the
+	// authorizer's answer carried.
+	LimitRejected()
+}
+
+// uncounted is the seam of a node that bound none, so every call site is one
+// line rather than a branch.
+type uncounted struct{}
+
+func (uncounted) In(string, int64) {}
+
+func (uncounted) UploadSession(string) {}
+
+func (uncounted) UploadPart(string) {}
+
+func (uncounted) LimitRejected() {}
+
+// The four values of arca_upload_sessions_total's outcome and the three of
+// arca_upload_parts_total's, spelled here so a call site and its series
+// cannot drift (spec 018).
+const (
+	sessionCreated   = "created"
+	sessionCompleted = "completed"
+	sessionAborted   = "aborted"
+	sessionExpired   = "expired"
+
+	partPresigned = "presigned"
+	partCompleted = "completed"
+	partMissing   = "missing"
+)
 
 // Options adds the session query set to what spec 005's package takes, so
 // the node builds both from one set of dependencies.
@@ -62,13 +109,21 @@ type Options struct {
 	// Sessions is the query set of spec 007. Nil takes the one over
 	// Postgres, which is every caller but a test.
 	Sessions store.Sessions
+	// Metrics is spec 018's seam for what a session becomes. It shadows the
+	// field of the embedded [files.Options] deliberately: the object plane
+	// records bytes and refusals, this plane records sessions and parts as
+	// well, and the node binds both to the one registry.
+	Metrics Metrics
 }
 
 // New builds the session surface.
 func New(o Options) *Service {
-	s := &Service{content: files.New(o.Options), sessions: o.Sessions, now: o.Now}
+	s := &Service{content: files.New(o.Options), sessions: o.Sessions, metrics: o.Metrics, now: o.Now}
 	if s.sessions == nil {
 		s.sessions = store.NewSessions()
+	}
+	if s.metrics == nil {
+		s.metrics = uncounted{}
 	}
 	if s.now == nil {
 		s.now = time.Now

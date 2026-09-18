@@ -52,6 +52,11 @@ func TestStoreAnOpenSessionKeepsItsObjectReferencedAndExpiresOnItsColumn(t *test
 	if expired, err := uploads.Expired(t.Context(), db.Querier(), time.Now(), 10); err != nil || len(expired) != 0 {
 		t.Fatalf("a live session is expired = %v, %v", expired, err)
 	}
+	// The count arca_upload_sessions_open reads is that query's complement:
+	// a session is open or expired and never both (spec 018).
+	if n, err := uploads.CountOpen(t.Context(), db.Querier(), time.Now()); err != nil || n != 1 {
+		t.Fatalf("CountOpen = %d, %v", n, err)
+	}
 	if _, err := db.Querier().Exec(t.Context(),
 		`UPDATE upload_sessions SET expires_at = now() - interval '1 hour' WHERE id = $1`, written.ID); err != nil {
 		t.Fatal(err)
@@ -59,6 +64,9 @@ func TestStoreAnOpenSessionKeepsItsObjectReferencedAndExpiresOnItsColumn(t *test
 	expired, err := uploads.Expired(t.Context(), db.Querier(), time.Now(), 10)
 	if err != nil || len(expired) != 1 || expired[0].ID != written.ID {
 		t.Fatalf("Expired = %v, %v", expired, err)
+	}
+	if n, err := uploads.CountOpen(t.Context(), db.Querier(), time.Now()); err != nil || n != 0 {
+		t.Fatalf("a session past its deadline read as open: %d, %v", n, err)
 	}
 
 	if ok, err := uploads.Delete(t.Context(), db.Querier(), written.ID); err != nil || !ok {

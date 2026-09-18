@@ -9,6 +9,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"latere.ai/x/arca/internal/config"
 	"latere.ai/x/arca/internal/metrics"
@@ -127,5 +128,65 @@ func TestTheReaperProcessBootstrapsToo(t *testing.T) {
 	}
 	if handed != "http://collector.invalid:4318" {
 		t.Errorf("the reap process handed over %q", handed)
+	}
+}
+
+// TestAGaugeReadsTheStoreAndNeverHangs: the two gauges of spec 018 that no
+// process keeps a number for are read at scrape time, with no context of
+// their own. Each read gets a bounded one, and a store that will not answer
+// reads as zero rather than as a scrape that waits for it.
+func TestAGaugeReadsTheStoreAndNeverHangs(t *testing.T) {
+	counted := sampling(t.Context(), "arca_leases_held", func(context.Context, time.Time) (int64, error) {
+		return 7, nil
+	})
+	if got := counted(); got != 7 {
+		t.Errorf("a gauge over a store holding seven read %v", got)
+	}
+	// The query is given a deadline of its own, so a store that never
+	// answers ends the read rather than the scrape.
+	var budget time.Duration
+	deadlined := sampling(t.Context(), "arca_upload_sessions_open", func(ctx context.Context, _ time.Time) (int64, error) {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Error("a gauge was read on a context with no deadline")
+		}
+		budget = time.Until(deadline)
+		return 1, nil
+	})
+	if got := deadlined(); got != 1 {
+		t.Errorf("a gauge read %v", got)
+	}
+	if budget <= 0 || budget > gaugeBudget {
+		t.Errorf("the gauge's budget is %s, and the spec's is %s", budget, gaugeBudget)
+	}
+
+	unread := sampling(t.Context(), "arca_leases_held", func(context.Context, time.Time) (int64, error) {
+		return 0, errors.New("the database is unreachable")
+	})
+	if got := unread(); got != 0 {
+		t.Errorf("a gauge whose query failed read %v", got)
+	}
+}
+
+// TestAReplicaWithNoDatabaseStillServesBothStoreGauges: the two gauges whose
+// source is a query are on the endpoint whatever the store answers. This
+// replica's database is unreachable, so each reads zero with a line naming
+// it, and the series exists for a dashboard from the first scrape rather than
+// from the first successful query.
+func TestAReplicaWithNoDatabaseStillServesBothStoreGauges(t *testing.T) {
+	_, internalURL, _, stop := startServe(t)
+	defer func() {
+		if code := stop(); code != 0 {
+			t.Errorf("exit %d", code)
+		}
+	}()
+	code, body := get(t, internalURL+"/metrics")
+	if code != 200 {
+		t.Fatalf("GET /metrics = %d", code)
+	}
+	for _, want := range []string{"arca_leases_held 0", "arca_upload_sessions_open 0"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the exposition does not carry %q", want)
+		}
 	}
 }

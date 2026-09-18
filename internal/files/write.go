@@ -191,6 +191,9 @@ func (s *Service) charge(ctx context.Context, q store.Querier, owner string, del
 	}
 	var over *OverLimit
 	if errors.As(err, &over) {
+		// Arca stores no limit, so the count of refusals is the only thing
+		// about one it can publish (spec 018).
+		s.metrics.LimitRejected()
 		return 0, api.Refuse(api.CodeQuotaExceeded, "%s", over.Error())
 	}
 	return 0, fault(ctx, "record what the space holds", err)

@@ -6,6 +6,7 @@ package workspaces
 import (
 	"net/http"
 	"testing"
+	"time"
 )
 
 // counted is spec 018's seam as a test reads it: the bytes each side of the
@@ -96,4 +97,40 @@ func TestAServiceWithNoSeamMovesBytesAnyway(t *testing.T) {
 	}
 	h.service.metrics.In("sync", 1)
 	h.service.metrics.Out("materialize", 1)
+}
+
+// TestTheLeasesHeldAreCountedAtTheInstantTheyAreAsked is spec 018's
+// arca_leases_held. The number is the database's and not this replica's: a
+// lease taken on one replica is held on all of them, and the sweep of spec
+// 010 reports what it ended rather than what is held.
+func TestTheLeasesHeldAreCountedAtTheInstantTheyAreAsked(t *testing.T) {
+	h := newHarness(t)
+	now := h.at()
+	if held, err := h.service.HeldLeases(t.Context(), now); err != nil || held != 0 {
+		t.Fatalf("HeldLeases with nothing attached = %d, %v", held, err)
+	}
+
+	ws := h.create(t, "build")
+	a := h.attach(t, ws, "sbx_a", "rw")
+	if held, err := h.service.HeldLeases(t.Context(), now); err != nil || held != 1 {
+		t.Fatalf("HeldLeases with one writer = %d, %v", held, err)
+	}
+	// A reader takes no lease, so the count does not move.
+	second := h.create(t, "ship")
+	h.attach(t, second, "sbx_b", "ro")
+	if held, err := h.service.HeldLeases(t.Context(), now); err != nil || held != 1 {
+		t.Fatalf("a reader was counted as a lease: %d, %v", held, err)
+	}
+	// Past its deadline the lease is the sweep's and is held by nobody,
+	// which is what makes the gauge and pass 3 read one partition.
+	if held, err := h.service.HeldLeases(t.Context(), now.Add(DefaultTTL+time.Hour)); err != nil || held != 0 {
+		t.Fatalf("a lapsed lease read as held: %d, %v", held, err)
+	}
+
+	if got := h.do(t, http.MethodDelete, "/v1/workspaces/"+ws.ID+"/attach/"+a.ID, nil); got.code != http.StatusNoContent {
+		t.Fatalf("the release = %d: %s", got.code, got.body)
+	}
+	if held, err := h.service.HeldLeases(t.Context(), now); err != nil || held != 0 {
+		t.Fatalf("a released lease read as held: %d, %v", held, err)
+	}
 }
