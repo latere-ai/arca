@@ -1,6 +1,6 @@
 ---
 title: "Conformance suite: the contract as an importable test package against any base URL"
-status: drafted
+status: testing
 track: core
 depends_on:
   - specs/001-architecture.md
@@ -9,7 +9,7 @@ depends_on:
 affects: [test/conformance/, internal/auth/, internal/config/, .github/workflows/verify.yml, .github/workflows/release.yml, docs/]
 effort: large
 created: 2026-09-18
-updated: 2026-09-18
+updated: 2026-09-19
 author: changkun
 ---
 
@@ -39,7 +39,109 @@ installation is not a case here.
 
 ## Current state
 
-Not built.
+Built and in the tree on 2026-09-19. `test/conformance` holds the suite,
+`contract_test.go` under the `tiers` tag drives it, `make
+test-conformance` runs it against the compose stack, and the
+`conformance` job of [[016-release-and-installation]] runs it against
+the published image on the kind stack.
+
+Against this build, which answers twenty-four of [[013-api]]'s
+forty-one routes, a run is **thirty-two cases passed, seventeen skipped
+with a reason, and one failed**: the pending group, which is what it is
+for.
+
+| Group | On this build | Waiting on |
+|---|---|---|
+| identity | passes, 4 cases | the expired token and the wrong audience are `Unverified`, below |
+| authorizer | passes, 3 cases | |
+| paths | passes, 1 case | the file routes add nothing it cannot already see through `POST /v1/shares` |
+| shares | passes, 3 cases | |
+| links | passes, 2 cases | `008/LinkFile` is pending, [[005-files]] |
+| workspaces | passes, 6 cases | |
+| events | passes, 4 cases | |
+| usage | passes, 2 cases | the byte limit half is `Unverified`, [[005-files]] |
+| errors | passes, 7 cases | five codes are reached by the groups below, [[005-files]], [[007-uploads]] |
+| files, bytes, versions, trash, stars, conditional writes | pending, 9 cases | [[005-files]], twelve routes |
+| uploads | pending, 4 cases | [[007-uploads]], three routes |
+| administration | skips, 3 cases | `Options.Admin` is unset on this target; the two routes wait on [[012-administration]] |
+| pending | **fails**, 17 routes outstanding | [[005-files]] 12, [[007-uploads]] 3, [[012-administration]] 2 |
+
+A pending case is not hidden. The pending group is one case that fails
+with every outstanding route and the spec that owns it, and each case
+that waits on one reports the routes by name. A run against a partial
+build is therefore red, and it goes green when the last route lands
+with no edit here.
+
+Criteria 1, 2, 3, 4, 5, 6 and 7 have passing tests. Criterion 8's import
+graph half is proved by `TestTheSuiteReachesNoHelperOfThisTree`; its CI
+job is not built, and is a suggestion rather than a claim. Criterion 9
+waits on a release that carries a `test/conformance` to check out, which
+is the release after this spec lands. The spec stays at `testing` until
+both close.
+
+What the implementation decided, where this spec was silent or where the
+tree made another reading better:
+
+- The input is `Options`, not `Config`, which is the word the tree
+  already uses for what a package is built from (`api.Options`). The
+  field set is this spec's unchanged.
+- `Report` gains `SkippedGroups`, so a group that skipped whole is named
+  once rather than once per case, and `Pending`, which is the routes of
+  [[013-api]] the target does not answer.
+- The build tag is `tiers`, the one every tier of this repository
+  carries ([[014-test-stubs-and-tiers]]), rather than the `e2e` this
+  spec wrote. That tag was settled before this spec was built, and a
+  second one would be a second way to say the same thing. The files that
+  carry `Run` are untagged, so a consumer imports the suite and none of
+  the driver.
+- A route [[013-api]] names and the target does not answer puts every
+  case that drives it in the pending group, above. This spec wrote the
+  optional-route rule for a `501`; [[013-api]] marks no route optional,
+  and a build part way through [[019-migration-from-drive]] is the case
+  that actually arises, so the suite reads the served document and
+  reports the difference.
+- The forty-one routes are declared in the suite rather than read from
+  the server's registrations, and the error table is a copy held equal
+  to [[013-api]] by `TestErrorTableMatchesTheSpec`. A suite that read
+  the build's own list would drop a route with it.
+- `TestEveryCriterionHasACase` runs in the direction that catches a lie:
+  every marker in the deck has a case. The reverse is not required. A
+  case drives a route of [[013-api]]'s table, which criterion 2 holds
+  whole, and a marker per case would put forty-one rows into the
+  acceptance tables of specs this one does not own.
+- `TestSuiteCatchesADrift` runs the suite in a process of its own and
+  reads its report. A case that fails fails the test it was given, so a
+  test that wants a failure cannot also be the test that takes it. It
+  compares a set of case names rather than one: a drift is applied where
+  an answer reaches the wire, and every case that reads that answer sees
+  it.
+- The three drifts are applied at the one place that owns each answer:
+  `paths` at the frame's plane check, which `internal/shares` now asks
+  instead of reading [[001-architecture]]'s two prefixes itself; `codes`
+  at `WriteError`; `etag` at `SetETag`. `etag` is therefore already
+  right for [[005-files]] and is not observable until those routes land,
+  which the test reports by name rather than passing quietly.
+  `ARCA_TEST_DRIFT` is read in the ordinary build rather than refused
+  outside a test build, which is what this spec's own argument asks for:
+  every value refuses something or answers with the wrong shape, none
+  grants an authority, and `arcad` says so on the line an operator reads
+  at start-up.
+- Two rows of the identity group are recorded in `Report.Unverified`
+  rather than asserted: a token past its expiry and one addressed to
+  another audience are signatures a suite with a mint function and no
+  signing key cannot produce. Both are proved in process by the family's
+  audience suite, which is already in the tree.
+- The family audience suite is `TestServiceConformance` in
+  `internal/auth`, landed with [[006-identity]] rather than here, which
+  is where this spec placed it. Criterion 7 is that test.
+- `test/conformance` is exempt from the coverage floor with the reason
+  in `.lateregate.yaml`: a case is a request against a running
+  installation, so its statements run in this tier and not in the unit
+  run. The unit run measures the machinery, and the tests beside it hold
+  that to the contract.
+- `make test-conformance` is not part of `make check-all`. The pending
+  group fails until the outstanding routes land, and a target that turns
+  the default bar red on another spec's work is not one.
 
 ## Design
 
