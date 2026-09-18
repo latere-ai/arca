@@ -51,9 +51,9 @@ validated spec is dispatched when every spec in its `depends_on` is at
 | [002](002-repository-scaffold.md) | Repository scaffold: module, binary, configuration, quality gate, image, workflow | complete |
 | [003](003-object-store.md) | Object store: the bucket contract, keys, integrity, presigned reads, multipart | testing |
 | [004](004-metadata-store.md) | Metadata store: the schema, migrations, transactions, the store interface | testing |
-| [005](005-files.md) | Files: put, get, list, move, delete; versions, trash, stars | drafted |
+| [005](005-files.md) | Files: put, get, list, move, delete; versions, trash, stars | testing |
 | [006](006-identity.md) | Identity: verification, the subject, the action vocabulary, the authorizer question, the owner policy | testing |
-| [007](007-uploads.md) | Uploads: sessions, size classes, direct-to-bucket parts, integrity | drafted |
+| [007](007-uploads.md) | Uploads: sessions, size classes, direct-to-bucket parts, integrity | testing |
 | [008](008-shares-and-links.md) | Shares and links: grants and the permission ladder, public links, what a caller sees shared with them | drafted |
 | [009](009-workspaces.md) | Workspaces: durable subtrees, the writer lease, materialize and sync | drafted |
 | [010](010-events-and-reaper.md) | Events and the reaper: the ledger, the log, the reconciliation of the two stores | drafted |

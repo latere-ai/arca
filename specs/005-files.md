@@ -1,12 +1,12 @@
 ---
 title: "Files: put, get, list, move, delete; versions, trash, stars"
-status: drafted
+status: testing
 track: core
 depends_on:
   - specs/001-architecture.md
   - specs/003-object-store.md
   - specs/004-metadata-store.md
-affects: [internal/files/, object/, space/, internal/api/, internal/store/migrations/, docs/]
+affects: [internal/files/, internal/api/, internal/store/, internal/config/, cmd/arcad/, test/e2e/]
 effort: large
 created: 2026-09-18
 updated: 2026-09-18
@@ -27,6 +27,103 @@ move is one `UPDATE` and an overwrite leaves the previous bytes
 addressable at their own key. Bytes stay off the hot path (invariant 4),
 so a read of a large object is a redirect and a write of one is not this
 spec's at all, it is [[007-uploads]]'s.
+
+## Current state
+
+Built and in the tree on 2026-09-18, phase 3 of [[019-migration-from-drive]].
+`internal/files` holds the twelve handlers, the one write both this spec and
+[[007-uploads]] commit through, and the path rules; `internal/store` gains
+the write arms, the trash, the versions and the stars over the tables
+[[004-metadata-store]] created; `internal/config` reads
+`ARCA_INLINE_BYTES`, `ARCA_MAX_UPLOAD_BYTES` and `ARCA_TRASH_RETENTION`;
+`internal/api` takes the rows of the specs that own their behaviour; and
+`arcad` mounts them. The commits are `d9622c5` (the queries), `3ba4536`
+(the variables), `aebc79e` (the route seam and the JSON decoder), `8e106f0`
+(the handlers), `0cb8d7e` (the wiring and the document), `2742b24` (the
+store and e2e tiers) and `eee80ec` (the detail a refusal carries). The gate
+passes at each of them, with `internal/files` at 91% and every other package
+above 90%.
+
+This spec writes no migration. `0001_files.up.sql` already creates
+`subjects`, `files`, `file_versions` and `stars`, which is every table this
+spec owns, and [[004-metadata-store]]'s ownership table says so.
+
+Criteria 1, 2, 3, 5, 6, 7, 8's bucket half, 9, 10, 11, 12, 13 and 14 have
+passing tests. Criterion 4 is proved at the store tier for the two answers
+and for the loser's bytes. Criterion 15 is proved at the unit tier against a
+recording seam, one case per handler, and closes for the whole surface with
+the conformance rows of [[017-conformance-suite]]. The one half still open
+is criterion 8's share: the grants table arrives with
+[[008-shares-and-links]], so a move carries versions and stars today and
+gains its fourth statement there.
+
+What the implementation decided, where this spec was silent or where the
+tree made another reading better:
+
+- The usage admission is the charge itself, applied inside the write's own
+  transaction, which is where [[010-events-and-reaper]] puts it and the only
+  place it is atomic with the row. This spec orders it before the bucket
+  write; a pre-read would compare a number a concurrent write could
+  invalidate, and a put's body is bounded by `ARCA_INLINE_BYTES` either way.
+  A refused charge rolls back and the handler deletes the key it just wrote,
+  so nothing is left for the reaper.
+- Every write holds its row with `SELECT ... FOR UPDATE` before it captures
+  a version. The spec asks for the precondition repeated in SQL, and it
+  still is, in the create-only and compare-and-swap arms; the lock is what
+  stops two writers of one path from reading one version number, which the
+  service Arca replaces left to the unique constraint and a rollback.
+- A refusal is `forbidden` on the caller's own space and `not_found` on any
+  other. One question cannot tell "may not see the space" from "may not do
+  this here", and the space is the one thing the handler knows without
+  asking twice. That is this spec's sentence about answering a refusal on a
+  space the caller cannot see as a missing object, read as a rule.
+- A `not_found` refusal carries the developer detail an absence carries and
+  never the authorizer's reason. The status, the code and the user sentence
+  were one answer from the first handler; the detail was not, and a field a
+  caller can read is a field a caller can probe. `Service.Refused` writes
+  the sentence the same handler writes when the path is not there. Commit
+  `eee80ec` carries the change and the two cases that fail without it.
+- A `list` question on the trash, on the star listing and on a purge that
+  names no path carries the space and no `path`. [[006-identity]] says a
+  `list` carries the prefix it lists, and these three list no one prefix:
+  the trash and the stars cross the planes of a space, and an emptied trash
+  is the whole of it. A purge that names `?path=` does carry it. The
+  recording rows of [[017-conformance-suite]] confirm the reading or correct
+  it.
+- A read of a public object redirects at any size, which is the order of
+  this spec's own table, and with `ARCA_PUBLIC_CDN_URL` unset it is the
+  ordinary presigned redirect that [[003-object-store]] names as the
+  fallback.
+- A listing may name a plane root and a path may not: a listing of a whole
+  plane is a question a caller asks, and an object at a plane root is not a
+  path. `ValidatePrefix` is that one row removed from `ValidatePath`.
+- A path holding a control character is `invalid_path`. The rules here name
+  the segments; a NUL reaching a `TEXT` column is a fault rather than a
+  verdict, so the refusal is in the rule.
+- The trash listing is newest first, as this spec says, so its cursor is the
+  pair the order is by, base64 of the deletion time and the path. A cursor
+  this server did not write is `invalid_field`. Each entry carries
+  `purges_at`, which is its deletion time plus `ARCA_TRASH_RETENTION`, so a
+  caller reads how long it has.
+- Emptying a trash answers `200` with the number of entries purged, which is
+  what the service Arca replaces answered and the one fact a caller wants.
+  It takes entries past the window too: those are the reaper's either way,
+  and a caller asking for an empty trash is not asking for the subset
+  retention still offers.
+- `GET /v1/files/materialize` pages through the subtree internally rather
+  than handing a caller a cursor, because a manifest is a snapshot a client
+  mounts and half of one is not useful. A very large space narrows with
+  `?prefix=`.
+- A database or a bucket that answers nothing is `503`
+  `storage_unavailable` and never `500`, so a caller retries. The one `500`
+  a handler writes is the row whose bytes the bucket does not hold, which is
+  criterion 14.
+- The ledger and the log of [[010-events-and-reaper]] are one interface of
+  `internal/files` with a no-op default, `Charge`, `Release` and `Append`,
+  and the workspace liveness of [[009-workspaces]] is another. The node
+  binds them when those specs land; until then nothing is counted, nothing
+  is recorded, and every workspace is live, which is the honest answer from
+  a build that holds no workspace.
 
 ## Design
 
