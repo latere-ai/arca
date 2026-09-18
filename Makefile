@@ -136,7 +136,7 @@ test-e2e: up build build-stubs
 test-conformance: up build build-stubs
 	$(TIER_ENV) ARCA_BINARY="$(CURDIR)/$(OUT_DIR)/$(SERVICE)" \
 		$(GO) test -tags=tiers -count=1 -timeout 30m -v \
-		-run '^(TestContract|TestSuiteCatchesADrift|TestTheSuiteReachesNoHelperOfThisTree)$$' \
+		-run '^(TestContract|TestConcurrentRuns|TestSuiteCatchesADrift|TestTheSuiteReachesNoHelperOfThisTree)$$' \
 		./test/conformance/...
 
 # The whole bar plus both service tiers, which is what to run before

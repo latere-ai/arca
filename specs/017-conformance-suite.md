@@ -46,9 +46,17 @@ test-conformance` runs it against the compose stack, and the
 the published image on the kind stack.
 
 Against this build, which answers twenty-four of [[013-api]]'s
-forty-one routes, a run is **thirty-two cases passed, seventeen skipped
-with a reason, and one failed**: the pending group, which is what it is
-for.
+forty-one routes, a run is **thirty-three cases passed, seventeen
+skipped with a reason, and one failed**: the pending group, which is
+what it is for.
+
+Twenty-six of the thirty rows of [[013-api]]'s error table are provoked
+by a case, which declares the codes it makes the target answer, and the
+remaining four are recorded with the reason no caller outside the
+installation can make one: `internal` and `storage_unavailable` are a
+fault inside it, `rate_limited` would be a denial of service against
+whoever else is using a shared installation, and `not_implemented` is
+read off the served document by the pending group.
 
 | Group | On this build | Waiting on |
 |---|---|---|
@@ -56,11 +64,11 @@ for.
 | authorizer | passes, 3 cases | |
 | paths | passes, 1 case | the file routes add nothing it cannot already see through `POST /v1/shares` |
 | shares | passes, 3 cases | |
-| links | passes, 2 cases | `008/LinkFile` is pending, [[005-files]] |
+| links | passes, 3 cases | `008/LinkFile` is pending, [[005-files]] |
 | workspaces | passes, 6 cases | |
 | events | passes, 4 cases | |
 | usage | passes, 2 cases | the byte limit half is `Unverified`, [[005-files]] |
-| errors | passes, 7 cases | five codes are reached by the groups below, [[005-files]], [[007-uploads]] |
+| errors | passes, 7 cases | six codes of the table are reached by the groups below, [[005-files]], [[007-uploads]] |
 | files, bytes, versions, trash, stars, conditional writes | pending, 9 cases | [[005-files]], twelve routes |
 | uploads | pending, 4 cases | [[007-uploads]], three routes |
 | administration | skips, 3 cases | `Options.Admin` is unset on this target; the two routes wait on [[012-administration]] |
@@ -72,12 +80,17 @@ that waits on one reports the routes by name. A run against a partial
 build is therefore red, and it goes green when the last route lands
 with no edit here.
 
-Criteria 1, 2, 3, 4, 5, 6 and 7 have passing tests. Criterion 8's import
-graph half is proved by `TestTheSuiteReachesNoHelperOfThisTree`; its CI
-job is not built, and is a suggestion rather than a claim. Criterion 9
-waits on a release that carries a `test/conformance` to check out, which
-is the release after this spec lands. The spec stays at `testing` until
-both close.
+Criteria 1, 2, 3, 4, 5, 6 and 7 have passing tests. Criterion 2's route
+half is `TestEveryRouteHasACase` and its code half is
+`TestEveryCodeIsProvokedOrNamed`, which reads the codes each case
+declares rather than what a run happened to see, so the rule holds
+against a build that serves none of the routes. Criterion 4's second
+half is `TestConcurrentRuns`, with one narrowing recorded below.
+Criterion 8's import graph half is proved by
+`TestTheSuiteReachesNoHelperOfThisTree`; its CI job is not built, and is
+a suggestion rather than a claim. Criterion 9 waits on a release that
+carries a `test/conformance` to check out, which is the release after
+this spec lands. The spec stays at `testing` until both close.
 
 What the implementation decided, where this spec was silent or where the
 tree made another reading better:
@@ -139,6 +152,23 @@ tree made another reading better:
   installation, so its statements run in this tier and not in the unit
   run. The unit run measures the machinery, and the tests beside it hold
   that to the contract.
+- `TestConcurrentRuns` skips the authorizer and usage groups. Object
+  isolation is what criterion 4 is about, and those two are the two
+  groups that do not touch it: both reach through one stub's rule table,
+  so two runs would be changing each other's verdicts rather than each
+  other's objects. What the test asserts is that two runs against one
+  installation each pass, each create something, and create nothing the
+  other created.
+- A case declares the codes of [[013-api]]'s table it provokes, beside
+  the routes it drives. Counting what a run answered would make the rule
+  hold only where the routes are served, and criterion 2 is about the
+  suite rather than about a build.
+- `deploy/examples/kind` gave the stub issuer no `-issuer-url`, so it
+  named itself `http://0.0.0.0:8081` while `ARCA_OIDC_ISSUERS` listed
+  `http://arca-stubs:8081`, and `arcad` refused every token that stack
+  minted. Nothing caught it: the release smoke reads the probes, which
+  carry no bearer. The overlay now names the in-cluster address, which
+  is what this spec's job is the first thing to need.
 - `make test-conformance` is not part of `make check-all`. The pending
   group fails until the outstanding routes land, and a target that turns
   the default bar red on another spec's work is not one.

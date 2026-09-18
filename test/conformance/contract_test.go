@@ -345,6 +345,68 @@ func failedCases(t *testing.T, s stack, extra ...string) []string {
 	return got
 }
 
+// TestConcurrentRuns is criterion 4's second half: two runs against one
+// installation touch none of each other's objects. Each draws its own value
+// at start and names everything it creates after it, so the two write
+// disjoint sets and each deletes exactly what it made.
+//
+// The authorizer and usage groups are skipped. They are not what the
+// criterion is about, and they cannot be concurrent against one target
+// anyway: both reach through the stub's control API to one rule table, so
+// two runs would be changing each other's verdicts rather than each other's
+// objects. Object isolation is the property, and it is the property the two
+// skipped groups do not touch.
+func TestConcurrentRuns(t *testing.T) {
+	stack, reason := readStack()
+	if reason != "" {
+		t.Skip(reason)
+	}
+	target := start(t, stack)
+	opts := func() conformance.Options {
+		return conformance.Options{
+			URL: target.publicURL,
+			Token: func(ctx context.Context, subject string) (string, error) {
+				return mint(ctx, target.issuerURL, subject)
+			},
+			Skip: []string{conformance.GroupAuthorizer, conformance.GroupUsage, "017/Pending"},
+		}
+	}
+
+	// The two runs are parallel subtests of one wrapper, so the wrapper
+	// returns only once both have finished and their reports are there to
+	// compare.
+	reports := make([]conformance.Report, 2)
+	t.Run("two runs at once", func(t *testing.T) {
+		for i := range reports {
+			t.Run(fmt.Sprintf("run-%d", i), func(t *testing.T) {
+				t.Parallel()
+				reports[i] = conformance.Run(t, opts())
+			})
+		}
+	})
+
+	for i, report := range reports {
+		if len(report.Failed) > 0 {
+			t.Errorf("run %d failed %v; two runs against one installation are each a run of their own", i, report.Failed)
+		}
+		if len(report.Created) == 0 {
+			t.Errorf("run %d created nothing, so there is nothing to have kept apart", i)
+		}
+	}
+
+	// Neither run made anything the other made, which is what deleting by id
+	// rather than by prefix is for.
+	first := map[string]bool{}
+	for _, made := range reports[0].Created {
+		first[made] = true
+	}
+	for _, made := range reports[1].Created {
+		if first[made] {
+			t.Errorf("both runs created %q", made)
+		}
+	}
+}
+
 // TestTheSuiteReachesNoHelperOfThisTree is criterion 8's structural half:
 // the package a consumer imports pulls in no package of this repository's
 // test tree and nothing under internal/. The CI job proves the command runs

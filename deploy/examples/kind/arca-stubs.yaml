@@ -40,6 +40,14 @@ spec:
         - name: arca-stubs
           image: ghcr.io/latere-ai/arca-stubs:unreleased
           imagePullPolicy: IfNotPresent
+          # The iss every minted token carries. Without it the stub names
+          # itself after its listen address, http://0.0.0.0:8081, which is
+          # not what ARCA_OIDC_ISSUERS lists, so arcad refuses every token
+          # this stack mints and nothing that carries a bearer works. A run
+          # on the runner mints through the node port and the token still
+          # names the in-cluster address, which is where arcad fetches the
+          # key set: one process, reached two ways (spec 017).
+          args: [-issuer-url, http://arca-stubs:8081]
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
