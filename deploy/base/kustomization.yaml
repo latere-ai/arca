@@ -1,0 +1,37 @@
+# The base holds every resource arcad needs in any installation. It is not
+# applied on its own: it declares no namespace, and an overlay supplies one
+# together with the origin, the bucket prefix, and the authorizer.
+#
+# There is no Ingress here. An ingress class, a certificate issuer, and the
+# controller settings an upload needs are an installation's choice, so each
+# example overlay carries its own (spec 016).
+#
+# Labels are written into each manifest rather than applied by a transformer
+# with includeSelectors. The tree holds two workloads under one name, the
+# API replicas and the reconciler of spec 010, and a transformer that wrote
+# one pair into every selector would make each Deployment's selector match
+# the other's pods. The component label is what tells them apart, and it is
+# only correct when it is in the file that declares the selector.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - serviceaccount.yaml
+  - deployment.yaml
+  - reaper.yaml
+  - service.yaml
+  - networkpolicy.yaml
+  - poddisruptionbudget.yaml
+  - hpa.yaml
+
+# prometheusrule.yaml is deliberately not a resource. A PrometheusRule needs
+# the Prometheus operator's CustomResourceDefinition, which Arca does not
+# require and the kind example does not install, so a base that named it
+# would fail to apply on every installation without that operator. An
+# installation running the operator applies the file beside the base, and
+# spec 018 owns what is in it.
+
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/part-of: arca

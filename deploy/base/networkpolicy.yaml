@@ -1,0 +1,75 @@
+# What may reach arcad. A NetworkPolicy closes every direction it names for
+# the pods it selects, so these two objects are the whole of the pods'
+# connectivity on a cluster that enforces policy.
+#
+# Ingress is the two listeners and nothing else, open to every peer. The
+# controller in front of the public listener and the scraper in front of the
+# internal one are named differently in every cluster, so a policy that
+# admitted them by label would be wrong on most installations and would fail
+# closed with no message a reader could act on. The control on the public
+# listener is the token every /v1 request carries (spec 006); the control on
+# the internal one is that no ingress routes it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: arcad-ingress
+  labels:
+    app.kubernetes.io/name: arcad
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: arcad
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - port: 8080
+          protocol: TCP
+        - port: 8081
+          protocol: TCP
+---
+# Where arcad may go: DNS, the bucket and the issuers over HTTPS, the
+# authorizer over either scheme, and Postgres. The destinations are not
+# CIDRs, because a bucket endpoint and an issuer are public names whose
+# addresses change; the port list is the confinement, and it is what stops
+# a compromised replica from reaching the rest of the cluster on any other
+# port.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: arcad-egress
+  labels:
+    app.kubernetes.io/name: arcad
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: arcad
+  policyTypes:
+    - Egress
+  egress:
+    # Cluster DNS.
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # The bucket (spec 003), the issuers' key sets (spec 006), the
+    # authorizer (spec 006), and the telemetry endpoint (spec 018). Port 80
+    # is admitted for an in-cluster authorizer, which is reached over plain
+    # HTTP inside the cluster and never from outside it.
+    - ports:
+        - port: 443
+          protocol: TCP
+        - port: 80
+          protocol: TCP
+    # Postgres (spec 004).
+    - ports:
+        - port: 5432
+          protocol: TCP
+    # The OTLP collector of spec 018, when one is installed beside the
+    # workload rather than reached over 443.
+    - ports:
+        - port: 4317
+          protocol: TCP
+        - port: 4318
+          protocol: TCP

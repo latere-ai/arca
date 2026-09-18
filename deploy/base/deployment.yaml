@@ -1,0 +1,144 @@
+# The workload and its container both carry the binary's name. The release
+# pipeline sets the image by that name, so no installation needs a mapping
+# between a manifest and a registry reference.
+#
+# arcad keeps nothing on local disk (spec 001, invariant 3): bytes go to the
+# bucket and metadata to Postgres. That is what lets the root filesystem be
+# read-only with no writable volume, and what lets a replica be replaced at
+# any moment.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: arcad
+  labels:
+    app.kubernetes.io/name: arcad
+    app.kubernetes.io/component: api
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  minReadySeconds: 10
+  progressDeadlineSeconds: 600
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: arcad
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: arcad
+        app.kubernetes.io/component: api
+    spec:
+      serviceAccountName: arcad
+      automountServiceAccountToken: false
+      # The 3 second drain delay plus the 60 second grace period of the
+      # server's shutdown (spec 002), plus a margin: a read in flight
+      # finishes before the pod is killed.
+      terminationGracePeriodSeconds: 90
+      # Replicas prefer to spread across nodes: a node that goes away takes
+      # one replica with it, not all of them.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: arcad
+                    app.kubernetes.io/component: api
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: arcad
+          # The release pipeline replaces this with the tag it built. The
+          # placeholder never resolves, so an installation that was never
+          # released fails to pull instead of running an unknown build.
+          image: ghcr.io/latere-ai/arcad:unreleased
+          imagePullPolicy: IfNotPresent
+          args: [serve]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: internal
+              containerPort: 8081
+              protocol: TCP
+          env:
+            # The audience every accepted token must carry (spec 006),
+            # named here rather than left to the server's default, so a
+            # token addressed to anything else is refused by decision and
+            # not by coincidence. This is the value spec 001 fixes for the
+            # core, and an installation that changes it changes what its
+            # issuer must mint.
+            - name: ARCA_OIDC_AUDIENCE
+              value: arca
+            # The connection string is its own Secret, separate from the
+            # bucket credential and from the authorizer bearer: one
+            # credential per endpoint.
+            - name: ARCA_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: arcad-database
+                  key: ARCA_DATABASE_URL
+          # ARCA_BUCKET, ARCA_BUCKET_REGION, ARCA_BUCKET_ENDPOINT and the
+          # access keys arrive from arcad-bucket; ARCA_OIDC_ISSUERS and
+          # ARCA_AUTHORIZER_TOKEN from arcad-auth. Both are written by hand
+          # from deploy/bootstrap/secrets.example.yaml. The authorizer's
+          # URL is not a credential and is not in either Secret: an overlay
+          # sets ARCA_AUTHORIZER_URL as plain environment, where a reviewer
+          # reads it.
+          #
+          # ARCA_PUBLIC_URL has no default and is not set here. Every
+          # overlay sets it, because the origin clients reach is the one
+          # value no base can guess and every URL the server writes is
+          # built from it.
+          envFrom:
+            - secretRef:
+                name: arcad-bucket
+            - secretRef:
+                name: arcad-auth
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          # Both probes go to the internal listener, which serves them for
+          # the cluster; the public listener answers them too, for a smoke
+          # that reaches the installation through an ingress (spec 002).
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: internal
+            initialDelaySeconds: 5
+            periodSeconds: 15
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: internal
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 3
+          startupProbe:
+            httpGet:
+              path: /livez
+              port: internal
+            periodSeconds: 3
+            failureThreshold: 20

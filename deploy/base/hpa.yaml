@@ -1,0 +1,38 @@
+# Replicas are the one thing that scales. arcad holds no state a request
+# cannot read back from the bucket and the database (spec 001, invariant 3),
+# so a replica added under load serves at once and a replica removed loses
+# nothing.
+#
+# CPU alone, at 70% of the request, between 2 and 32. No metrics adapter is
+# installed: the counters of spec 018 are dashboard signals, not inputs. An
+# installation whose replicas sit at their CPU request under ordinary
+# traffic raises maxReplicas in its overlay.
+#
+# Scale-up waits 30 seconds and scale-down 600, so a burst of reads does
+# not churn the Deployment.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: arcad
+  labels:
+    app.kubernetes.io/name: arcad
+    app.kubernetes.io/component: api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: arcad
+  minReplicas: 2
+  maxReplicas: 32
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30
+    scaleDown:
+      stabilizationWindowSeconds: 600

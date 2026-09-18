@@ -1,0 +1,23 @@
+# The alert rules, applied beside the base and not by it.
+#
+# This object needs the Prometheus operator's CustomResourceDefinition.
+# Arca does not require the operator and the kind example does not install
+# it, so kustomization.yaml does not name this file: a base that did would
+# fail to apply on every installation without the operator. An installation
+# that runs it applies this file by hand:
+#
+#   kubectl apply -n <namespace> -f deploy/base/prometheusrule.yaml
+#
+# The groups are empty on purpose. Spec 018 owns what an installation is
+# paged for and fills them in; the object exists now so that the file an
+# operator applies has one name for the life of the installation, and so
+# that the rules arrive as a change to a file that is already applied
+# rather than as a new step in the install document.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: arcad
+  labels:
+    app.kubernetes.io/name: arcad
+spec:
+  groups: []
