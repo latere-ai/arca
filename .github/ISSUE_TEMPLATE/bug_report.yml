@@ -1,0 +1,61 @@
+name: Bug report
+description: Something Arca does that it should not, or does not do that it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not report a security vulnerability here. See
+        [SECURITY.md](https://github.com/latere-ai/arca/blob/main/SECURITY.md).
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+      placeholder: |
+        I put an object at files/reports/q3.pdf, listed the space, and the object ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: >
+        The shortest sequence that shows it. The `curl` command with its
+        output is ideal. Redact tokens and presigned URLs.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The release tag or image digest, from `GET /version`.
+      placeholder: v0.1.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: bucket
+    attributes:
+      label: Object store
+      options:
+        - AWS S3
+        - DigitalOcean Spaces
+        - MinIO
+        - Another S3 compatible store
+        - Not applicable
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: >
+        Relevant lines from arcad, and the `trace_id` of the failing
+        request if you have it. Redact tokens and hostnames you would rather
+        not publish.
+      render: text

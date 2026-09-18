@@ -1,0 +1,83 @@
+# The shared quality bar, read by `go tool lateregate`. The gates live in
+# latere.ai/x/ci-gate, pinned in go.mod; only repository-specific values are
+# here.
+
+cover:
+  trim_prefix: latere.ai/x/arca/
+
+spec:
+  status:
+    - vague
+    - drafted
+    - validated
+    - dispatched
+    - in-progress
+    - testing
+    - complete
+    - stale
+    - superseded
+  require: [title, status, track, depends_on, affects, effort, created, updated, author]
+  wikilinks: true
+  numbered: true
+  started: [dispatched, in-progress, testing, complete]
+  settled: [complete, superseded]
+  require_section:
+    - Overview
+    - Design
+    - Acceptance criteria
+  require_section_by_status:
+    complete: [Outcome]
+
+# The suite runs with only the Go toolchain on PATH. arcad forks no
+# binary: bytes go to the bucket through the S3 API and metadata to
+# Postgres through its wire protocol, both from Go.
+hermetic:
+  allow: []
+
+tempdir:
+  allow: {}
+
+# Spec 001's dependency invariant: the build list of ./cmd/arcad reaches
+# the standard library, latere.ai/x/pkg, the S3 client of spec 003, the
+# Postgres driver of spec 004, and the OpenTelemetry SDK, and no cloud
+# SDK beyond the S3 API and no Kubernetes client. Until those specs land
+# the list is the standard library and pkg, so a new dependency is a
+# decision recorded here, one row per package as the specs land.
+depcheck:
+  packages:
+    latere.ai/x/arca/cmd/arcad:
+      decision: >-
+        the server reaches latere.ai/x/pkg and the standard library; the
+        S3 client joins the list with spec 003, the Postgres driver with
+        spec 004, the OpenTelemetry SDK with spec 006, and nothing else
+        does without a row here (spec 001)
+      allow:
+        latere.ai/x/pkg: the shared library every Latere service is built on (spec 002)
+
+license:
+  spdx: MIT
+  holder: Latere AI
+
+# The identity shape of the family: specs/infrastructure/identity.md in
+# latere-ai/specs. A core verifies and asks; the decision is the
+# authorizer's.
+identity:
+  role: core
+  audience: arca
+  config_prefix: ARCA
+  api_group: arca.latere.ai
+  # The default audience of the open core, verified only where the core is
+  # self-hosted; Latere reaches it through the origin, spec 006.
+  reached_by: self-hosted
+  # Access is by role: the roles rule runs, and it is one way once set.
+  roles_only: true
+  # The two rules that read an import the scaffold does not make yet.
+  # Spec 006 mounts the shared verifier and the authorizer client on /v1,
+  # and both waivers go with it; the dates are the leaf's deadline.
+  waive:
+    verifier:
+      until: 2026-10-31
+      reason: spec 006 mounts latere.ai/x/pkg/authkit/jwt on /v1; nothing is served under /v1 before it
+    authorizer:
+      until: 2026-10-31
+      reason: spec 006 asks its question through latere.ai/x/pkg/authz; nothing decides before it
