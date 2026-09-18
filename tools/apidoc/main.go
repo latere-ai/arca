@@ -25,6 +25,7 @@ import (
 
 	"latere.ai/x/arca/internal/api"
 	"latere.ai/x/arca/internal/apidocs"
+	"latere.ai/x/arca/internal/shares"
 	"latere.ai/x/arca/internal/workspaces"
 )
 
@@ -72,11 +73,14 @@ func Render() []byte {
 }
 
 // routes is the whole surface this build registers: the frame's own rows
-// and the rows each owning package declares. The node builds its mux from
-// the same declarations, so the committed document and the registrations are
-// one list read twice and cannot disagree.
+// and the rows each owning package declares, in the order the node hands
+// them in, so the committed document and the registrations are one list read
+// twice and cannot disagree.
 func routes() []apidocs.Route {
-	return append(api.Routes(), api.Described(workspaces.Table())...)
+	rows := api.Routes()
+	rows = append(rows, api.Described(workspaces.Table())...)
+	rows = append(rows, api.Described(shares.Table())...)
+	return rows
 }
 
 // mustYAML converts a JSON document to YAML, and panics on bytes that are

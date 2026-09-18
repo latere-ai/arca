@@ -41,6 +41,37 @@ type route struct {
 	handler func(*API, http.ResponseWriter, *http.Request)
 }
 
+// Links is the half of spec 008's surface the frame registers: the three
+// routes that redeem a token, which sit outside the verifier because the
+// token in the URL is the whole of their authorization.
+//
+// The other eight rows of that spec are contributed through Options.Routes
+// like every other package's, because they are behind the verifier and ask
+// an action. These three cannot be: a row contributed there is refused when
+// it asks nothing, and a hole in the verifier is the frame's own business
+// rather than something a later phase opens by passing a field. So the frame
+// declares the rows and takes the service that answers them.
+type Links interface {
+	// LinkMeta answers GET /v1/shares/links/{token}/meta.
+	LinkMeta(w http.ResponseWriter, r *http.Request)
+	// LinkList answers GET /v1/shares/links/{token}.
+	LinkList(w http.ResponseWriter, r *http.Request)
+	// LinkFile answers GET /v1/shares/links/{token}/files/{path...}.
+	LinkFile(w http.ResponseWriter, r *http.Request)
+}
+
+// link dispatches one of the three public rows to the service the node
+// bound, and answers not_implemented in a build that bound none. A row is
+// registered whether or not a build answers it, so the surface has one shape
+// everywhere and a build that cannot answer a row says so.
+func (a *API) link(w http.ResponseWriter, r *http.Request, h func(Links, http.ResponseWriter, *http.Request)) {
+	if a.links == nil {
+		WriteError(w, r, Refuse(CodeNotImplemented, "this build binds no shares and links service"))
+		return
+	}
+	h(a.links, w, r)
+}
+
 // routeTable is the frame's own half of the surface: the three public link
 // routes of spec 008, registered outside the verifier because that is where
 // they belong and because registering them later would be registering them
@@ -57,21 +88,21 @@ var routeTable = []route{
 	},
 	{
 		method: http.MethodGet, path: "/v1/shares/links/{token}/meta",
-		public: true, pending: true, status: http.StatusOK,
+		public: true, status: http.StatusOK,
 		summary: "What a link token names, before anything is fetched.",
-		handler: (*API).link,
+		handler: func(a *API, w http.ResponseWriter, r *http.Request) { a.link(w, r, Links.LinkMeta) },
 	},
 	{
 		method: http.MethodGet, path: "/v1/shares/links/{token}",
-		public: true, pending: true, status: http.StatusOK,
+		public: true, status: http.StatusOK,
 		summary: "A listing of the subtree a link token names.",
-		handler: (*API).link,
+		handler: func(a *API, w http.ResponseWriter, r *http.Request) { a.link(w, r, Links.LinkList) },
 	},
 	{
 		method: http.MethodGet, path: "/v1/shares/links/{token}/files/{path...}",
-		public: true, pending: true, status: http.StatusOK,
+		public: true, status: http.StatusOK,
 		summary: "One object under the subtree a link token names.",
-		handler: (*API).link,
+		handler: func(a *API, w http.ResponseWriter, r *http.Request) { a.link(w, r, Links.LinkFile) },
 	},
 }
 
@@ -89,12 +120,4 @@ func Errors() []apidocs.ErrorCode {
 		out[i] = apidocs.ErrorCode{Code: code, Status: Status(code), Sentence: Sentence(code)}
 	}
 	return out
-}
-
-// link answers the three public link routes until spec 008 lands their
-// behaviour. It is registered at the right place with the right exception,
-// so the shape of the surface is settled before the handler is.
-func (a *API) link(w http.ResponseWriter, r *http.Request) {
-	WriteError(w, r, Refuse(CodeNotImplemented,
-		"the public link routes arrive with the shares and links of spec 008"))
 }

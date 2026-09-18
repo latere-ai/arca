@@ -60,6 +60,64 @@ func TestTheThreeVerifierExceptionsAndNoMore(t *testing.T) {
 	}
 }
 
+// TestAReservedWordWinsOverTheWildcardBesideIt is criterion 4 of spec 013:
+// where a literal sits beside a wildcard in the same position, the literal
+// wins and the word is reserved. with-me is not a share id, and the route it
+// names asks a different action from the one an id would.
+//
+// Both rows are contributed ones, which is where that pair lives: the router
+// reads the merged registry, so the rule has to hold across the rows the
+// frame declares and the rows a package hands it.
+func TestAReservedWordWinsOverTheWildcardBesideIt(t *testing.T) {
+	answer := func(name string) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			httpjson.Write(w, http.StatusOK, map[string]string{"reached": name})
+		})
+	}
+	h := newHarness(t, func(o *Options) {
+		o.Routes = []Route{
+			{
+				Method: http.MethodGet, Path: "/v1/shares/{id}",
+				Action: authorizer.ActionShareRead, Status: http.StatusOK,
+				Summary: "One grant.", Handler: answer("id"),
+			},
+			{
+				Method: http.MethodGet, Path: "/v1/shares/with-me",
+				Action: authorizer.ActionShareList, Status: http.StatusOK,
+				Summary: "The grants whose grantee is the caller.", Handler: answer("with-me"),
+			},
+		}
+	})
+	h.endpoint.Allow(stub.Rule{Subject: "*", Action: "*", Resource: "*", Allow: true})
+	w := h.do(t, http.MethodGet, "/v1/shares/with-me", h.bearer())
+	if !strings.Contains(w.Body.String(), "with-me") {
+		t.Fatalf("GET /v1/shares/with-me reached %s; with-me is a reserved word and not a share id", w.Body)
+	}
+}
+
+// TestABuildThatBindsNoServiceAnswersNotImplemented: the three public rows
+// are registered at their right place either way, which is what keeps the
+// surface one declaration through the phases of spec 019. A row a package
+// contributes is not registered at all in a build that contributes none, so
+// this is the whole of what a build without a service answers.
+//
+// The frame's table holds two kinds of row and only one kind has a seam a
+// build may leave unbound. The event tail is bound by New from a log the
+// surface refuses to build without, so the rows read here are the public
+// ones: they are the rows whose service is handed over rather than required.
+func TestABuildThatBindsNoServiceAnswersNotImplemented(t *testing.T) {
+	h := newHarness(t, func(o *Options) { o.Links = nil })
+	for _, r := range routeTable {
+		if !r.public {
+			continue
+		}
+		w := h.do(t, r.method, fill(r.path), h.bearer())
+		if w.Code != http.StatusNotImplemented {
+			t.Errorf("%s %s = %d with no service bound", r.method, r.path, w.Code)
+		}
+	}
+}
+
 // TestEveryActionIsOneOfTheVocabulary: a row asking a string outside spec
 // 006's table is a question no authorizer can answer, and the shared client
 // refuses it before the wire, so it would be an outage rather than a deny.
@@ -224,8 +282,29 @@ func registry(t *testing.T) []route {
 func fill(path string) string {
 	out := strings.ReplaceAll(path, "{token}", "tkn")
 	out = strings.ReplaceAll(out, "{owner}", "https%3A%2F%2Fissuer.example%7C9ab3")
+	out = strings.ReplaceAll(out, "{id}", "01J8GRANT")
 	out = strings.ReplaceAll(out, "{path...}", "files/reports/q3.pdf")
 	return out
+}
+
+// bound is the links service this harness binds: the three public rows of
+// spec 008 and nothing else, because the eight rows behind the verifier are
+// contributed and carry their own handlers.
+//
+// The three ask nothing. The token in the URL is the whole of their
+// authorization, and the test above holds them to asking nothing.
+type bound struct{}
+
+func (bound) LinkMeta(w http.ResponseWriter, _ *http.Request) { acted(w) }
+
+func (bound) LinkList(w http.ResponseWriter, _ *http.Request) { acted(w) }
+
+func (bound) LinkFile(w http.ResponseWriter, _ *http.Request) { acted(w) }
+
+// acted is what a handler that ran writes, so a test can tell a handler that
+// answered from one that was never reached.
+func acted(w http.ResponseWriter) {
+	httpjson.Write(w, http.StatusOK, map[string]string{"state": "acted"})
 }
 
 // harness is one mounted surface with the stub issuer and the stub
@@ -256,6 +335,7 @@ func newHarness(t *testing.T, opts ...func(*Options)) *harness {
 	p := &probe{}
 	o := Options{
 		Verifier: id.Verifier, Authorizer: id.Authorizer,
+		Links:     bound{},
 		PublicURL: "https://storage.example",
 		// The node wires the log of spec 010 and the database it reads
 		// through; a test of the frame wires a log that answers an empty

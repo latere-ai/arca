@@ -54,7 +54,7 @@ validated spec is dispatched when every spec in its `depends_on` is at
 | [005](005-files.md) | Files: put, get, list, move, delete; versions, trash, stars | drafted |
 | [006](006-identity.md) | Identity: verification, the subject, the action vocabulary, the authorizer question, the owner policy | testing |
 | [007](007-uploads.md) | Uploads: sessions, size classes, direct-to-bucket parts, integrity | drafted |
-| [008](008-shares-and-links.md) | Shares and links: grants and the permission ladder, public links, what a caller sees shared with them | drafted |
+| [008](008-shares-and-links.md) | Shares and links: grants and the permission ladder, public links, what a caller sees shared with them | testing |
 | [009](009-workspaces.md) | Workspaces: durable subtrees, the writer lease, materialize and sync | testing |
 | [010](010-events-and-reaper.md) | Events and the reaper: the ledger, the log, the reconciliation of the two stores | testing |
 | 011 | Webhooks | retired 2026-09-18 before drafting closed; the number is not reused. Events are tailed by cursor, spec 010 |

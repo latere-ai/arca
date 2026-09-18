@@ -69,6 +69,12 @@ type Options struct {
 	// and a log that reaches no database takes none.
 	Events  events.Log
 	Querier store.Querier
+	// Links answers the three public link routes of spec 008. They are the
+	// frame's own rows, because a row contributed through Routes is behind
+	// the verifier and these three are the exception to it, so the service
+	// that holds their behaviour is handed over rather than registered. A
+	// build that binds none answers not_implemented from them.
+	Links Links
 	// Routes are the rows of spec 013's table the packages that own their
 	// behaviour contribute. See register.go: a contributed row is behind
 	// the verifier, asks one action of spec 006's vocabulary, and joins the
@@ -86,6 +92,7 @@ type API struct {
 	publicURL  string
 	perSubject *ratelimit.Buckets
 	perAddress *ratelimit.Buckets
+	links      Links
 	clock      func() time.Time
 	rows       []route
 	document   []byte
@@ -113,7 +120,7 @@ func New(o Options) (*API, error) {
 	}
 	a := &API{
 		verifier: o.Verifier, authorizer: o.Authorizer,
-		publicURL: o.PublicURL, clock: o.Now,
+		publicURL: o.PublicURL, links: o.Links, clock: o.Now,
 		perSubject: buckets(o.RequestsPerMinute),
 		perAddress: buckets(o.UnauthenticatedRequestsPerMinute),
 		rows:       rows,

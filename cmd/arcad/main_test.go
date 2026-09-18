@@ -430,10 +430,13 @@ func TestTheSurfaceIsMountedOnThePublicListener(t *testing.T) {
 	if code, body := get(t, publicURL+"/v1/trash"); code != 401 || !strings.Contains(body, `"unauthenticated"`) {
 		t.Errorf("GET /v1/trash = %d %q, want 401 in the error envelope", code, body)
 	}
-	// The three public link routes take no bearer and answer the frame's
-	// not_implemented until spec 008 lands their behaviour.
-	if code, body := get(t, publicURL+"/v1/shares/links/tkn"); code != 501 || !strings.Contains(body, `"not_implemented"`) {
-		t.Errorf("GET /v1/shares/links/{token} = %d %q, want 501", code, body)
+	// The three public link routes take no bearer: they reach their handler
+	// and resolve the token before anything else. This node has no database
+	// behind it, and a store that cannot answer is a 500 and never a
+	// not-found, so what this holds is that the route was not refused for
+	// want of a bearer.
+	if code, body := get(t, publicURL+"/v1/shares/links/tkn"); code != 500 || !strings.Contains(body, `"internal"`) {
+		t.Errorf("GET /v1/shares/links/{token} = %d %q, want 500 with no database behind it", code, body)
 	}
 	// The document takes no token: a route name is not a secret.
 	code, body := get(t, publicURL+"/openapi.json")
