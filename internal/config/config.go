@@ -33,18 +33,23 @@ const (
 	// per client address before it (spec 015). Zero disables either.
 	DefaultRequestsPerMinute                = 600
 	DefaultUnauthenticatedRequestsPerMinute = 60
-)
-
-// Defaults for the two windows the reconciler of spec 010 works to.
-const (
-	// DefaultReapInterval is how often the reconciler runs inside serve. A
-	// value of zero disables the in-process loop, which is what an
-	// installation that runs arcad reap as a process of its own sets on its
-	// API replicas.
-	DefaultReapInterval = 5 * time.Minute
-	// DefaultTrashRetention is how long a trashed object stays restorable.
+	// DefaultMaxUploadBytes is the largest object this server accepts at
+	// all, and DefaultInlineBytes the largest it streams through itself
+	// (specs 005 and 007). Above the inline size the bytes go from the
+	// client to the bucket in parts and never through a replica, which is
+	// invariant 4 of spec 001.
+	DefaultMaxUploadBytes int64 = 5 << 30
+	DefaultInlineBytes    int64 = 16 << 20
+	// DefaultTrashRetention is how long a trashed object is restorable
+	// before the reaper purges it from both stores (spec 005).
 	DefaultTrashRetention = 720 * time.Hour
 )
+
+// DefaultReapInterval is how often the reconciler of spec 010 runs inside
+// serve. A value of zero disables the in-process loop, which is what an
+// installation that runs arcad reap as a process of its own sets on its API
+// replicas.
+const DefaultReapInterval = 5 * time.Minute
 
 // prefixShape is what a bucket prefix may hold: the characters a key is
 // built from, and no others, so a prefix cannot smuggle a query string or a
@@ -106,11 +111,16 @@ type Config struct {
 	// token buckets of spec 015. Zero disables one.
 	RequestsPerMinute                int
 	UnauthenticatedRequestsPerMinute int
+	// MaxUploadBytes is the largest object this server accepts by any
+	// route, and InlineBytes the boundary between the two size classes of
+	// spec 007: at or below it a put streams through the server, above it
+	// the parts of a session go straight to the bucket.
+	MaxUploadBytes, InlineBytes int64
 	// ReapInterval is how often the reconciler of spec 010 runs inside
 	// serve. Zero leaves serve with no reconciliation loop.
 	ReapInterval time.Duration
-	// TrashRetention is how long a trashed object stays restorable before
-	// the reconciler purges it from both stores.
+	// TrashRetention is how long a trashed object stays restorable (spec
+	// 005) before the reconciler purges it from both stores (spec 010).
 	TrashRetention time.Duration
 }
 
@@ -172,6 +182,14 @@ func Load(getenv Getenv) (Config, error) {
 			DefaultRequestsPerMinute, "ARCA_REQUESTS_PER_MINUTE", note),
 		UnauthenticatedRequestsPerMinute: count(getenv("ARCA_UNAUTHENTICATED_REQUESTS_PER_MINUTE"),
 			DefaultUnauthenticatedRequestsPerMinute, "ARCA_UNAUTHENTICATED_REQUESTS_PER_MINUTE", note),
+		MaxUploadBytes: size(getenv("ARCA_MAX_UPLOAD_BYTES"),
+			DefaultMaxUploadBytes, "ARCA_MAX_UPLOAD_BYTES", note),
+		InlineBytes: size(getenv("ARCA_INLINE_BYTES"),
+			DefaultInlineBytes, "ARCA_INLINE_BYTES", note),
+	}
+	if c.InlineBytes > c.MaxUploadBytes {
+		note("ARCA_INLINE_BYTES is %d and ARCA_MAX_UPLOAD_BYTES is %d, and the largest object streamed "+
+			"through the server cannot be larger than the largest object accepted", c.InlineBytes, c.MaxUploadBytes)
 	}
 	if err := checkAddr(c.PublicAddr); err != nil {
 		problems = append(problems, "ARCA_PUBLIC_ADDR "+err.Error())
@@ -320,6 +338,27 @@ func duration(raw string, def time.Duration, name string, offSwitch bool, note f
 		return d
 	}
 	return 0
+}
+
+// size reads a byte count. Unset is the default, and a value that is not a
+// whole number above zero is a problem rather than a silent default: a
+// server that accepted no object at all because a variable read as zero
+// would be a deployment nobody could debug from its behaviour.
+func size(raw string, def int64, name string, note func(string, ...any)) int64 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return def
+	}
+	v, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		note("%s is %q, not a whole number of bytes", name, raw)
+		return def
+	}
+	if v <= 0 {
+		note("%s is %d, and a server that accepts no object serves nothing", name, v)
+		return def
+	}
+	return v
 }
 
 // normalisePrefix is spec 003's rule: a missing trailing slash is appended,

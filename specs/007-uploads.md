@@ -1,13 +1,13 @@
 ---
 title: "Uploads: sessions, size classes, direct-to-bucket parts, integrity"
-status: drafted
+status: testing
 track: core
 depends_on:
   - specs/001-architecture.md
   - specs/003-object-store.md
   - specs/004-metadata-store.md
   - specs/005-files.md
-affects: [internal/uploads/, internal/api/, internal/store/migrations/, docs/]
+affects: [internal/uploads/, internal/api/, internal/store/, internal/store/migrations/, internal/config/, cmd/arcad/, test/e2e/]
 effort: medium
 created: 2026-09-18
 updated: 2026-09-18
@@ -29,6 +29,85 @@ the write, account for it, and record it, and none of that requires the
 bytes to pass through the server. So they do not, and what the server
 keeps is the one thing the bucket cannot give back: a durable pointer to
 an upload in flight.
+
+## Current state
+
+Built and in the tree on 2026-09-18, phase 3 of [[019-migration-from-drive]].
+`internal/uploads` holds the three handlers, `internal/store` holds the
+session query set and `0002_uploads.up.sql` creates `upload_sessions`, which
+is the migration [[004-metadata-store]]'s ownership table assigns this spec.
+The commits are `9bbf965` (the table, the queries and the reference check),
+`3ba4536` (the two sizes), `7204bd4` (the handlers), `0cb8d7e` (the wiring
+and the document), `2742b24` (the store and e2e tiers) and `eee80ec` (the
+detail a refusal carries). The gate passes at each of them, with
+`internal/uploads` at 92%.
+
+The row write at completion is [[005-files]]'s `Commit`, taken by both, so a
+put and a completed session cannot drift apart in their conditional
+behaviour, their version capture, their charge or their event. Two fields
+were added to that write for this spec: what the space has already paid, so
+a session that opened and completed is charged once, and a hook that runs in
+the same transaction, so the session row leaves in the commit the object
+arrives in.
+
+One bug of the service Arca replaces is fixed here rather than carried.
+`StorageKeyReferenced` in `drive/internal/store/refs.go` line 19 reads
+`files` and `file_versions` while calling itself "the single invariant
+deciding whether a blob may be deleted", and the migration creating its
+`upload_sessions` table calls that row the only durable pointer to an
+upload's parts. Arca's `store.ObjectReferenced` names all three, and
+`TestObjectReferencedNamesEveryTableThatHoldsAnObjectID` reads every table of
+the embedded schema that carries an `object_id` and holds the statement to
+that list, so a fourth table added with the column cannot be left out
+quietly. `TestTheGuardFindsThePredecessorsGap` uses the predecessor's own
+statement as its fixture.
+
+Criteria 1, 2, 3, 5, 7, 8 and 11 have passing tests. Criterion 4's refusal
+and its deletion are proved at the unit tier against the answer's limit, and
+the reaper's half of it is [[010-events-and-reaper]]'s. Criterion 6 is
+proved at the unit tier with the row write failed once, and the retry
+resumes from the row write. Criterion 9's expiry query is exposed and proved
+against Postgres; the sweep that runs it is the reaper's. Criterion 10 waits
+for the conformance rows of [[017-conformance-suite]]. Criterion 12 is open:
+see the divergence below.
+
+What the implementation decided, where this spec was silent or where the
+tree made another reading better:
+
+- An abort the store refuses answers `503` `storage_unavailable` and not the
+  `502` this spec names. The error table of [[013-api]] has no row at 502,
+  and `storage_unavailable` is the row for a store that could not do what
+  was asked. The row stays either way, which is the property the paragraph
+  is about, and the reaper retries.
+- A session carries no `checksum` field, so criterion 12 is open. Opening a
+  multipart with a checksum algorithm is `blob.PutOptions`'s to offer and it
+  carries a content type alone ([[003-object-store]]). The two mechanisms
+  that hold today are the part labels the store verifies when it assembles,
+  and the head that reads the assembled size back. Adding the algorithm is a
+  change to [[003-object-store]]'s options and then one field here.
+- Visibility is the authorizer's answer alone. This spec names the creator
+  and an administrator; Arca holds no notion of an administrator, and
+  comparing a session's creator against the caller inside the handler is a
+  policy this core does not decide and a claim read for meaning if it were
+  read from the token. One question is asked, and a session nobody may act
+  on is a session that is not there.
+- What is kept and what is dropped when a completion fails follows from who
+  will come back. A completion the caller's own request refused will not, so
+  the assembled object goes and the session with it; a completion a store
+  refused will, so both stay and the retry resumes from the row write rather
+  than from a part. The predecessor kept the object in one of those two
+  cases and not in the other for the same reason, without writing the reason
+  down.
+- A declared size of zero or less is `invalid_field`, and one over the part
+  cap is `too_many_parts`, both read before anything opens, so a refused
+  session opens no multipart.
+- A session id that is not an identifier at all reads as a session that does
+  not exist, so a client sending a word learns what a client sending
+  somebody else's session learns. Until `eee80ec` the two answers differed
+  in the one field a caller can still read: a deny at lookup carried the
+  authorizer's reason and an unknown id carried its own sentence. An id is a
+  guessable string, so that difference was an oracle; both now carry the
+  sentence an unknown id carries.
 
 ## Design
 

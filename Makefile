@@ -117,7 +117,8 @@ down:
 # in it skips itself with the remediation in its message.
 test-store: up
 	$(TIER_ENV) $(GO) test -tags=tiers -race -count=1 -run '^TestStore' \
-		./internal/blob/... ./internal/store/... ./internal/events/... ./internal/reaper/...
+		./internal/blob/... ./internal/store/... ./internal/events/... ./internal/reaper/... \
+		./internal/files/... ./internal/uploads/...
 
 # The e2e tier: arcad as a process against the stack and the stubs.
 test-e2e: up build build-stubs

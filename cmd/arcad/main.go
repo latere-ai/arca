@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -29,9 +30,11 @@ import (
 	"latere.ai/x/arca/internal/blob"
 	"latere.ai/x/arca/internal/config"
 	"latere.ai/x/arca/internal/events"
+	"latere.ai/x/arca/internal/files"
 	"latere.ai/x/arca/internal/reaper"
 	"latere.ai/x/arca/internal/shares"
 	"latere.ai/x/arca/internal/store"
+	"latere.ai/x/arca/internal/uploads"
 	"latere.ai/x/arca/internal/version"
 	"latere.ai/x/arca/internal/workspaces"
 )
@@ -382,6 +385,12 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	if err != nil {
 		return fail(stderr, err)
 	}
+	// The routes of the specs that own their behaviour, bound to their
+	// handlers and registered through the one table of spec 013. The ledger
+	// and the log of spec 010 and the workspace liveness of spec 009 are
+	// seams these packages default; the node binds them when those specs
+	// land.
+	content := files.Options{DB: db, Bucket: bucket, Decide: identity.Authorizer, Config: cfg}
 	surface, err := api.New(api.Options{
 		Verifier: identity.Verifier, Authorizer: identity.Authorizer,
 		Links:                            sharing,
@@ -391,12 +400,18 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		// The log of spec 010 and the database it reads through, which is
 		// what GET /v1/events tails.
 		Events: log, Querier: db.Querier(),
-		// The twenty rows two packages own: the twelve of spec 009 and the
-		// eight of spec 008 that sit behind the verifier. Each is declared
-		// by the package that answers it and registered through the one seam
-		// of register.go, in the order tools/apidoc unions them, so the
+		// The thirty-five rows four packages own: the twelve of spec 009,
+		// the eight of spec 008 that sit behind the verifier, the twelve of
+		// spec 005 and the three of spec 007. Each is declared by the
+		// package that answers it and registered through the one seam of
+		// register.go, in the order tools/apidoc unions them, so the
 		// committed document and the mux read one list the same way.
-		Routes: append(workspaces.Routes(durable), shares.Routes(sharing)...),
+		Routes: slices.Concat(
+			workspaces.Routes(durable),
+			shares.Routes(sharing),
+			files.Routes(content),
+			uploads.Routes(uploads.Options{Options: content}),
+		),
 	})
 	if err != nil {
 		return fail(stderr, err)

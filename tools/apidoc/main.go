@@ -25,7 +25,9 @@ import (
 
 	"latere.ai/x/arca/internal/api"
 	"latere.ai/x/arca/internal/apidocs"
+	"latere.ai/x/arca/internal/files"
 	"latere.ai/x/arca/internal/shares"
+	"latere.ai/x/arca/internal/uploads"
 	"latere.ai/x/arca/internal/workspaces"
 )
 
@@ -80,6 +82,7 @@ func routes() []apidocs.Route {
 	rows := api.Routes()
 	rows = append(rows, api.Described(workspaces.Table())...)
 	rows = append(rows, api.Described(shares.Table())...)
+	rows = append(rows, api.Described(append(files.Table(), uploads.Table()...))...)
 	return rows
 }
 

@@ -17,18 +17,19 @@ import (
 // and the schema it asks over have to say the same thing. This file holds
 // the two together.
 //
-// It exists because the service Arca replaces got it wrong: its
-// StorageKeyReferenced read files and file_versions while its own migration
-// called the upload session row the only durable pointer to an upload's
-// parts, so an in-flight multipart's bytes were one grace window away from
-// being deleted under it. Arca's grace window is shorter than Drive's, so
-// the omission would be reachable here, and a comment is not what keeps it
-// out of reach.
+// It exists because the service Arca replaces got it wrong:
+// StorageKeyReferenced in drive/internal/store/refs.go reads files and
+// file_versions while calling itself "the single invariant deciding whether
+// a blob may be deleted", and the migration creating its upload_sessions
+// table calls that row the only durable pointer to an upload's parts. What
+// kept the omission out of reach there was the reaper's twenty-four hour
+// orphan grace window rather than the invariant. A comment is not what keeps
+// it out of reach here.
 
 func TestObjectReferencedNamesEveryTableThatHoldsAnObjectID(t *testing.T) {
 	schema := tablesWithColumn(t, "object_id")
-	if len(schema) < 2 {
-		t.Fatalf("the schema holds %v, and files and file_versions both carry an object id", schema)
+	if len(schema) < 3 {
+		t.Fatalf("the schema holds %v, and files, file_versions and upload_sessions all carry an object id", schema)
 	}
 	if missing := tablesMissing(schema, objectReferencedSQL); len(missing) > 0 {
 		t.Fatalf("the reference check leaves out %v, and bytes a row of those tables names would be deleted", missing)

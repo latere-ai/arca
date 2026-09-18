@@ -33,6 +33,236 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /v1/files/materialize:
+    get:
+      operationId: getV1FilesMaterialize
+      summary: One space as a manifest of presigned URLs.
+      description: Asks the authorizer for file.list before it acts.
+      security:
+      - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {}
+        "401":
+          $ref: "#/components/responses/unauthenticated"
+        "403":
+          $ref: "#/components/responses/forbidden"
+        "404":
+          $ref: "#/components/responses/not_found"
+        "429":
+          $ref: "#/components/responses/rate_limited"
+        "500":
+          $ref: "#/components/responses/internal"
+        "503":
+          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v1/files/{owner}/{path}:
+    delete:
+      operationId: deleteV1FilesByOwnerByPath
+      summary: Trash the object; ?permanent=1 removes it and ?version=N prunes one version.
+      description: Asks the authorizer for file.delete before it acts.
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: path
+        in: path
+        required: true
+        description: The rest of the path, slashes included.
+        schema:
+          type: string
+      security:
+      - bearer: []
+      responses:
+        "204":
+          description: No Content
+          content:
+            application/json:
+              schema: {}
+        "401":
+          $ref: "#/components/responses/unauthenticated"
+        "403":
+          $ref: "#/components/responses/forbidden"
+        "404":
+          $ref: "#/components/responses/not_found"
+        "429":
+          $ref: "#/components/responses/rate_limited"
+        "500":
+          $ref: "#/components/responses/internal"
+        "503":
+          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    get:
+      operationId: getV1FilesByOwnerByPath
+      summary: Read one object, its subtree with ?list=1, or its versions with ?versions=1.
+      description: Asks the authorizer for file.read before it acts.
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: path
+        in: path
+        required: true
+        description: The rest of the path, slashes included.
+        schema:
+          type: string
+      security:
+      - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {}
+        "401":
+          $ref: "#/components/responses/unauthenticated"
+        "403":
+          $ref: "#/components/responses/forbidden"
+        "404":
+          $ref: "#/components/responses/not_found"
+        "429":
+          $ref: "#/components/responses/rate_limited"
+        "500":
+          $ref: "#/components/responses/internal"
+        "503":
+          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    head:
+      operationId: headV1FilesByOwnerByPath
+      summary: The object's headers with no body.
+      description: Asks the authorizer for file.read before it acts.
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: path
+        in: path
+        required: true
+        description: The rest of the path, slashes included.
+        schema:
+          type: string
+      security:
+      - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {}
+        "401":
+          $ref: "#/components/responses/unauthenticated"
+        "403":
+          $ref: "#/components/responses/forbidden"
+        "404":
+          $ref: "#/components/responses/not_found"
+        "429":
+          $ref: "#/components/responses/rate_limited"
+        "500":
+          $ref: "#/components/responses/internal"
+        "503":
+          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      operationId: postV1FilesByOwnerByPath
+      summary: Move the object with move_to, or bring a version forward with restore_version.
+      description: Asks the authorizer for file.write before it acts.
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: path
+        in: path
+        required: true
+        description: The rest of the path, slashes included.
+        schema:
+          type: string
+      security:
+      - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {}
+        "401":
+          $ref: "#/components/responses/unauthenticated"
+        "403":
+          $ref: "#/components/responses/forbidden"
+        "404":
+          $ref: "#/components/responses/not_found"
+        "429":
+          $ref: "#/components/responses/rate_limited"
+        "500":
+          $ref: "#/components/responses/internal"
+        "503":
+          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    put:
+      operationId: putV1FilesByOwnerByPath
+      summary: Write one object; the body is the bytes.
+      description: Asks the authorizer for file.write before it acts.
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: path
+        in: path
+        required: true
+        description: The rest of the path, slashes included.
+        schema:
+          type: string
+      security:
+      - bearer: []
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: {}
+        "401":
+          $ref: "#/components/responses/unauthenticated"
+        "403":
+          $ref: "#/components/responses/forbidden"
+        "404":
+          $ref: "#/components/responses/not_found"
+        "429":
+          $ref: "#/components/responses/rate_limited"
+        "500":
+          $ref: "#/components/responses/internal"
+        "503":
+          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /v1/shares:
     get:
       operationId: getV1Shares
@@ -333,6 +563,276 @@ paths:
       responses:
         "200":
           description: OK
+          content:
+            application/json:
+              schema: {}
+        "401":
+          $ref: "#/components/responses/unauthenticated"
+        "403":
+          $ref: "#/components/responses/forbidden"
+        "404":
+          $ref: "#/components/responses/not_found"
+        "429":
+          $ref: "#/components/responses/rate_limited"
+        "500":
+          $ref: "#/components/responses/internal"
+        "503":
+          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v1/stars:
+    delete:
+      operationId: deleteV1Stars
+      summary: Unstar an object; idempotent.
+      description: Asks the authorizer for file.write before it acts.
+      security:
+      - bearer: []
+      responses:
+        "204":
+          description: No Content
+          content:
+            application/json:
+              schema: {}
+        "401":
+          $ref: "#/components/responses/unauthenticated"
+        "403":
+          $ref: "#/components/responses/forbidden"
+        "404":
+          $ref: "#/components/responses/not_found"
+        "429":
+          $ref: "#/components/responses/rate_limited"
+        "500":
+          $ref: "#/components/responses/internal"
+        "503":
+          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    get:
+      operationId: getV1Stars
+      summary: The caller's stars across every space.
+      description: Asks the authorizer for file.list before it acts.
+      security:
+      - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {}
+        "401":
+          $ref: "#/components/responses/unauthenticated"
+        "403":
+          $ref: "#/components/responses/forbidden"
+        "404":
+          $ref: "#/components/responses/not_found"
+        "429":
+          $ref: "#/components/responses/rate_limited"
+        "500":
+          $ref: "#/components/responses/internal"
+        "503":
+          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    put:
+      operationId: putV1Stars
+      summary: Star an object; idempotent.
+      description: Asks the authorizer for file.write before it acts.
+      security:
+      - bearer: []
+      responses:
+        "204":
+          description: No Content
+          content:
+            application/json:
+              schema: {}
+        "401":
+          $ref: "#/components/responses/unauthenticated"
+        "403":
+          $ref: "#/components/responses/forbidden"
+        "404":
+          $ref: "#/components/responses/not_found"
+        "429":
+          $ref: "#/components/responses/rate_limited"
+        "500":
+          $ref: "#/components/responses/internal"
+        "503":
+          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v1/trash:
+    delete:
+      operationId: deleteV1Trash
+      summary: Empty the trash, or one path with ?path=.
+      description: Asks the authorizer for file.delete before it acts.
+      security:
+      - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {}
+        "401":
+          $ref: "#/components/responses/unauthenticated"
+        "403":
+          $ref: "#/components/responses/forbidden"
+        "404":
+          $ref: "#/components/responses/not_found"
+        "429":
+          $ref: "#/components/responses/rate_limited"
+        "500":
+          $ref: "#/components/responses/internal"
+        "503":
+          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    get:
+      operationId: getV1Trash
+      summary: What is trashed and still restorable, newest first.
+      description: Asks the authorizer for file.list before it acts.
+      security:
+      - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {}
+        "401":
+          $ref: "#/components/responses/unauthenticated"
+        "403":
+          $ref: "#/components/responses/forbidden"
+        "404":
+          $ref: "#/components/responses/not_found"
+        "429":
+          $ref: "#/components/responses/rate_limited"
+        "500":
+          $ref: "#/components/responses/internal"
+        "503":
+          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v1/trash/restore:
+    post:
+      operationId: postV1TrashRestore
+      summary: Return one object to its path.
+      description: Asks the authorizer for file.restore before it acts.
+      security:
+      - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {}
+        "401":
+          $ref: "#/components/responses/unauthenticated"
+        "403":
+          $ref: "#/components/responses/forbidden"
+        "404":
+          $ref: "#/components/responses/not_found"
+        "429":
+          $ref: "#/components/responses/rate_limited"
+        "500":
+          $ref: "#/components/responses/internal"
+        "503":
+          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v1/uploads:
+    post:
+      operationId: postV1Uploads
+      summary: Open an upload session and answer its presigned part URLs.
+      description: Asks the authorizer for upload.write before it acts.
+      security:
+      - bearer: []
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: {}
+        "401":
+          $ref: "#/components/responses/unauthenticated"
+        "403":
+          $ref: "#/components/responses/forbidden"
+        "404":
+          $ref: "#/components/responses/not_found"
+        "429":
+          $ref: "#/components/responses/rate_limited"
+        "500":
+          $ref: "#/components/responses/internal"
+        "503":
+          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v1/uploads/{id}:
+    delete:
+      operationId: deleteV1UploadsById
+      summary: Abort the session and discard its parts.
+      description: Asks the authorizer for upload.write before it acts.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      security:
+      - bearer: []
+      responses:
+        "204":
+          description: No Content
+          content:
+            application/json:
+              schema: {}
+        "401":
+          $ref: "#/components/responses/unauthenticated"
+        "403":
+          $ref: "#/components/responses/forbidden"
+        "404":
+          $ref: "#/components/responses/not_found"
+        "429":
+          $ref: "#/components/responses/rate_limited"
+        "500":
+          $ref: "#/components/responses/internal"
+        "503":
+          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v1/uploads/{id}/complete:
+    post:
+      operationId: postV1UploadsByIdComplete
+      summary: Assemble the parts into the object at the session's path.
+      description: Asks the authorizer for upload.write before it acts.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      security:
+      - bearer: []
+      responses:
+        "201":
+          description: Created
           content:
             application/json:
               schema: {}

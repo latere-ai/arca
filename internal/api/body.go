@@ -32,6 +32,14 @@ const MaxBodyBytes = 64 << 20
 // JSONMediaType is the one content type a body route accepts.
 const JSONMediaType = "application/json"
 
+// The two request headers this surface negotiates on, named rather than
+// spelled at each site that reads one, so a handler and the test that
+// drives it cannot disagree by a letter.
+const (
+	HeaderContentType = "Content-Type"
+	HeaderAccept      = "Accept"
+)
+
 // DecodeBody reads a JSON request body into a T. A body route refuses a
 // content type that is not JSON, a field the endpoint does not know, a body
 // past the bound, and anything that is not JSON at all, each with the code
@@ -79,7 +87,7 @@ func JSONRequest(r *http.Request) error {
 	if err := Acceptable(r); err != nil {
 		return err
 	}
-	raw := r.Header.Get("Content-Type")
+	raw := r.Header.Get(HeaderContentType)
 	if raw == "" {
 		return Refuse(CodeUnsupportedMediaType, "the body carries no content type; this endpoint reads %s", JSONMediaType)
 	}
@@ -93,7 +101,7 @@ func JSONRequest(r *http.Request) error {
 // Acceptable reports whether the caller takes a JSON answer. A request that
 // sends no Accept takes anything, which is most of them.
 func Acceptable(r *http.Request) error {
-	raw := r.Header.Get("Accept")
+	raw := r.Header.Get(HeaderAccept)
 	if raw == "" {
 		return nil
 	}

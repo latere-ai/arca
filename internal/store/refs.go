@@ -16,16 +16,17 @@ import (
 // table added with the column and left out of this statement is bytes
 // deleted under a live row.
 //
-// The union is two tables today and three from spec 007, which creates
-// upload_sessions: an incomplete multipart's parts are invisible to a
-// listing, so its session row is the only durable pointer to them. The
-// service Arca replaces left that table out of the same check while calling
-// it "the single invariant deciding whether a blob may be deleted", and what
-// kept the omission out of reach there was the reaper's 24 hour grace window
+// The union is three tables. The third is upload_sessions, which spec 007
+// creates: an incomplete multipart's parts are invisible to a listing, so
+// its session row is the only durable pointer to them. The service Arca
+// replaces left that table out of the same check while calling it "the
+// single invariant deciding whether a blob may be deleted", and what kept
+// the omission out of reach there was the reaper's 24 hour grace window
 // rather than the invariant.
 const objectReferencedSQL = `
 	SELECT EXISTS (SELECT 1 FROM files WHERE object_id = $1)
-	    OR EXISTS (SELECT 1 FROM file_versions WHERE object_id = $1)`
+	    OR EXISTS (SELECT 1 FROM file_versions WHERE object_id = $1)
+	    OR EXISTS (SELECT 1 FROM upload_sessions WHERE object_id = $1)`
 
 // ObjectReferenced reports whether any row still points at the object id.
 // It is the one statement deciding whether bytes may be deleted, so the
