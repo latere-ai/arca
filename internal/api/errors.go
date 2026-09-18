@@ -186,8 +186,13 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 	if len(refusal.Fields) > 0 {
 		details["fields"] = refusal.Fields
 	}
-	httpjson.WriteError(w, Status(refusal.Code), httpjson.Error{
-		Code: refusal.Code, Message: Sentence(refusal.Code), Details: details,
+	// The code goes out through the drift seam of spec 017: the refusal's
+	// own in every deployment, and one row's substitute under
+	// ARCA_TEST_DRIFT. It is read here rather than at each refusal site
+	// because this is the one place a code reaches the wire.
+	code := driftedCode(refusal.Code)
+	httpjson.WriteError(w, Status(code), httpjson.Error{
+		Code: code, Message: Sentence(code), Details: details,
 	})
 }
 
