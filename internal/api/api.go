@@ -27,6 +27,7 @@ package api
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -74,6 +75,13 @@ type Options struct {
 	// the verifier, asks one action of spec 006's vocabulary, and joins the
 	// one list the mux and the document are both built from.
 	Routes []Route
+	// Metrics is spec 018's seam on the request path. Nil records nothing,
+	// which is what a test of the frame and a replica exporting nothing both
+	// want.
+	Metrics Metrics
+	// Logger is where the one line per request goes. Nil is slog's default,
+	// which is the logger cmd/arcad bootstrapped.
+	Logger *slog.Logger
 	// Now is the clock request ids are minted on. time.Now when nil.
 	Now func() time.Time
 }
@@ -92,6 +100,10 @@ type API struct {
 	// eventTail is the handler of spec 010, built once over the log and the
 	// database of this build.
 	eventTail http.Handler
+	// metrics and logs are spec 018's two: the counters of the request path
+	// and the line each request ends on. Neither is ever nil.
+	metrics Metrics
+	logs    *slog.Logger
 }
 
 // New builds the surface. It refuses to build without the two of spec 006,
@@ -117,6 +129,10 @@ func New(o Options) (*API, error) {
 		perSubject: buckets(o.RequestsPerMinute),
 		perAddress: buckets(o.UnauthenticatedRequestsPerMinute),
 		rows:       rows,
+		metrics:    o.Metrics, logs: o.Logger,
+	}
+	if a.metrics == nil {
+		a.metrics = nothing{}
 	}
 	a.eventTail = events.Handler(o.Events, o.Querier, eventGuard{api: a}, refuseEvent)
 	a.document = a.build(rows)
@@ -142,7 +158,8 @@ func (a *API) Mount(mux *http.ServeMux) {
 }
 
 func (a *API) mount(mux *http.ServeMux, rows []route) {
-	mux.Handle("GET /openapi.json", a.requestID(http.HandlerFunc(a.openapi)))
+	const document = "GET /openapi.json"
+	mux.Handle(document, a.requestID(a.observe(naming(document, http.HandlerFunc(a.openapi)))))
 	guarded := http.NewServeMux()
 	guarded.Handle("/", http.HandlerFunc(a.notFound))
 	for _, r := range rows {
@@ -150,14 +167,24 @@ func (a *API) mount(mux *http.ServeMux, rows []route) {
 		answer := r.handler
 		handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) { answer(a, w, req) })
 		if r.public {
-			mux.Handle(pattern, a.requestID(a.limitAddress(handler)))
+			mux.Handle(pattern, a.requestID(a.observe(naming(pattern, a.limitAddress(handler)))))
 			continue
 		}
-		guarded.Handle(pattern, handler)
+		guarded.Handle(pattern, naming(pattern, handler))
 	}
-	mux.Handle("/v1/", a.requestID(
+	// The observation of spec 018 sits directly inside the request id and
+	// outside everything else: outside the verifier and outside the rate
+	// limit, because a 401 and a 429 are requests this replica served and an
+	// error rate computed without them is the wrong number, and inside the
+	// request id because the line it writes carries that id.
+	//
+	// What it cannot see from there reaches it from inside: the route
+	// through the wrapper each registration carries, the code through the
+	// one place a refusal is written, and the subject through the limit that
+	// runs the moment the verifier settles one.
+	mux.Handle("/v1/", a.requestID(a.observe(
 		a.verifier.Middleware(a.refuseVerification)(
-			a.limitSubject(guarded))))
+			a.limitSubject(guarded)))))
 }
 
 // notFound answers a path under /v1 that no row of the route table

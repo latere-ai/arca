@@ -49,6 +49,10 @@ func allowed(b *ratelimit.Buckets, key string) bool {
 func (a *API) limitSubject(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		subject := auth.CallerFrom(r.Context()).Subject
+		// The verifier has just settled who this is, and the line of spec
+		// 018 names the caller by that subject, so it is written where the
+		// observation outside can read it.
+		knowing(r.Context(), subject)
 		if !allowed(a.perSubject, subject) {
 			WriteError(w, r, Refuse(CodeRateLimited, "the subject %s is over its rate for this minute", subject))
 			return
@@ -85,6 +89,9 @@ func (a *API) chargeAddress(r *http.Request) bool {
 // meets the same limit as one guessing link tokens, and a caller whose token
 // verifies pays neither.
 func (a *API) refuseVerification(w http.ResponseWriter, r *http.Request, err error) {
+	// The row of the reason table is the label of spec 018's counter, and
+	// the verifier's refusal is the one thing that carries it.
+	a.metrics.TokenRejected(auth.ReasonOf(err))
 	if !a.chargeAddress(r) {
 		WriteError(w, r, Refuse(CodeRateLimited, "this address is over its rate for this minute"))
 		return

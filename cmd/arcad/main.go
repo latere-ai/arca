@@ -29,6 +29,7 @@ import (
 	"latere.ai/x/arca/internal/blob"
 	"latere.ai/x/arca/internal/config"
 	"latere.ai/x/arca/internal/events"
+	"latere.ai/x/arca/internal/metrics"
 	"latere.ai/x/arca/internal/reaper"
 	"latere.ai/x/arca/internal/store"
 	"latere.ai/x/arca/internal/version"
@@ -100,10 +101,11 @@ func reap(ctx context.Context, args []string, getenv config.Getenv, stdout, stde
 		return fail(stderr, errors.New("ARCA_REAP_INTERVAL is 0, which turns the loop off; run arcad reap -once, or set an interval"))
 	}
 
-	bucket, err := blob.NewS3(ctx, bucketOptions(cfg))
+	s3, err := blob.NewS3(ctx, bucketOptions(cfg))
 	if err != nil {
 		return fail(stderr, err)
 	}
+	bucket := recorder.Bucket(s3)
 	db, err := store.Open(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return fail(stderr, err)
@@ -176,6 +178,10 @@ func reaperOptions(cfg config.Config, db *store.DB, bucket blob.Store, dryRun bo
 type ledger struct {
 	log   events.Log
 	usage events.Ledger
+	// metrics is spec 018's counter of the rows the log took, which is here
+	// rather than in internal/events because this is the one place a
+	// workspace's mutation becomes a row of that log.
+	metrics *metrics.Set
 }
 
 // Append writes one row of the log. The action is one word of spec 010's
@@ -190,6 +196,9 @@ func (l ledger) Append(ctx context.Context, q store.Querier, e workspaces.Event)
 		Owner: e.Owner, Path: e.Path, Action: events.Action(e.Action),
 		Actor: e.Actor, Detail: e.Detail,
 	})
+	if err == nil {
+		l.metrics.EventAppended(e.Action)
+	}
 	return err
 }
 
@@ -205,7 +214,14 @@ func (l ledger) Release(ctx context.Context, q store.Querier, owner string, byte
 // reconciler hands every pass a querier and a dry flag; this sweep opens its
 // own transactions, one per row it ends, because a reap is a row, a lease and
 // a log entry written together.
-type leasePass struct{ service *workspaces.Service }
+type leasePass struct {
+	service *workspaces.Service
+	// metrics is spec 018's arca_lease_expiries_total. The reconciler counts
+	// the same sweep as a finding of kind lease_expired; this is the rate a
+	// platform alerts on, and it is recorded here because the sweep's own
+	// package knows nothing of a registry.
+	metrics *metrics.Set
+}
 
 // Sweep ends what outlived its deadline, and runs nothing at all on a dry
 // run. The sweep has no counting half: every statement it issues is a write,
@@ -216,7 +232,9 @@ func (p leasePass) Sweep(ctx context.Context, _ store.Querier, now time.Time, dr
 	if dry {
 		return 0, nil
 	}
-	return p.service.ExpireLeases(ctx, now)
+	ended, err := p.service.ExpireLeases(ctx, now)
+	p.metrics.LeaseExpired(ended)
+	return ended, err
 }
 
 // bucketOptions is the bucket client every role opens, from the one table of
@@ -305,10 +323,14 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	// configuration, and the readiness check below is what reaches the
 	// store. A store that is briefly unreachable at start-up therefore
 	// delays readiness rather than crashing the process.
-	bucket, err := blob.NewS3(ctx, bucketOptions(cfg))
+	s3, err := blob.NewS3(ctx, bucketOptions(cfg))
 	if err != nil {
 		return fail(stderr, err)
 	}
+	// Spec 018's decorator: every call this replica makes against the bucket
+	// is counted by operation and result, timed, and opened as a span named
+	// bucket.<op>. internal/blob is left holding the S3 contract alone.
+	bucket := recorder.Bucket(s3)
 
 	db, err := store.Open(ctx, cfg.DatabaseURL)
 	if err != nil {
@@ -337,6 +359,10 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		InsecureIssuers: cfg.OIDCInsecureIssuers,
 		AuthorizerURL:   cfg.AuthorizerURL, AuthorizerToken: cfg.AuthorizerToken,
 		AdminSubjects: cfg.AdminSubjects,
+		// Spec 018's identity row: the duration of a call to the operator's
+		// endpoint, and the outcome of every decision this node acted on,
+		// whichever of the two answered.
+		Observe: recorder.AuthorizerCall, Decided: recorder.Decided,
 	})
 	if err != nil {
 		return fail(stderr, err)
@@ -351,7 +377,8 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		DB: db, Workspaces: store.NewWorkspaces(), Attachments: store.NewAttachments(),
 		Objects: store.NewWorkspaceObjects(), Bucket: bucket, Prefix: cfg.BucketPrefix,
 		Authorizer: identity.Authorizer,
-		Ledger:     ledger{log: events.NewLog(), usage: events.NewLedger()},
+		Ledger:     ledger{log: events.NewLog(), usage: events.NewLedger(), metrics: recorder},
+		Metrics:    recorder,
 	})
 	if err != nil {
 		return fail(stderr, err)
@@ -367,6 +394,9 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		// The twelve rows of spec 009, contributed by the package that owns
 		// their behaviour and registered through the one seam of register.go.
 		Routes: workspaces.Routes(durable),
+		// Spec 018's request path: the counters and the one line per request.
+		// The logger is slog's default, which the bootstrap above set.
+		Metrics: recorder,
 	})
 	if err != nil {
 		return fail(stderr, err)
@@ -378,7 +408,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	// ARCA_REAP_INTERVAL to 0 here and runs arcad reap as a process of its
 	// own. It starts before the listeners, so a reconciler that cannot be
 	// built fails the start-up before a port is bound.
-	if err := startReaper(ctx, cfg, db, bucket, leasePass{durable}, recorder, stdout); err != nil {
+	if err := startReaper(ctx, cfg, db, bucket, leasePass{service: durable, metrics: recorder}, recorder, stdout); err != nil {
 		return fail(stderr, err)
 	}
 

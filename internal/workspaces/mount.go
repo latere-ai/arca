@@ -117,6 +117,14 @@ func (s *Service) materialize(w http.ResponseWriter, r *http.Request) {
 		}
 		files = append(files, File{Entry: e, URL: url})
 	}
+	// The bytes of spec 018: what the manifest hands out, which is what the
+	// client will fetch from the bucket. Nothing of it passes through this
+	// process, so this is the only place the number exists.
+	var out int64
+	for _, f := range files {
+		out += f.Size
+	}
+	s.metrics.Out("materialize", out)
 	at := pinnedAt(ws, a)
 	httpjson.Write(w, http.StatusOK, Manifest{Root: Root(ws.Slug), PinnedAt: &at, Files: files})
 }
@@ -238,6 +246,14 @@ func (s *Service) sync(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, r, err)
 		return
 	}
+	// The bytes of spec 018, once the boundary committed: what the writer
+	// declared it had put under the root, which is what the space now holds
+	// of this sync.
+	var in int64
+	for _, e := range body.Files {
+		in += e.Size
+	}
+	s.metrics.In("sync", in)
 	s.sweep(ctx, freed)
 	httpjson.Write(w, http.StatusOK, result)
 }

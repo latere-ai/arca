@@ -179,6 +179,10 @@ func FromAuth(err error) *Refusal {
 // query, a key or an internal type, even in the developer detail.
 func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 	refusal := asRefusal(err)
+	// The code is what spec 018 labels the request with, and this is the one
+	// place a refusal of this surface is written, so it is the one place the
+	// label is settled.
+	noting(r.Context(), refusal.Code)
 	details := map[string]any{"request_id": RequestID(r.Context())}
 	if refusal.Detail != "" {
 		details["detail"] = refusal.Detail

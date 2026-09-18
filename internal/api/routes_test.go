@@ -5,6 +5,7 @@ package api
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -263,6 +264,11 @@ func newHarness(t *testing.T, opts ...func(*Options)) *harness {
 		// package's own business.
 		Events: &fakeLog{},
 		Routes: []Route{p.route()},
+		// The request line of spec 018 goes nowhere unless a test asks for
+		// it. Without this the frame writes through slog's default, which in
+		// a test binary is standard error, and every test of the surface
+		// would print a line it does not read.
+		Logger: slog.New(slog.DiscardHandler),
 	}
 	for _, opt := range opts {
 		opt(&o)
