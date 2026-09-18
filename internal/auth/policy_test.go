@@ -6,6 +6,7 @@ package auth_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -13,56 +14,92 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"latere.ai/x/pkg/authz"
 
 	"latere.ai/x/arca/authorizer"
 	"latere.ai/x/arca/internal/auth"
+	"latere.ai/x/arca/internal/shares"
+	"latere.ai/x/arca/internal/store"
 )
 
 // carol is the third subject of the policy table: neither the owner of the
 // space nor an administrator of the installation.
 const carol = "https://issuer.example|carol"
 
-// grants is a grants table for a test: one permission, held by one subject,
-// on one prefix of one space. The real one arrives with spec 008.
-type grants struct {
-	owner, subject, prefix string
-	held                   auth.Permission
-	err                    error
+// table is the grants table of spec 008 as a case writes one. The two seams
+// the policy reads it through are the real lookups of internal/shares, so
+// what this test drives is the query an installation runs: the doubles it
+// carried while spec 008 was open are gone with that spec.
+type table struct {
+	// Shares carries the queries no case here calls. The two that are
+	// called are written out below.
+	store.Shares
+	rows []store.Grant
+	err  error
 }
 
-func (g grants) Permission(_ context.Context, owner, subject, path string) (auth.Permission, error) {
-	switch {
-	case g.err != nil:
-		return auth.PermissionNone, g.err
-	case owner != g.owner || subject != g.subject:
-		return auth.PermissionNone, nil
-	case path != g.prefix && !strings.HasPrefix(path, g.prefix+"/"):
-		return auth.PermissionNone, nil
+// Covering is the query the grant step runs.
+func (t table) Covering(_ context.Context, _ store.Querier, owner, path string) ([]store.Grant, error) {
+	if t.err != nil {
+		return nil, t.err
 	}
-	return g.held, nil
-}
-
-// links is a public link table for a test: one live link on one space.
-type links struct {
-	id, owner string
-	err       error
-}
-
-func (l links) Live(_ context.Context, id, owner, _ string) (bool, error) {
-	if l.err != nil {
-		return false, l.err
+	prefixes := store.PrefixesOf(path)
+	var out []store.Grant
+	for _, g := range t.rows {
+		if g.Owner == owner && g.Status == store.StatusActive && slices.Contains(prefixes, g.PathPrefix) {
+			out = append(out, g)
+		}
 	}
-	return id == l.id && owner == l.owner, nil
+	return out, nil
+}
+
+// Live is the query the link step runs.
+func (t table) Live(_ context.Context, _ store.Querier, id, owner string) (store.Grant, error) {
+	if t.err != nil {
+		return store.Grant{}, t.err
+	}
+	for _, g := range t.rows {
+		if g.ID == id && g.Owner == owner && g.GranteeKind != store.GranteeSubject &&
+			g.Status == store.StatusActive {
+			return g, nil
+		}
+	}
+	return store.Grant{}, fmt.Errorf("store: read the link: %w", pgx.ErrNoRows)
+}
+
+// pool is what the lookups need of a database. The two queries above read no
+// querier, so it hands them none.
+type pool struct{}
+
+func (pool) Querier() store.Querier { return nil }
+
+func (pool) Tx(ctx context.Context, fn func(store.Querier) error) error { return fn(nil) }
+
+// granted is the table a case holds: one live link on files/reports of
+// alice's space, and the grant the case gives carol, if any.
+func granted(held auth.Permission, prefix string) table {
+	rows := table{rows: []store.Grant{{
+		ID: "01J8LINK", Owner: alice, PathPrefix: "files/reports", GranteeKind: store.GranteeLink,
+		Permission: string(auth.PermissionRead), Token: "t0ken", Status: store.StatusActive,
+	}}}
+	if held != auth.PermissionNone {
+		rows.rows = append(rows.rows, store.Grant{
+			ID: "01J8GRANT", Owner: alice, PathPrefix: prefix, GranteeKind: store.GranteeSubject,
+			Grantee: carol, Permission: string(held), Status: store.StatusActive,
+		})
+	}
+	return rows
 }
 
 // policy is the owner policy with alice as the space's owner, bob as an
 // administrator, and carol holding whatever the case grants her.
 func policy(held auth.Permission, prefix string) *auth.OwnerPolicy {
+	rows := granted(held, prefix)
 	return &auth.OwnerPolicy{
 		Admins: []string{bob},
-		Grants: grants{owner: alice, subject: carol, prefix: prefix, held: held},
-		Links:  links{id: "01J8LINK", owner: alice},
+		Grants: shares.Grants(pool{}, rows),
+		Links:  shares.Links(pool{}, rows),
 	}
 }
 
@@ -290,7 +327,7 @@ func TestTheLadderCoversTheWholeVocabulary(t *testing.T) {
 // caller is never told no because a query failed.
 func TestAGrantsTableThatCannotAnswerIsNoDecision(t *testing.T) {
 	boom := errors.New("the connection is gone")
-	p := &auth.OwnerPolicy{Admins: []string{bob}, Grants: grants{err: boom}}
+	p := &auth.OwnerPolicy{Admins: []string{bob}, Grants: shares.Grants(pool{}, table{err: boom})}
 	_, err := p.Authorize(t.Context(), authz.Request{
 		Subject: carol, Action: authorizer.ActionFileRead, Claims: map[string]any{},
 		Resource: authorizer.File{ID: "01J8R4", Owner: alice, Path: "files/x", Plane: "files"}.Resource(),
@@ -299,7 +336,7 @@ func TestAGrantsTableThatCannotAnswerIsNoDecision(t *testing.T) {
 		t.Fatalf("a failing grants table answered %v", err)
 	}
 
-	p = &auth.OwnerPolicy{Links: links{err: boom}}
+	p = &auth.OwnerPolicy{Links: shares.Links(pool{}, table{err: boom})}
 	_, err = p.Authorize(t.Context(), authz.Request{
 		Action: authorizer.ActionLinkRead, Claims: map[string]any{},
 		Resource: authorizer.Link{ID: "01J8LINK", Owner: alice, Path: "files/x"}.Resource(),

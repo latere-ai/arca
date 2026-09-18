@@ -60,6 +60,33 @@ func TestTheThreeVerifierExceptionsAndNoMore(t *testing.T) {
 	}
 }
 
+// TestAReservedWordWinsOverTheWildcardBesideIt is criterion 4 of spec 013:
+// where a literal sits beside a wildcard in the same position, the literal
+// wins and the word is reserved. with-me is not a share id, and the route it
+// names asks a different action from the one an id would.
+func TestAReservedWordWinsOverTheWildcardBesideIt(t *testing.T) {
+	h := newHarness(t, routeTable)
+	h.endpoint.Allow(stub.Rule{Subject: "*", Action: "*", Resource: "*", Allow: true})
+	h.do(t, http.MethodGet, "/v1/shares/with-me", h.bearer())
+	asked := h.endpoint.Requests()
+	if len(asked) != 1 || asked[0].Action != authorizer.ActionShareList {
+		t.Fatalf("GET /v1/shares/with-me asked %v; with-me is a reserved word and not a share id", asked)
+	}
+}
+
+// TestABuildThatBindsNoServiceAnswersNotImplemented: a row is registered at
+// its right place either way, which is what keeps the surface one
+// declaration through the phases of spec 019.
+func TestABuildThatBindsNoServiceAnswersNotImplemented(t *testing.T) {
+	h := newHarness(t, routeTable, func(o *Options) { o.Shares = nil })
+	for _, r := range routeTable {
+		w := h.do(t, r.method, fill(r.path), h.bearer())
+		if w.Code != http.StatusNotImplemented {
+			t.Errorf("%s %s = %d with no service bound", r.method, r.path, w.Code)
+		}
+	}
+}
+
 // TestEveryActionIsOneOfTheVocabulary: a row asking a string outside spec
 // 006's table is a question no authorizer can answer, and the shared client
 // refuses it before the wire, so it would be an outage rather than a deny.
@@ -188,8 +215,51 @@ var probeRoute = route{
 func fill(path string) string {
 	out := strings.ReplaceAll(path, "{token}", "tkn")
 	out = strings.ReplaceAll(out, "{owner}", "https%3A%2F%2Fissuer.example%7C9ab3")
+	out = strings.ReplaceAll(out, "{id}", "01J8GRANT")
 	out = strings.ReplaceAll(out, "{path...}", "files/reports/q3.pdf")
 	return out
+}
+
+// bound is the shares service this harness binds: one method per row of spec
+// 008's surface, each asking the action of its row through the seam every
+// handler decides through and acting afterwards.
+//
+// It stands in for internal/shares, whose behaviour is proved in that
+// package. What the tests here need of it is the binding: a row of the table
+// reaches the implementation the node handed over, asks once, and does not
+// act on a deny.
+type bound struct{ decider *auth.Authorizer }
+
+func (b bound) CreateGrant(w http.ResponseWriter, r *http.Request) {
+	b.ask(w, r, authorizer.ActionShareCreate)
+}
+
+func (b bound) ListGrants(w http.ResponseWriter, r *http.Request) {
+	b.ask(w, r, authorizer.ActionShareList)
+}
+
+func (b bound) GrantsWithMe(w http.ResponseWriter, r *http.Request) {
+	b.ask(w, r, authorizer.ActionShareList)
+}
+
+func (b bound) ReadGrant(w http.ResponseWriter, r *http.Request) {
+	b.ask(w, r, authorizer.ActionShareRead)
+}
+
+func (b bound) RevokeGrant(w http.ResponseWriter, r *http.Request) {
+	b.ask(w, r, authorizer.ActionShareRevoke)
+}
+
+// ask puts the one question the row names and acts on an allow.
+func (b bound) ask(w http.ResponseWriter, r *http.Request, action string) {
+	res := authorizer.Share{
+		ID: r.PathValue("id"), Owner: "https://issuer.example|9ab3", Path: "files/reports",
+	}.Resource()
+	if _, err := b.decider.Decide(r.Context(), action, res); err != nil {
+		WriteError(w, r, FromAuth(err))
+		return
+	}
+	httpjson.Write(w, http.StatusOK, map[string]string{"state": "acted"})
 }
 
 // harness is one mounted surface with the stub issuer and the stub
@@ -216,6 +286,7 @@ func newHarness(t *testing.T, rows []route, opts ...func(*Options)) *harness {
 	}
 	o := Options{
 		Verifier: id.Verifier, Authorizer: id.Authorizer,
+		Shares:    bound{decider: id.Authorizer},
 		PublicURL: "https://storage.example",
 	}
 	for _, opt := range opts {

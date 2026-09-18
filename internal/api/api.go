@@ -58,6 +58,9 @@ type Options struct {
 	PublicURL                        string
 	RequestsPerMinute                int
 	UnauthenticatedRequestsPerMinute int
+	// Shares answers the rows of spec 008. A build that binds none
+	// registers those rows and answers not_implemented from them.
+	Shares Shares
 	// Now is the clock request ids are minted on. time.Now when nil.
 	Now func() time.Time
 }
@@ -70,6 +73,7 @@ type API struct {
 	publicURL  string
 	perSubject *ratelimit.Buckets
 	perAddress *ratelimit.Buckets
+	shares     Shares
 	clock      func() time.Time
 	document   []byte
 }
@@ -86,7 +90,7 @@ func New(o Options) (*API, error) {
 	}
 	a := &API{
 		verifier: o.Verifier, authorizer: o.Authorizer,
-		publicURL: o.PublicURL, clock: o.Now,
+		publicURL: o.PublicURL, shares: o.Shares, clock: o.Now,
 		perSubject: buckets(o.RequestsPerMinute),
 		perAddress: buckets(o.UnauthenticatedRequestsPerMinute),
 	}

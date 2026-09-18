@@ -6,6 +6,7 @@ package api
 import (
 	"net/http"
 
+	"latere.ai/x/arca/authorizer"
 	"latere.ai/x/arca/internal/apidocs"
 )
 
@@ -40,12 +41,77 @@ type route struct {
 	handler func(*API, http.ResponseWriter, *http.Request)
 }
 
-// routeTable is the surface. Today it is the frame of spec 013: the three public
-// link routes of spec 008, registered outside the verifier because that is
-// where they belong and because registering them later would be registering
-// them somewhere else. Every other row of spec 013's table arrives with the
-// spec that owns its behaviour, on the phases of spec 019.
+// Shares is the surface of spec 008 as internal/shares implements it: one
+// method per row of the route table below, each the handler of one route.
+//
+// It is an interface because the behaviour of a route belongs to the spec
+// that owns it and the declaration of the surface belongs here. A package of
+// a later phase implements the interface of its own rows, the node hands the
+// implementation over at start, and neither package imports the other's
+// handlers.
+type Shares interface {
+	// CreateGrant answers POST /v1/shares.
+	CreateGrant(w http.ResponseWriter, r *http.Request)
+	// ListGrants answers GET /v1/shares.
+	ListGrants(w http.ResponseWriter, r *http.Request)
+	// GrantsWithMe answers GET /v1/shares/with-me.
+	GrantsWithMe(w http.ResponseWriter, r *http.Request)
+	// ReadGrant answers GET /v1/shares/{id}.
+	ReadGrant(w http.ResponseWriter, r *http.Request)
+	// RevokeGrant answers DELETE /v1/shares/{id}.
+	RevokeGrant(w http.ResponseWriter, r *http.Request)
+}
+
+// share dispatches one row of spec 008's surface to the implementation the
+// node bound, and answers not_implemented in a build that bound none. A row
+// is registered at its right place either way, which is what keeps the
+// surface one declaration.
+func (a *API) share(w http.ResponseWriter, r *http.Request, h func(Shares, http.ResponseWriter, *http.Request)) {
+	if a.shares == nil {
+		WriteError(w, r, Refuse(CodeNotImplemented, "this build binds no shares and links service"))
+		return
+	}
+	h(a.shares, w, r)
+}
+
+// routeTable is the surface. Today it is the frame of spec 013 and the
+// grants of spec 008: the five routes a grant is created, read, listed and
+// revoked through, and the three public link routes, registered outside the
+// verifier because that is where they belong and because registering them
+// later would be registering them somewhere else. Every other row of spec
+// 013's table arrives with the spec that owns its behaviour, on the phases
+// of spec 019.
 var routeTable = []route{
+	{
+		method: http.MethodPost, path: "/v1/shares",
+		action: authorizer.ActionShareCreate, status: http.StatusCreated,
+		summary: "Grant a subject a permission on a subtree of a space.",
+		handler: func(a *API, w http.ResponseWriter, r *http.Request) { a.share(w, r, Shares.CreateGrant) },
+	},
+	{
+		method: http.MethodGet, path: "/v1/shares",
+		action: authorizer.ActionShareList, status: http.StatusOK,
+		summary: "The grants on a space.",
+		handler: func(a *API, w http.ResponseWriter, r *http.Request) { a.share(w, r, Shares.ListGrants) },
+	},
+	{
+		method: http.MethodGet, path: "/v1/shares/with-me",
+		action: authorizer.ActionShareList, status: http.StatusOK,
+		summary: "The grants whose grantee is the caller.",
+		handler: func(a *API, w http.ResponseWriter, r *http.Request) { a.share(w, r, Shares.GrantsWithMe) },
+	},
+	{
+		method: http.MethodGet, path: "/v1/shares/{id}",
+		action: authorizer.ActionShareRead, status: http.StatusOK,
+		summary: "One grant.",
+		handler: func(a *API, w http.ResponseWriter, r *http.Request) { a.share(w, r, Shares.ReadGrant) },
+	},
+	{
+		method: http.MethodDelete, path: "/v1/shares/{id}",
+		action: authorizer.ActionShareRevoke, status: http.StatusNoContent,
+		summary: "Revoke a grant.",
+		handler: func(a *API, w http.ResponseWriter, r *http.Request) { a.share(w, r, Shares.RevokeGrant) },
+	},
 	{
 		method: http.MethodGet, path: "/v1/shares/links/{token}/meta",
 		public: true, pending: true, status: http.StatusOK,

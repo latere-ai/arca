@@ -12,6 +12,7 @@ import (
 
 	"latere.ai/x/arca/authorizer"
 	"latere.ai/x/arca/internal/auth"
+	"latere.ai/x/arca/internal/shares"
 )
 
 // TestStartSelectsTheOwnerPolicyWithNoEndpoint: ARCA_AUTHORIZER_URL unset is
@@ -108,8 +109,8 @@ func TestStartWiresTheGrantsAndLinksIntoTheOwnerPolicy(t *testing.T) {
 	iss := issuer(t)
 	id, err := auth.Start(t.Context(), auth.Options{
 		Issuers: []string{iss.URL()}, Audience: audience,
-		Grants: grants{owner: alice, subject: carol, prefix: "files/reports", held: auth.PermissionRead},
-		Links:  links{id: "01J8LINK", owner: alice},
+		Grants: shares.Grants(pool{}, granted(auth.PermissionRead, "files/reports")),
+		Links:  shares.Links(pool{}, granted(auth.PermissionRead, "files/reports")),
 	})
 	if err != nil {
 		t.Fatalf("the node would not start: %v", err)
