@@ -628,6 +628,11 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	if err != nil {
 		return fail(stderr, err)
 	}
+	// The drift seam of spec 017, before the surface is built: it is read by
+	// the three places that own the answers it changes, and setting it after
+	// a request could be served would make which answer a caller got depend
+	// on when it asked.
+	api.SetDrift(cfg.TestDrift)
 	surface, err := api.New(api.Options{
 		Verifier: identity.Verifier, Authorizer: identity.Authorizer,
 		Links:                            sharing,
@@ -718,6 +723,15 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	// whether the endpoint they configured was picked up (spec 006).
 	_, _ = fmt.Fprintf(stdout, "arcad: %s listening public=%s internal=%s deciding=%q\n",
 		version.Version, publicLn.Addr(), internalLn.Addr(), identity.Mode)
+	// The drift seam of spec 017 is empty in every deployment, so a build
+	// that has one says so where an operator reads the start-up. It refuses
+	// what it should serve and grants nothing, which makes a seam set by
+	// accident a visible defect rather than a hole.
+	if drift := api.CurrentDrift(); drift != api.DriftNone {
+		_, _ = fmt.Fprintf(stdout,
+			"arcad: ARCA_TEST_DRIFT=%s, so this build answers the contract of spec 013 wrong in one named way; unset it for any installation that is not proving the conformance suite\n",
+			drift)
+	}
 
 	servers := []*http.Server{
 		{Handler: public, ReadHeaderTimeout: 10 * time.Second},

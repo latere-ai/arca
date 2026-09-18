@@ -30,11 +30,10 @@ func cleanPrefix(raw string) (string, error) {
 		return "", err
 	}
 	// A plane on its own is the whole of it, and anything deeper is read for
-	// the plane it is rooted in.
-	if plane := object.Plane(prefix); plane.Valid() {
-		return prefix, nil
-	}
-	if _, _, err := object.SplitPath(prefix); err != nil {
+	// the plane it is rooted in. Which prefixes are planes is the frame's
+	// answer rather than this package's own reading of spec 001, so the two
+	// planes stay one fact for every package above the frame.
+	if !api.PlaneServed(prefix) {
 		return "", api.Refuse(api.CodeUnknownPlane,
 			"a path begins with %q or %q, and %q begins with neither",
 			object.PlaneFiles.Prefix(), object.PlaneWorkspaces.Prefix(), prefix).About("path_prefix")

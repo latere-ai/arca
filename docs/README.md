@@ -30,6 +30,7 @@ everything is published on loopback.
 | `make run` | the stack, the stubs, the migrations, and the server, in that order |
 | `make run-down` | stops the server and the stubs and leaves the stack up, so a failed run is debuggable |
 | `make up`, `make down` | the stack alone |
+| `make test-conformance` | the conformance suite against an installation it brings up on the stack: every route of the [API spec](../specs/013-api.md) this build answers, every error code it can provoke, and the pagination and conditional requests that spec fixes. It runs against any other installation with `-url` and a token |
 | `make clean` | removes the stack with its volumes and the build output |
 
 What answers today is the server's own surface: `GET /` with the build

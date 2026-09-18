@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"latere.ai/x/pkg/authz"
+
+	"latere.ai/x/arca/internal/api"
 )
 
 // Defaults for the optional variables.
@@ -133,6 +135,18 @@ type Config struct {
 	// prefix and a test passes one map. cmd/arcad hands the value to
 	// pkg/otel, which reads the standard name.
 	OTelEndpoint string
+	// TestDrift names one way this build is to answer the contract wrong,
+	// so the conformance suite of spec 017 is proved to catch a server that
+	// does not serve spec 013 rather than only to pass one that does. Every
+	// value refuses something the server should serve or answers with the
+	// wrong shape, and none grants an authority the server would otherwise
+	// withhold, so a value set by accident is a visible defect and never a
+	// way past a decision. It is empty in every deployment, arcad says so in
+	// its log when it is not, and a value no drift is written for is refused
+	// here rather than ignored: such a value is a typo in the one that was
+	// meant, and a server that ignored it would report a suite as having
+	// caught a drift that never ran.
+	TestDrift api.Drift
 }
 
 // Database reads the one variable the migrate subcommand needs, so a
@@ -269,6 +283,11 @@ func Load(getenv Getenv) (Config, error) {
 	}
 	c.ReapInterval = duration(getenv("ARCA_REAP_INTERVAL"), DefaultReapInterval, "ARCA_REAP_INTERVAL", true, note)
 	c.TrashRetention = duration(getenv("ARCA_TRASH_RETENTION"), DefaultTrashRetention, "ARCA_TRASH_RETENTION", false, note)
+	if drift, err := api.ParseDrift(getenv("ARCA_TEST_DRIFT")); err != nil {
+		note("ARCA_TEST_DRIFT %s", err)
+	} else {
+		c.TestDrift = drift
+	}
 	if len(problems) > 0 {
 		sort.Strings(problems)
 		return Config{}, errors.New("configuration: " + strings.Join(problems, "; "))

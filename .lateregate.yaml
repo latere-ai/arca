@@ -16,6 +16,21 @@ release:
 
 cover:
   trim_prefix: latere.ai/x/arca/
+  exempt:
+    # Spec 017's suite is a black box driver: every case is a request
+    # against a running installation, so its statements execute only in a
+    # tier that has one. The unit run measures the machinery, and the tests
+    # beside it hold that to the contract: the error table against
+    # specs/013-api.md, every route and every group against the case list,
+    # the pending group, the skip reasons, the run's own names, the
+    # cleanup. The cases are run by `make test-conformance` and by the
+    # release pipeline's conformance job, neither of which feeds a profile
+    # here, so a floor over the unit run alone would be met by deleting
+    # cases rather than by writing them.
+    test/conformance: >-
+      the cases are requests against a running installation and run in the
+      conformance tier (spec 017); the unit run measures the machinery, and
+      the tier that runs the cases feeds no profile to this gate
 
 spec:
   status:

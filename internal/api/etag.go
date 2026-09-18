@@ -34,9 +34,11 @@ func ETag(checksum string) string {
 	return `"` + checksum + `"`
 }
 
-// SetETag answers the object's checksum on a read or a write.
+// SetETag answers the object's checksum on a read or a write. It is the one
+// place a validator reaches the wire, so the drift seam of spec 017 is read
+// here and every route that answers an ETag is covered by it.
 func SetETag(w http.ResponseWriter, checksum string) {
-	if tag := ETag(checksum); tag != "" {
+	if tag := ETag(driftedETag(checksum)); tag != "" {
 		w.Header().Set(HeaderETag, tag)
 	}
 }
