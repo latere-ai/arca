@@ -40,8 +40,8 @@ remember.
 
 | Class | Route | Bytes go | Server sees | Enforced |
 |---|---|---|---|---|
-| at or below `ARCA_INLINE_BYTES` | `PUT` of [[005-files]] | through the server | every byte | quota before the write, sha256 over the stream, `Content-Length` required |
-| above it, up to `ARCA_MAX_UPLOAD_BYTES` | the session below | client to bucket | no byte | quota at create and again at completion, the store's checksums, the assembled size |
+| at or below `ARCA_INLINE_BYTES` | `PUT` of [[005-files]] | through the server | every byte | the usage charge before the write, sha256 over the stream, `Content-Length` required |
+| above it, up to `ARCA_MAX_UPLOAD_BYTES` | the session below | client to bucket | no byte | the usage charge at create and again at completion, the store's checksums, the assembled size |
 
 A `PUT` above the boundary is `413` naming this API, and a session for a
 declared size at or below it is accepted, because a client that already
@@ -77,7 +77,7 @@ sequenceDiagram
 **Create.** `POST /v1/uploads` with `{owner, path, size, content_type}`
 asks `upload.write` on the target path and runs the same gate as a
 `PUT`: the path is validated, the workspace must be live
-([[009-workspaces]]), and quota admission runs against the declared
+([[009-workspaces]]), and usage admission runs against the declared
 size. Then it mints an object id, opens a multipart upload on its key,
 writes the session row, and presigns one URL per part.
 
@@ -105,12 +105,10 @@ the ETags the bucket returned. It asks `upload.write` again rather than
 one action over the whole flow keeps a client from passing a gate at
 create that it would fail at completion. The same conditional-write
 contract as `PUT` applies, carried by the same headers and checked
-before assembly so a doomed completion costs nothing: a write under
-`memory/` still requires `If-Match` or `If-None-Match: *`
-([[005-files]]).
+before assembly so a doomed completion costs nothing ([[005-files]]).
 
 Then, in order: assemble the parts, head the assembled object for its
-true size and ETag, re-check quota against that size rather than the
+true size and ETag, charge the difference between that size and the
 declared one, and write the row in one transaction that also captures
 the version and deletes the session. The response mirrors `PUT`, `201`
 for a create and `200` for an overwrite, with the checksum as the
@@ -149,10 +147,10 @@ and verified at three points.
    ETag. A wrong or missing one fails the assembly at the store, not at
    Arca, and answers `400`.
 3. **Whole object, by the head.** The assembled size is read back and
-   is what the row records and what the quota charges. The declared size
-   was a promise; the head is the fact. A completed object over the
-   space's limit is deleted and answers `413` rather than being kept and
-   billed.
+   is what the row records and what the space is charged. The declared
+   size was a promise; the head is the fact. A completed object past a
+   limit the authorizer's answer carried is deleted and answers `413`
+   rather than being kept and billed.
 
 The checksum of a multipart object is the store's composite ETag, so its
 row carries `checksum_kind = 'etag'` ([[004-metadata-store]]). It is not
@@ -164,7 +162,7 @@ part and keeps its own.
 ### Expiry and the abandoned session
 
 A session expires 24 hours after it is created, recorded in
-`expires_at`. The reaper of [[010-quotas-events-and-reaper]] aborts
+`expires_at`. The reaper of [[010-events-and-reaper]] aborts
 every expired session's multipart and deletes its row, holding the row
 whenever the abort fails, for the reason above. It is the same pass that
 collects an object assembled by a completion that never committed.
@@ -191,8 +189,8 @@ From `internal/handler/uploads.go` and the archived spec
 | Arrives | Changes |
 |---|---|
 | the three routes, the fixed part size, the 1000 part cap, the presigned part URLs | unchanged |
-| quota at create against the declared size, again at completion against the assembled size | unchanged |
-| the CAS contract shared with `PUT`, including the `memory/` requirement | unchanged |
+| the charge at create against the declared size, again at completion against the assembled size | unchanged, with the charge applied to the ledger of [[010-events-and-reaper]] rather than recomputed |
+| the CAS contract shared with `PUT` | unchanged as an option; no path requires a precondition ([[005-files]]) |
 | the resumable completion, and the abort that keeps its row when the store's abort fails | unchanged, and the reasoning is written into this spec so the next reader does not undo it |
 | the session key `{key}@{rand}`, chosen so a session cannot clobber the live object | gone as a device: the key is the session's own object id, and the property holds by construction |
 | the owner of a session | the subject `<issuer>` and `<sub>`, and visibility is a question for [[006-identity]] rather than a comparison against `claims.Sub` in the handler |
@@ -205,20 +203,20 @@ From `internal/handler/uploads.go` and the archived spec
 
 Writes at or below the boundary ([[005-files]]), the bucket calls
 themselves ([[003-object-store]]), the reaper's schedule
-([[010-quotas-events-and-reaper]]), who may write
+([[010-events-and-reaper]]), who may write
 ([[006-identity]]), and the wire details ([[013-api]]).
 
 ## Acceptance criteria
 
 | # | Criterion | Proved by |
 |---|---|---|
-| 1 | A session created, uploaded part by part, and completed lands the object with the right size, checksum, event, and quota charge | the e2e tier against MinIO and Postgres |
+| 1 | A session created, uploaded part by part, and completed lands the object with the right size, checksum, event, and usage charge | the e2e tier against MinIO and Postgres |
 | 2 | A `PUT` above `ARCA_INLINE_BYTES` is `413` and names this API | `internal/files` handler test |
 | 3 | A declared size over `ARCA_MAX_UPLOAD_BYTES`, or over the part cap, is refused at create and opens no multipart | `internal/uploads` tests with `blob.Counting` |
-| 4 | A session whose declared size fits but whose assembled size exceeds the quota is refused at completion, and the assembled object is deleted | the store tier |
+| 4 | A session whose declared size fits but whose assembled size crosses the answer's limit is refused at completion, and the assembled object is deleted | `TestUsageOnComplete` and `TestMultipartOverrunIsReaped`, on the store tier |
 | 5 | Completion with a wrong part ETag is `400` and leaves no row | the store tier against MinIO |
 | 6 | A completion retried after a database failure succeeds without re-uploading a part | the store tier, with the row write failed once |
-| 7 | `If-Match` and `If-None-Match: *` behave at completion exactly as at `PUT`, and `memory/` without either is `428` | one table run against both handlers |
+| 7 | `If-Match` and `If-None-Match: *` behave at completion exactly as at `PUT`, and a completion with neither succeeds | one table run against both handlers |
 | 8 | An abort removes the multipart and the row, and an abort whose store call fails keeps the row and answers `502` | `internal/uploads` tests with a failing stub |
 | 9 | An expired session is aborted and removed by the reaper, and its parts are gone from the store | the e2e tier with the clock moved |
 | 10 | A session is invisible to every subject but its creator and an administrator | the conformance rows of [[017-conformance-suite]] |

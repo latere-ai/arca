@@ -7,7 +7,6 @@ depends_on:
   - specs/003-object-store.md
   - specs/004-metadata-store.md
   - specs/006-identity.md
-  - specs/011-webhooks.md
   - specs/013-api.md
 affects: [test/stubs/, test/e2e/, Makefile, compose.yaml, Dockerfile.stubs, .github/workflows/verify.yml, .lateregate.yaml, docs/]
 effort: medium
@@ -42,14 +41,17 @@ anywhere.
 ### The stubs
 
 One package per stub under `test/stubs/`, each with a handler and a test
-that drives every flag, and `test/stubs/cmd/arca-stubs` serving all three
-on three ports.
+that drives every flag, and `test/stubs/cmd/arca-stubs` serving both on
+two ports.
 
 | Stub | Serves | Behaviour |
 |---|---|---|
 | issuer | `/.well-known/openid-configuration`, `/jwks`, `POST /mint {sub, aud?, exp?, iat?, authorization_details?}` | a real OIDC issuer over an RS256 key set; mints any subject asked; `-alg es256` adds a second key and signs with it, for the ES256 case and the start-up key-set check of [[006-identity]]; `iat` and `exp` are settable so the 24 hour token-age rule is testable; `authorization_details` is passed through so a narrowed personal key is minted here and nowhere else. A token signed with an algorithm outside RS256 and ES256 is built by the verifier's own test, not offered here |
-| authorizer | the envelope of [[006-identity]], over the stub `latere.ai/x/pkg/authz` ships | allows everything except the probe resource, the id `probe` of kind `Space`, which is always denied, so `arcad check` has something to check; `-deny <action>` or the request header `X-Stub-Deny: <action>` refuses one action; `-filter <json>`, `-limits <json>`, and `-ttl <seconds>` ride every allow, so the quota override of [[010-quotas-events-and-reaper]] and the list filter of [[013-api]] are exercised; `-fail-mode timeout\|malformed\|status:<code>\|no-allow\|conn-drop` produces each failure [[006-identity]] names, with `conn-drop` closing before a response line so the one retry runs; every request is recorded and served at `GET /requests` so a tier asserts the action and the resource fields a handler asked with |
-| sink | a webhook receiver for [[011-webhooks]] | verifies the signature against the configured key and refuses a stale timestamp; `-fail-first N` answers 503 to the first N deliveries so the backoff and the retirement run; `-status <code>` answers that to the next one; stores deliveries and serves them at `GET /deliveries` in order per subscription |
+| authorizer | the envelope of [[006-identity]], over the stub `latere.ai/x/pkg/authz` ships | allows everything except the probe resource, the id `probe` of kind `Space`, which is always denied, so `arcad check` has something to check; `-deny <action>` or the request header `X-Stub-Deny: <action>` refuses one action; `-filter <json>`, `-limits <json>`, and `-ttl <seconds>` ride every allow, so the byte limit of [[010-events-and-reaper]] and the list filter of [[013-api]] are exercised; `-fail-mode timeout\|malformed\|status:<code>\|no-allow\|conn-drop` produces each failure [[006-identity]] names, with `conn-drop` closing before a response line so the one retry runs; every request is recorded and served at `GET /requests` so a tier asserts the action and the resource fields a handler asked with |
+
+Two stubs and no third. Arca calls an issuer, an authorizer, and its two
+stores, and nothing else leaves the process, so there is nothing else to
+stand in for.
 
 Neither store is stubbed. A fake bucket that accepts `If-None-Match: *`
 whenever a real one would is the bug invariant 1 of [[001-architecture]]
@@ -117,7 +119,7 @@ bucket prefix of its own, `test-<ulid>/`, which it removes in
 `t.Cleanup`. Nothing a tier does reads a developer's real
 configuration, and no tier reads `ARCA_*` from the environment.
 
-The e2e harness starts, per package: the three stubs in process, the
+The e2e harness starts, per package: the two stubs in process, the
 migrations, and `arcad serve` as an `httptest.Server` over the real
 handler tree, with `ARCA_OIDC_ISSUERS` naming the stub issuer,
 `ARCA_OIDC_INSECURE_ISSUERS=true` because the stub issuer serves
@@ -193,7 +195,7 @@ reason survives.
 | `drive/Makefile`'s `e2e`, `e2e-up`, `e2e-down` | `make test-store`, `make test-e2e`, `make up`, `make down` | one target per tier instead of one target that runs everything |
 | `drive/.github/workflows/ci.yml`'s `e2e` job | the two jobs above | hosted runners instead of a self-hosted VM; compose instead of a service container beside a `docker run` step; the coverage gate moves to the shared gate reading three profiles |
 | `latere.ai/x/pkg/authkit/issuertest` | the issuer stub | it becomes a binary as well as a package, and gains `/mint` over HTTP so `make run` and a non-Go consumer can get a token |
-| nothing | the authorizer stub, the sink stub, `arca-stubs`, `make run` | new. The service Arca replaces decided access itself and had no authorizer to stub, and it had a hosted deployment instead of a one-command local installation |
+| nothing | the authorizer stub, `arca-stubs`, `make run` | new. The service Arca replaces decided access itself and had no authorizer to stub, and it had a hosted deployment instead of a one-command local installation |
 
 ## Not in this spec
 
@@ -206,10 +208,10 @@ tier asserts, which every other spec's acceptance criteria own.
 
 | # | Criterion | Proved by |
 |---|---|---|
-| 1 | Each stub serves its contract and every flag in its row is driven | `TestIssuerStub`, `TestAuthorizerStub`, `TestSinkStub` |
+| 1 | Each stub serves its contract and every flag in its row is driven | `TestIssuerStub`, `TestAuthorizerStub` |
 | 2 | The authorizer stub denies the probe resource for every subject and every flag combination, and records the action and resource fields of each request | `TestAuthorizerStub`, and [[012-administration]]'s `check` test |
 | 3 | The issuer stub mints a token carrying `authorization_details`, an `iat` of a chosen age, and an ES256 signature under `-alg es256` | `TestIssuerStub` |
-| 4 | The sink refuses a delivery whose signature does not verify and one whose timestamp is stale, and `-fail-first` drives the backoff to retirement | `TestSinkStub`, and [[011-webhooks]]'s delivery test |
+| 4 | The authorizer stub's `-limits` reaches the server as the space's byte limit, and a write past it is refused for the answer's `ttl` | `TestAuthorizerStub`, and [[010-events-and-reaper]]'s limit test |
 | 5 | `go test ./...` on a clean clone with no services is green, and every tier test skips with the remediation in its message | `TestTiersSkipWithoutServices`, run with the variables cleared |
 | 6 | No file in the untagged suite dials a socket or forks a process, and `hermetic.allow` is empty | the `hermetic` gate |
 | 7 | Every tier binds `:0`, keeps files under `t.TempDir()`, uses a schema and a bucket prefix of its own, and leaves neither behind | `TestTiersAreIsolated`, plus a bucket listing after the store tier |

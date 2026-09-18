@@ -229,7 +229,7 @@ routes.
 immediate and there is no grace window: the next `Covering` call does not
 return the grant, and the next redemption of a revoked token is a
 not-found. A revoked row is kept so an audit can see the grant existed
-([[012-administration]]); the reaper of [[010-quotas-events-and-reaper]]
+([[012-administration]]); the reaper of [[010-events-and-reaper]]
 deletes grants that expired long ago.
 
 Expiry needs no sweep to take effect. `Covering` and the token lookup both
@@ -238,7 +238,7 @@ it expires whether or not anything has run.
 
 ### Events
 
-Every mutation appends to the log of [[010-quotas-events-and-reaper]]:
+Every mutation appends to the log of [[010-events-and-reaper]]:
 
 | Mutation | Action | Detail |
 |---|---|---|
@@ -291,9 +291,9 @@ Left behind, and named for [[019-migration-from-drive]]:
 The decision a grant takes part in, and the built-in owner policy
 ([[006-identity]]). The table and its indexes ([[004-metadata-store]]).
 The status codes, pagination, and error bodies ([[013-api]]). What a read
-of a shared path does once allowed ([[005-files]]). Quota accounting on a
+of a shared path does once allowed ([[005-files]]). Usage accounting on a
 shared write: bytes are charged to the space that owns them, never to the
-grantee ([[010-quotas-events-and-reaper]]).
+grantee ([[010-events-and-reaper]]).
 
 ## Acceptance criteria
 
@@ -309,5 +309,5 @@ grantee ([[010-quotas-events-and-reaper]]).
 | 7 | A revoke takes effect on the next request with no sweep in between | e2e: read, revoke, read again |
 | 8 | `GET /v1/shared-with-me` answers grants where the caller is the grantee and reads no claim beyond the subject | e2e with two subjects from one issuer |
 | 9 | An organization grantee takes the same code path as a person, with no group table and no org claim read | e2e where the authorizer names an organization subject as the grantee |
-| 10 | A create and a revoke each append one event with the grantee kind in the detail | [[010-quotas-events-and-reaper]]'s tail test |
+| 10 | A create and a revoke each append one event with the grantee kind in the detail | [[010-events-and-reaper]]'s tail test |
 | 11 | No handler in `internal/shares` reads `org_id`, `roles`, or `email` | the `identity` gate's rule, plus a grep test in `internal/shares` |

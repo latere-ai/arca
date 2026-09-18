@@ -119,14 +119,12 @@ operator fixes a deployment in one round. A blank value is unset.
 | `ARCA_DATABASE_URL` | required | the Postgres connection string | 004 |
 | `ARCA_MAX_UPLOAD_BYTES` | `5368709120` | the largest object accepted | 007 |
 | `ARCA_INLINE_BYTES` | `16777216` | the largest object streamed through the server; above it, parts go direct | 007 |
-| `ARCA_DEFAULT_QUOTA_BYTES` | `10737418240` | a space's quota until the authorizer or an administrator sets one | 010 |
 | `ARCA_OIDC_ISSUERS` | required | the issuers whose tokens are verified, comma separated | 006 |
 | `ARCA_OIDC_AUDIENCE` | `arca` | the audience every token must carry | 006 |
 | `ARCA_OIDC_INSECURE_ISSUERS` | `false` | admit an `http://` issuer off loopback; for the test tiers | 006 |
 | `ARCA_AUTHORIZER_URL` | unset | the authorizer endpoint; unset selects the owner policy | 006 |
 | `ARCA_AUTHORIZER_TOKEN` | unset | the bearer the authorizer expects | 006 |
 | `ARCA_ADMIN_SUBJECTS` | unset | the subjects the owner policy treats as administrators, comma separated | 006 |
-| `ARCA_WEBHOOK_SIGNING_KEY` | required when webhooks are enabled | the key deliveries are signed with | 011 |
 | `ARCA_REAP_INTERVAL` | `5m` | how often the reconciler runs | 010 |
 | `ARCA_TRASH_RETENTION` | `720h` | how long a trashed object is restorable | 005 |
 | `ARCA_OTEL_EXPORTER_OTLP_ENDPOINT` | unset | where traces and metrics go; unset exports nothing | 018 |

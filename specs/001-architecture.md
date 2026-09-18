@@ -21,7 +21,7 @@ artifact an agent produces, the working tree a sandbox needs back
 tomorrow, the object an application serves. A git host holds commits and
 a sandbox's volume dies with the sandbox. Arca is the third place, and
 it is the only one of the three that knows who owns a byte, who may
-read it, how much a space may hold, and what happened to it last week.
+read it, how much a space holds, and what happened to it last week.
 
 Arca is one server, `arcad`, in front of two stores it does not own: an
 S3 compatible bucket for bytes and a Postgres database for meaning. The
@@ -60,7 +60,7 @@ a visible lie:
 
 | Operation | Order | A failure between the two leaves |
 |---|---|---|
-| put | bucket first, then database | an object in the bucket with no row: invisible, reaped by [[010-quotas-events-and-reaper]] |
+| put | bucket first, then database | an object in the bucket with no row: invisible, reaped by [[010-events-and-reaper]] |
 | delete | database first, then bucket | a row gone with bytes still in the bucket: invisible, reaped |
 | move | database only | nothing; the key does not change, the path does |
 | restore from trash | database only | nothing |
@@ -81,15 +81,17 @@ whose subject the authorizer names. Arca holds no table of principals
 beyond the ones that have touched it and no notion of membership; who
 may act in whose space is the authorizer's answer.
 
-Inside a space, four planes are four path prefixes with their own
-rules and one storage model:
+Inside a space, two planes are two path prefixes with their own rules
+and one storage model:
 
 | Plane | Prefix | What it holds | Rules of its own |
 |---|---|---|---|
-| files | `files/` | objects a person or an application stores | versions, trash, stars ([[005-files]]) |
+| files | `files/` | objects a person, an application, or an agent stores | versions, trash, stars, conditional writes by ETag ([[005-files]]) |
 | workspaces | `workspaces/<slug>/` | a durable subtree a sandbox attaches to | one writer lease, materialize, sync ([[009-workspaces]]) |
-| repos | `repos/<name>/` | a working tree whose history lives on a git host | the workspace rules; the split is a convention, not a schema |
-| memory | `memory/<scope>/` | files an agent reads and writes across runs | conditional writes by ETag; no index, no search |
+
+A repository's history lives on a git host, and a checked-out tree a
+sandbox needs is a workspace or the sandbox's own disk, so there is no
+plane for it.
 
 A path is `<space>/<plane>/<rest>`, and the bucket key is derived from
 the object's id and never from the path, so a move is a row update.
@@ -103,7 +105,7 @@ Three places, by who imports them.
 
 ```
 object/                 the object model a platform imports: ids, paths, planes, the key derivation, integrity (003)
-space/                  the space model: subjects, owners, quotas as values, the ladder of permissions (005, 008)
+space/                  the space model: subjects, owners, usage as a value, the ladder of permissions (005, 008)
 authorizer/             the action vocabulary and the resource shapes the authorizer question carries (006)
 
 cmd/arcad/              main: subcommand dispatch, configuration, listeners, run group (002)
@@ -117,11 +119,9 @@ internal/files/         put, get, list, move, delete; versions, trash, stars (00
 internal/uploads/       upload sessions and the multipart completion (007)
 internal/shares/        grants, the permission ladder, public links, shared-with-me (008)
 internal/workspaces/    attach, renew, release, materialize, sync (009)
-internal/quota/         limits and the ledger (010)
-internal/events/        the event log and its cursor (010)
+internal/events/        the usage ledger, the event log, and its cursor (010)
 internal/reaper/        the reconciliation of the two stores and the expiry of leases, sessions, and trash (010)
-internal/webhook/       subscriptions and delivery (011)
-internal/admin/         the overview, audit, restore across spaces (012)
+internal/admin/         the overview across spaces and the restore across them (012)
 internal/check/         the check role of arcad (012)
 internal/metrics/       the one registry and the table of 018
 test/e2e/               arcad as a process against MinIO and Postgres (014)
@@ -147,7 +147,7 @@ role by its args ([[002-repository-scaffold]] owns the table).
 | Role | Does |
 |---|---|
 | `serve` | the API, the stores, the probes; the default |
-| `reap` | the reconciler of [[010-quotas-events-and-reaper]] as a process of its own, for an installation that wants it off the API replicas |
+| `reap` | the reconciler of [[010-events-and-reaper]] as a process of its own, for an installation that wants it off the API replicas |
 | `migrate` | applies the database migrations of [[004-metadata-store]] and exits |
 | `check` | one line per requirement of the installation, exit 1 on any failure ([[012-administration]]) |
 
@@ -173,8 +173,7 @@ does; the intersection is the shared library's.
 | Point | Who writes it | Contract |
 |---|---|---|
 | the authorizer | the operator | `POST` one question, `200` one answer ([[006-identity]]) |
-| webhooks | a consumer | a signed delivery per event, retired after repeated failure ([[011-webhooks]]) |
-| the event log | a consumer | tail by cursor ([[010-quotas-events-and-reaper]]) |
+| the event log | a consumer | tail by cursor ([[010-events-and-reaper]]) |
 | the bucket | the operator | the S3 API, any implementation that honours `If-None-Match: *` on put |
 | the database | the operator | Postgres 16 or newer |
 
@@ -223,7 +222,7 @@ Numbered so a later spec can cite the one it is bound by.
 | 2 | The build list of `./cmd/arcad` holds no package outside invariant 9 | the `depcheck` gate, whose allow list names each row |
 | 3 | No file outside `deploy/prod` and `specs/` names a Latere address | the `identity` gate's `no-latere-value` rule |
 | 4 | Every `/v1` handler runs behind the verifier and asks before it acts | [[006-identity]]'s conformance rows, run by `test/conformance` |
-| 5 | A put that fails after the bucket write leaves a reaper finding and no row | [[010-quotas-events-and-reaper]]'s fault test |
+| 5 | A put that fails after the bucket write leaves a reaper finding and no row | [[010-events-and-reaper]]'s fault test |
 | 6 | A delete that fails after the row is gone leaves a reaper finding and no visible object | the same |
 | 7 | A move touches no bucket key | [[005-files]]'s test against a counting bucket stub |
 | 8 | Two attaches to one workspace yield one lease | [[009-workspaces]]'s test |

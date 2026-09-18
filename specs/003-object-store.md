@@ -187,7 +187,7 @@ only durable pointer to them is the session row of
 [[004-metadata-store]]. The referenced set a sweep compares a key
 against is therefore the union of three tables, `files`,
 `file_versions`, and `upload_sessions`, and
-[[010-quotas-events-and-reaper]] inherits that rule from here.
+[[010-events-and-reaper]] inherits that rule from here.
 
 The browser sends part bodies to the bucket's origin, so the bucket
 needs a CORS rule for the console origin the operator serves: allowed
@@ -270,7 +270,7 @@ Two implementations of `Store` ship beside the S3 one, both in
   method and optionally fails the nth call of one method. It is how a
   test proves a negative: [[005-files]] asserts that a move leaves every
   counter at zero (criterion 7 of [[001-architecture]]), and
-  [[010-quotas-events-and-reaper]] injects the fault that leaves bytes
+  [[010-events-and-reaper]] injects the fault that leaves bytes
   without a row.
 
 ### What arrives from Drive
@@ -293,7 +293,7 @@ From `internal/storage/s3.go` and the archived specs `002-file-plane`,
 ## Not in this spec
 
 Which bytes are written and when ([[005-files]], [[007-uploads]]), what
-a key is compared against and how often ([[010-quotas-events-and-reaper]]),
+a key is compared against and how often ([[010-events-and-reaper]]),
 who may read an object ([[006-identity]]), and the bucket's own
 lifecycle or replication configuration, which is the operator's
 ([[016-release-and-installation]]).

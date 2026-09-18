@@ -88,25 +88,24 @@ and its authorizer answers for the people who may act in it.
 
 `authorizer/` exports the vocabulary as a `latere.ai/x/pkg/authz`
 `Vocabulary` with labels, and a test holds the package's table equal
-to this one. Twenty-nine actions over nine kinds.
+to this one. Twenty-three actions over seven kinds.
 
 | Kind | Actions | Resource fields |
 |---|---|---|
-| `File` | `file.read`, `file.write`, `file.delete`, `file.list`, `file.restore` | `id` (absent on a write that creates), `owner`, `path`, `plane`, `size` |
+| `File` | `file.read`, `file.write`, `file.delete`, `file.list`, `file.restore` | `id` (absent on a write that creates), `owner`, `path`, `plane` (`files` or `workspaces`), `size` |
 | `Upload` | `upload.write` | `owner`, `path`, `size` |
 | `Share` | `share.create`, `share.read`, `share.list`, `share.revoke` | `id`, `owner`, `path`, `grantee`, `permission` |
 | `Link` | `link.create`, `link.read`, `link.revoke` | `id`, `owner`, `path` |
-| `Workspace` | `workspace.create`, `workspace.read`, `workspace.write`, `workspace.delete`, `workspace.list`, `workspace.attach`, `workspace.sync`, `workspace.restore` | `id`, `owner`, `slug`, `kind` |
-| `Quota` | `quota.read`, `quota.write` | `owner` |
+| `Workspace` | `workspace.create`, `workspace.read`, `workspace.write`, `workspace.delete`, `workspace.list`, `workspace.attach`, `workspace.sync`, `workspace.restore` | `id`, `owner`, `slug` |
 | `Event` | `event.read` | `owner` |
-| `Webhook` | `webhook.create`, `webhook.read`, `webhook.list`, `webhook.delete` | `id`, `owner`, `url` |
 | `Space` | `space.admin` | `owner` (absent on the overview across spaces) |
 
 Rules of the table:
 
-- `file.write` covers put, move, star, and the memory plane's
-  conditional write; the resource's `path` is the target and, on a
-  move, `from` carries the source.
+- `file.write` covers put, move, star, and a conditional write; the
+  resource's `path` is the target and, on a move, `from` carries the
+  source. `plane` is `files` or `workspaces` and nothing else
+  ([[001-architecture]]).
 - `file.read` covers get, head, and a version's read; `file.list`
   covers a directory page, a version list, and the trash listing;
   `file.restore` is the one action that brings an object back from
@@ -166,8 +165,7 @@ Authorization: Bearer {ARCA_AUTHORIZER_TOKEN}
 | timeout | 5 s |
 | unavailable | anything but a 200 with `allow`: 503 `authorizer_unavailable`, never an allow |
 | deny | 403 `forbidden` with the reason in the developer detail; a deny at lookup is 404 `not_found`, indistinguishable from a missing object |
-| `limits.quota_bytes` | the space's quota for the answer's `ttl`; [[010-quotas-events-and-reaper]] fixes the order: this answer, then the stored `quotas` row, then `ARCA_DEFAULT_QUOTA_BYTES` |
-| `limits.webhooks` | the number of subscriptions the space may hold, over the built-in cap of [[011-webhooks]] |
+| `limits.quota_bytes` | the space's byte limit for the answer's `ttl`; without it a space has no limit, because Arca stores none ([[010-events-and-reaper]]) |
 | `filter` | on a `list` action, the owners and labels the page is narrowed to |
 | probe | the resource id `probe` of kind `Space`, which every authorizer denies for every subject; `arcad check` asks it and refuses an endpoint that allows |
 
@@ -198,8 +196,8 @@ The ladder a grant is read against is [[008-shares-and-links]]'s:
 `file.restore`, `upload.write`, `workspace.write`, `workspace.attach`,
 `workspace.sync`; `manage` adds `share.create`, `share.read`,
 `share.list`, `share.revoke` on the granted subtree. `space.admin`,
-`quota.write`, `webhook.*`, and `workspace.create` and
-`workspace.delete` are the owner's or an administrator's. The owner
+`workspace.create`, and `workspace.delete` are the owner's or an
+administrator's. The owner
 policy applies `authz.Restrict` last, so a narrowed personal key is
 narrowed here too.
 
@@ -230,7 +228,7 @@ and the owner policy is not consulted.
 | 4 | A deny at lookup is a 404 identical in body and headers to a missing object | `test/conformance` case |
 | 5 | An authorizer that answers anything but a 200 with `allow` yields a 503 and never an allow | the stub authorizer's fault modes in [[014-test-stubs-and-tiers]] |
 | 6 | An allow is cached for `ttl` and a deny for 5 seconds, keyed by subject, action, and resource id | `internal/auth` cache test with a counting stub |
-| 7 | `limits.quota_bytes` overrides the default for the named space and expires with the answer | [[010-quotas-events-and-reaper]]'s test |
+| 7 | A write past an answer's `limits.quota_bytes` is refused for that answer's `ttl` and admitted once the answer expires or stops carrying the field, and no store holds a limit | [[010-events-and-reaper]]'s test |
 | 8 | The owner policy admits the owner, an administrator, a grantee within the ladder, and a resolving link, and denies everything else | `internal/auth` policy table test |
 | 9 | A personal key narrowed to `file.read` on one path reads it and is refused every other action with reason `grant`, under both the authorizer and the owner policy | `test/conformance` case A13 of the family suite plus Arca's own |
 | 10 | `arcad check` refuses an authorizer that allows the probe resource | `internal/check` test against the stub |

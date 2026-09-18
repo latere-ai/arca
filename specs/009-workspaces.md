@@ -37,10 +37,10 @@ time. Invariant 7 of [[001-architecture]] states it, and this spec is
 where it is enforced, through a lease that a writer holds, renews, and
 loses by crashing.
 
-A repo is a workspace with `kind` `repo`. Its history lives on a git
-host; what Arca holds is a working tree, including its `.git` directory
-if the sandbox syncs one back. Nothing else about a repo differs, which
-is why the split is a convention rather than a schema.
+A checked-out repository is a workspace like any other. Its history
+lives on a git host and never in Arca; what Arca holds is a working
+tree, including the `.git` directory if the sandbox syncs one back.
+There is no second kind of workspace and no column that would name one.
 
 ## Design
 
@@ -50,7 +50,6 @@ is why the split is a convention rather than a schema.
 |---|---|
 | `id` | the workspace's identity, the handle every route names |
 | `owner` | the space, the subject `<issuer>\|<sub>` |
-| `kind` | `workspace` or `repo` |
 | `slug` | the name inside the space, matching `^[a-z0-9][a-z0-9-]{0,63}$` |
 | `writer_sandbox_id` | the holder of the lease, null when free |
 | `writer_expires_at` | when the lease lapses |
@@ -58,19 +57,15 @@ is why the split is a convention rather than a schema.
 | `created_by` | the subject that created it |
 | `deleted_at` | when it was soft deleted, null while live |
 
-`(owner, kind, slug)` is unique and the uniqueness is not conditional on
+`(owner, slug)` is unique and the uniqueness is not conditional on
 `deleted_at`, which is what makes restore simple; see below.
 [[004-metadata-store]] owns the table.
 
-The root prefix is derived from `kind` and `slug`, never stored:
-
-| `kind` | Root prefix |
-|---|---|
-| `workspace` | `workspaces/<slug>/` |
-| `repo` | `repos/<slug>/` |
+The root prefix is `workspaces/<slug>/`, derived from the slug and never
+stored.
 
 Files under the root are ordinary objects of [[005-files]]. They are
-listed, versioned, trashed, charged to the quota, and shared by exactly
+listed, trashed, charged to the space's usage, and shared by exactly
 the code paths that serve every other object. A grant on the root prefix
 is a share of the workspace ([[008-shares-and-links]]), so nothing here
 holds a second permission model.
@@ -80,7 +75,7 @@ holds a second permission model.
 | Method | Path | Action | Does |
 |---|---|---|---|
 | POST | `/v1/workspaces` | `workspace.create` | creates, 409 on a taken slug |
-| GET | `/v1/workspaces` | `workspace.list` | lists a space, filterable by `kind` |
+| GET | `/v1/workspaces` | `workspace.list` | lists a space |
 | GET | `/v1/workspaces/deleted` | `workspace.list` | lists the soft deleted ones |
 | GET | `/v1/workspaces/{id}` | `workspace.read` | the record, plus file and byte counts and the lease state |
 | PATCH | `/v1/workspaces/{id}` | `workspace.write` | renames the slug |
@@ -93,7 +88,7 @@ holds a second permission model.
 | POST | `/v1/workspaces/{id}/sync` | `workspace.sync` | writes the result back |
 
 Every route is authorized per [[006-identity]] with the action named, and
-the resource carries `id`, `owner`, `slug`, and `kind`. The mode of an
+the resource carries `id`, `owner`, and `slug`. The mode of an
 attach picks the action so the ladder of [[008-shares-and-links]] falls
 out without a second rule: a `read` grantee mounts read-only, and only a
 `write` grantee can take the lease. A deny at lookup answers not-found,
@@ -136,7 +131,7 @@ Default one hour, ceiling twenty-four hours, both constants in
 seconds and gets the smaller of its ask and the ceiling. A renew stamps a
 new `expires_at` and nothing else. A release clears
 `writer_sandbox_id` and marks the attachment `released`. The reaper of
-[[010-quotas-events-and-reaper]] marks an expired active attachment
+[[010-events-and-reaper]] marks an expired active attachment
 `reaped` and clears the lease it held.
 
 A reaped writer's unsynced work is lost, by design. Arca holds no copy of
@@ -257,20 +252,20 @@ A delete stamps `deleted_at` and is refused while the lease is held. The
 subtree stays readable to nobody and restorable by the owner for
 `ARCA_TRASH_RETENTION`, the same window a trashed object of
 [[005-files]] gets; there is no second retention setting. After it, the
-reaper of [[010-quotas-events-and-reaper]] purges the rows and the bytes
+reaper of [[010-events-and-reaper]] purges the rows and the bytes
 and the row itself.
 
 `GET /v1/workspaces/deleted` lists what is inside the window and
 `POST /v1/workspaces/{id}/restore` clears `deleted_at`. Restore needs no
 collision guard, and the reason is the uniqueness constraint: because
-`(owner, kind, slug)` is unique regardless of `deleted_at`, a tombstone
+`(owner, slug)` is unique regardless of `deleted_at`, a tombstone
 keeps its slug reserved until purge, so no live workspace can have taken
 the name in the meantime. Restoring something that is not deleted is a
 conflict; restoring something already purged is not-found.
 
 ### Events
 
-Appended to the log of [[010-quotas-events-and-reaper]]:
+Appended to the log of [[010-events-and-reaper]]:
 
 | Mutation | Action | Detail |
 |---|---|---|
@@ -278,11 +273,11 @@ Appended to the log of [[010-quotas-events-and-reaper]]:
 | a release | `release` | `attachment_id` |
 | a sync | `sync` | `attachment_id`, `files`, `deleted` |
 | a lease or attachment reaped | `reap` | `attachment_id` |
-| a workspace purged | `purge` | `kind`, `slug` |
-| a workspace restored | `restore` | `kind`, `slug` |
+| a workspace purged | `purge` | `slug` |
+| a workspace restored | `restore` | `slug` |
 
 Create, rename, and delete of the record itself are not separate actions.
-The enum is closed ([[010-quotas-events-and-reaper]]), and a consumer
+The enum is closed ([[010-events-and-reaper]]), and a consumer
 that wants workspace lifecycle reads the `put` and `delete` events on the
 root prefix.
 
@@ -320,9 +315,10 @@ client that wants it builds it from [[005-files]].
 The object schema and the migrations ([[004-metadata-store]]). What a put
 under a workspace root does ([[005-files]], [[007-uploads]]). The reaper
 loop that expires leases and purges tombstones
-([[010-quotas-events-and-reaper]]). The grant that shares a workspace
-([[008-shares-and-links]]). Git protocol of any kind: a repo's history
-lives on a git host, and [[001-architecture]] says Arca is not one.
+([[010-events-and-reaper]]). The grant that shares a workspace
+([[008-shares-and-links]]). Git protocol of any kind: a repository's
+history lives on a git host, and [[001-architecture]] says Arca is not
+one.
 
 ## Acceptance criteria
 
@@ -331,8 +327,8 @@ lives on a git host, and [[001-architecture]] says Arca is not one.
 | 1 | Two concurrent `rw` attaches leave exactly one lease, and the loser is a conflict | a real-database race test in `internal/workspaces`, not a mock |
 | 2 | Many concurrent `ro` attaches all succeed and none touches the lease | the same test's read-only arm |
 | 3 | A renew extends `expires_at` and a release clears the lease and marks the attachment released | `internal/workspaces` test |
-| 4 | An expired lease is cleared by the reaper, and the zombie writer's next sync or renew is gone | [[010-quotas-events-and-reaper]]'s expiry test, asserted from this side |
-| 5 | The root prefix is derived from `kind` and `slug`, and `(owner, kind, slug)` collides across live and deleted rows alike | `internal/workspaces` test |
+| 4 | An expired lease is cleared by the reaper, and the zombie writer's next sync or renew is gone | [[010-events-and-reaper]]'s expiry test, asserted from this side |
+| 5 | The root prefix is derived from the slug, and `(owner, slug)` collides across live and deleted rows alike | `internal/workspaces` test |
 | 6 | A rename moves rows and issues no bucket call | a counting bucket stub, the test invariant 8 of [[001-architecture]] names |
 | 7 | A rename or a delete while the lease is held is refused | `internal/workspaces` test |
 | 8 | Materialize pins to the attachment manifest, presigns the row's current storage key, and omits a path whose row is gone | store-tier test against MinIO with a multipart-written object |
@@ -342,6 +338,6 @@ lives on a git host, and [[001-architecture]] says Arca is not one.
 | 12 | Replaying a sync changes nothing | e2e |
 | 13 | A sync from a non-writer attachment, or from a released one, is refused | e2e |
 | 14 | `ro` attach asks `workspace.read` and `rw` attach asks `workspace.attach`, so a `read` grantee mounts read-only and cannot take the lease | [[017-conformance-suite]]'s rows, with a recording authorizer |
-| 15 | A delete lists in `/v1/workspaces/deleted`, restores within `ARCA_TRASH_RETENTION`, and is purged after it | e2e plus [[010-quotas-events-and-reaper]]'s purge test |
+| 15 | A delete lists in `/v1/workspaces/deleted`, restores within `ARCA_TRASH_RETENTION`, and is purged after it | e2e plus [[010-events-and-reaper]]'s purge test |
 | 16 | Restore of a live workspace is a conflict and restore of a purged id is not-found | e2e |
 | 17 | No handler in `internal/workspaces` reads `org_id`, `roles`, or the principal type | the `identity` gate's rule, plus a grep test |

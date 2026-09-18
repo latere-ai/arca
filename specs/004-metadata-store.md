@@ -59,7 +59,7 @@ CREATE TABLE subjects (
 CREATE TABLE files (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     owner         TEXT NOT NULL,            -- the space
-    path          TEXT NOT NULL,            -- plane-rooted: files/…, memory/…
+    path          TEXT NOT NULL,            -- plane-rooted: files/…, workspaces/…
     object_id     UUID NOT NULL,            -- the bytes; 003 derives the key
     created_by    TEXT NOT NULL,            -- the subject that first wrote the path
     content_type  TEXT NOT NULL DEFAULT 'application/octet-stream',
@@ -137,7 +137,6 @@ CREATE INDEX shares_subtree_idx ON shares (owner, path_prefix);  -- plus partial
 CREATE TABLE workspaces (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     owner             TEXT NOT NULL,
-    kind              TEXT NOT NULL CHECK (kind IN ('workspace','repo')),
     slug              TEXT NOT NULL,        -- [a-z0-9-]{1,64}
     created_by        TEXT NOT NULL,
     writer_holder     TEXT,                 -- the lease holder; NULL is free
@@ -146,7 +145,7 @@ CREATE TABLE workspaces (
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at        TIMESTAMPTZ,          -- soft delete; the reaper purges
-    UNIQUE (owner, kind, slug)
+    UNIQUE (owner, slug)
 );
 CREATE TABLE workspace_attachments (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -160,10 +159,13 @@ CREATE TABLE workspace_attachments (
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     released_at  TIMESTAMPTZ
 );
--- The limit and the log. 010 owns both.
-CREATE TABLE quotas (
-    owner       TEXT PRIMARY KEY,
-    limit_bytes BIGINT NOT NULL             -- ARCA_DEFAULT_QUOTA_BYTES until set
+-- The usage ledger and the log. 010 owns both. There is no limit
+-- column and no limits table: a limit reaches Arca only on the
+-- authorizer's answer, and is never stored.
+CREATE TABLE space_usage (
+    owner      TEXT PRIMARY KEY,            -- the space
+    bytes      BIGINT NOT NULL DEFAULT 0 CHECK (bytes >= 0),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE TABLE events (
     id         BIGSERIAL PRIMARY KEY,       -- the cursor a consumer tails
@@ -175,35 +177,6 @@ CREATE TABLE events (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX events_owner_idx ON events (owner, id);
--- Outbound delivery. 011 owns it.
-CREATE TABLE webhooks (
-    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    owner            TEXT NOT NULL,
-    url              TEXT NOT NULL,         -- https only
-    secret           TEXT NOT NULL,         -- the signing key, shown once
-    path_prefix      TEXT NOT NULL DEFAULT '',
-    actions          TEXT[] NOT NULL DEFAULT '{}',
-    active           BOOL NOT NULL DEFAULT true,
-    created_by       TEXT NOT NULL,
-    failure_count    INT NOT NULL DEFAULT 0,    -- consecutive, across events
-    attempts         INT NOT NULL DEFAULT 0,    -- retries for the current event
-    next_attempt_at  TIMESTAMPTZ,               -- backoff gate; NULL is due now
-    cursor_event_id  BIGINT NOT NULL DEFAULT 0,
-    last_delivery_at TIMESTAMPTZ,
-    locked_until     TIMESTAMPTZ,               -- one replica delivers at a time
-    created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX webhooks_due_idx ON webhooks (active, next_attempt_at);
--- Every administrative call. 012 owns it.
-CREATE TABLE admin_audit (
-    id         BIGSERIAL PRIMARY KEY,
-    actor      TEXT NOT NULL,
-    method     TEXT NOT NULL,
-    route      TEXT NOT NULL,
-    owner      TEXT,                        -- the space acted on, when there is one
-    detail     JSONB,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
 ```
 
 ### Migration ownership
@@ -218,9 +191,7 @@ not claim one number.
 | `0002_uploads.up.sql` | `upload_sessions` | [[007-uploads]] |
 | `0003_shares.up.sql` | `shares` | [[008-shares-and-links]] |
 | `0004_workspaces.up.sql` | `workspaces`, `workspace_attachments` | [[009-workspaces]] |
-| `0005_quotas_events.up.sql` | `quotas`, `events` | [[010-quotas-events-and-reaper]] |
-| `0006_webhooks.up.sql` | `webhooks` | [[011-webhooks]] |
-| `0007_admin_audit.up.sql` | `admin_audit` | [[012-administration]] |
+| `0005_usage_events.up.sql` | `space_usage`, `events` | [[010-events-and-reaper]] |
 
 Migrations are forward only. There are no `.down.sql` files: the source
 driver accepts an up only set, a rollback of a shipped change is a new
@@ -299,11 +270,14 @@ type Files interface {
 }
 ```
 
-`Versions`, `Stars`, `Sessions`, `Shares`, `Workspaces`, `Quotas`,
-`Events`, `Webhooks`, and `Audit` follow the same shape, each owned by
-its spec. `store.ObjectReferenced(ctx, q, id)` answers whether an object
+`Versions`, `Stars`, `Sessions`, `Shares`, `Workspaces`, `Usage`, and
+`Events` follow the same shape, each owned by its spec. `Usage` carries
+the one statement every write path shares, an upsert that applies a
+signed delta to `space_usage.bytes` and returns the new total, so a
+charge and the check against the authorizer's limit read one row in one
+transaction ([[010-events-and-reaper]]). `store.ObjectReferenced(ctx, q, id)` answers whether an object
 id is still referenced by `files`, `file_versions`, or
-`upload_sessions`. That union is what [[010-quotas-events-and-reaper]]
+`upload_sessions`. That union is what [[010-events-and-reaper]]
 sweeps against and what every delete of superseded bytes checks first.
 
 ### What arrives from Drive
@@ -318,21 +292,22 @@ From `migrations/000001` through `000017`, and `internal/store`.
 | `principal_directory` | renamed `subjects` | keyed by the subject, presentation only, as before |
 | `upload_sessions` | kept | `object_id` replaces `storage_key`, and `expires_at` is a column rather than a hard-coded sweep |
 | `shares` | kept, narrowed | `grantee_kind` loses `org`, `role`, and `team`. Arca reads no claim for meaning, so a grant names a subject, an address, a link, or the public |
-| `workspaces` | kept | `writer_holder` replaces `writer_sandbox_id`; `agent_access` is dropped |
+| `workspaces` | kept, narrowed | `writer_holder` replaces `writer_sandbox_id`; `agent_access` is dropped; the `kind` column goes, because a checked-out tree is a workspace like any other and a repository's history lives on a git host ([[009-workspaces]]) |
 | `workspace_attachments` | kept | `holder` replaces `sandbox_id`, `subject` replaces `principal_id` |
-| `quotas`, `events`, `admin_audit` | kept | `owner` and `actor` are subjects |
-| `webhooks` | kept | the lease column of the second migration is folded in |
+| `quotas` | replaced by `space_usage` | the limit column does not arrive; what is stored is the bytes a space holds, kept current by the write paths of [[010-events-and-reaper]] |
+| `events` | kept | `owner` and `actor` are subjects; an administrator's action is an event in the space it touched ([[012-administration]]) |
+| `admin_audit` | dropped | the audit is the event log. A separate table recorded the same facts a second time and answered from a second surface |
 | `agent_visibility` | dropped | it decided a read from the `principal_type` claim, which invariant 5 forbids. The authorizer receives the subject, the plane, and the path, so an operator that wants machine subjects kept out of a subtree says so there |
 | team grants | never created | already deleted by Drive's `000017` |
 
-Seventeen migrations become seven, because Arca starts at the shape
-Drive reached. Carrying an existing Drive database across is
+Seventeen migrations become five, because Arca starts at the shape
+Drive reached and drops what it does not carry. Carrying an existing Drive database across is
 [[019-migration-from-drive]]'s, and the mapping above is its input.
 
 ## Not in this spec
 
 What the rows mean to a caller, which is each owning spec's; the event
-vocabulary and the reaper's passes ([[010-quotas-events-and-reaper]]);
+vocabulary and the reaper's passes ([[010-events-and-reaper]]);
 pool sizing ([[016-release-and-installation]]); the wire ([[013-api]]).
 
 ## Acceptance criteria

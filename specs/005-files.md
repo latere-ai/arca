@@ -17,9 +17,9 @@ author: changkun
 
 ## Overview
 
-The plane every other plane is built on. A file is a path in a space
-with bytes behind it, and this spec is what happens to it: written,
-read, listed, moved, deleted, versioned, trashed, restored, starred.
+The plane the other plane is built on. A file is a path in a space with
+bytes behind it, and this spec is what happens to it: written, read,
+listed, moved, deleted, versioned, trashed, restored, starred.
 
 Two properties from [[001-architecture]] shape all of it. The bucket key
 derives from an object id and never from the path (invariant 8), so a
@@ -37,11 +37,11 @@ A request names a space and a path inside it. The owner is the subject
 [[013-api]] fixes; the path is plane rooted and validated before
 anything else runs:
 
-- the first segment is a plane of [[001-architecture]]: `files`,
-  `workspaces`, `repos`, `memory`;
+- the first segment is a plane of [[001-architecture]]: `files` or
+  `workspaces`;
 - no empty segment, no `..`, no leading or trailing `/`;
-- under `workspaces/` and `repos/` a path has at least three segments,
-  because bytes live inside a workspace, not beside one.
+- under `workspaces/` a path has at least three segments, because bytes
+  live inside a workspace, not beside one.
 
 A path that fails is `400`. A path under a workspace that does not exist
 or is soft deleted is `404`, whoever asks ([[009-workspaces]]).
@@ -64,7 +64,7 @@ sequenceDiagram
   participant B as bucket
   participant P as Postgres
   C->>A: PUT /v1/files/{owner}/{path}, If-Match
-  A->>A: validate, authorize file.write, preconditions, quota
+  A->>A: validate, authorize file.write, preconditions, usage
   A->>B: put <new object id>, sha256 as it streams
   A->>P: begin, capture version, write row WHERE checksum = If-Match
   A->>P: commit
@@ -80,9 +80,10 @@ In order, and the order is the contract:
    length up front and Arca buffers no body to find it). Over
    `ARCA_MAX_UPLOAD_BYTES` is `413`, over `ARCA_INLINE_BYTES` is `413`
    naming [[007-uploads]].
-5. Quota admission against the declared length
-   ([[010-quotas-events-and-reaper]]), which for an overwrite is the
-   delta plus the version the overwrite will keep.
+5. Usage admission against the declared length
+   ([[010-events-and-reaper]]), which for an overwrite is the delta plus
+   the version the overwrite will keep, compared against the limit the
+   authorizer's answer carried if it carried one.
 6. Mint an object id, stream the body to the bucket, and take the
    sha256 in the same pass ([[003-object-store]]).
 7. One transaction: capture the previous row as a version, then apply
@@ -91,7 +92,7 @@ In order, and the order is the contract:
 8. Commit, then emit the `put` event.
 
 A failure between the bucket write and the commit leaves an object no
-row points at, reaped by [[010-quotas-events-and-reaper]] and deletable
+row points at, reaped by [[010-events-and-reaper]] and deletable
 at once by the handler because the key is fresh and nothing else can
 reference it. The predecessor had to reason about when deleting its own
 upload would destroy the live file; keys derived from ids remove the
@@ -105,7 +106,7 @@ object, the URL a reader can use:
   "checksum": "a3f1…", "checksum_kind": "sha256" }
 ```
 
-### Conditional writes and the memory plane
+### Conditional writes
 
 | Header | Meaning | Failure |
 |---|---|---|
@@ -113,11 +114,12 @@ object, the URL a reader can use:
 | `If-None-Match: *` | write only if no live row holds the path | `412` |
 | neither | last writer wins | none |
 
-A write under `memory/` requires one of the two and answers `428`
-without it. An agent that reads a memory file, thinks, and writes it
-back is the one caller whose lost update is silent and expensive, so the
-plane makes the round trip explicit rather than optional. Every other
-plane leaves the choice to the caller.
+Every object under `files/` takes these headers, and none requires them.
+The caller that needs them most is the agent that reads a file, thinks,
+and writes it back, whose lost update is silent and expensive; an agent
+that keeps such state conventionally puts it under a `files/memory/`
+prefix of its own choosing, which is a name and not a rule. The server
+reads the prefix for nothing.
 
 `If-None-Match: *` still revives a trashed path: the conflict arm is
 scoped to rows with `deleted_at` set, so exactly one of two racing
@@ -181,20 +183,20 @@ live row holds (`409`). Version rows, stars, and a share whose prefix is
 exactly this path follow the file in the same transaction; a share on a
 parent prefix covers a subtree and stays where it is.
 
-Moves are limited to `files/` and `memory/`. A path under `workspaces/`
-or `repos/` belongs to the sync protocol of [[009-workspaces]], which
-would see a move as a delete and a create.
+Moves are limited to `files/`. A path under `workspaces/` belongs to the
+sync protocol of [[009-workspaces]], which would see a move as a delete
+and a create.
 
 A test asserts this operation makes zero calls against `blob.Counting`
 ([[003-object-store]]), which is criterion 7 of [[001-architecture]].
 
 ### Delete, trash, restore
 
-`DELETE` asks `file.delete`. Under `files/` and `memory/` it is soft: it
-sets `deleted_at`, the row leaves every listing, read, share, and link,
-and the bytes stay. Under `workspaces/` and `repos/` it is hard, because
-sync owns those trees and a soft row would reappear as a phantom file at
-the next materialize. `?permanent=1` is hard anywhere.
+`DELETE` asks `file.delete`. Under `files/` it is soft: it sets
+`deleted_at`, the row leaves every listing, read, share, and link, and
+the bytes stay. Under `workspaces/` it is hard, because sync owns those
+trees and a soft row would reappear as a phantom file at the next
+materialize. `?permanent=1` is hard anywhere.
 
 A hard delete is row first and bytes second (invariant 1), taking the
 path's version rows with it; the bytes of any version no longer
@@ -208,14 +210,14 @@ referenced go after the commit.
 | `DELETE /v1/trash?owner=` | empties the space's trash | `file.delete` |
 
 A trashed object is restorable for `ARCA_TRASH_RETENTION`, default 720
-hours, after which [[010-quotas-events-and-reaper]] purges row and
-bytes. Trashed bytes count against the quota for the whole window: a
-space that wants the bytes back empties its trash, and a reader of the
-storage figure is not surprised later.
+hours, after which [[010-events-and-reaper]] purges row and
+bytes. Trashed bytes count towards the space's usage for the whole
+window: a space that wants the bytes back empties its trash, and a
+reader of the storage figure is not surprised later.
 
 ### Versions
 
-An overwrite of a path under `files/` or `memory/` keeps what was there.
+An overwrite of a path under `files/` keeps what was there.
 The previous row's metadata moves into `file_versions` inside the same
 transaction as the write, and the bytes are not copied: the version row
 keeps the object id the file had, and the new write is already at a new
@@ -240,11 +242,11 @@ would otherwise delete bytes that are in use.
 
 Retention is the newest 10 versions per path and nothing older than 30
 days, whichever trims first, applied by
-[[010-quotas-events-and-reaper]]. Both are constants, not configuration:
+[[010-events-and-reaper]]. Both are constants, not configuration:
 they bound a cost the operator did not ask for, and an installation that
 wants a different bound is asking for a feature, not a variable.
-Versions count against the quota. `workspaces/` and `repos/` keep no
-versions, and a restore there is `400`.
+Versions count towards the space's usage ([[010-events-and-reaper]]).
+`workspaces/` keeps no versions, and a restore there is `400`.
 
 ### Stars
 
@@ -261,15 +263,15 @@ or trashed drops out of the listing and is pruned later.
 ### Provenance zones do not arrive
 
 The predecessor gated writes by the caller's `principal_type` claim:
-humans wrote `files/`, machines wrote `agents/` and `memory/`, and an
-`agent_visibility` table curated what machines could read. It does not
-come across, for two reasons that are both structural.
+humans wrote `files/`, machines wrote `agents/` and a memory namespace,
+and an `agent_visibility` table curated what machines could read. It does
+not come across, for two reasons that are both structural.
 
 Arca reads no claim for meaning (invariant 5). A rule keyed on
 `principal_type` is exactly a claim read for meaning, and building it in
 would fork the family's identity model in the one repository that is
-meant to prove it. And [[001-architecture]]'s planes are four: there is
-no `agents/` plane to be the machine half of the pair.
+meant to prove it. And [[001-architecture]]'s planes are two: there is
+no second namespace to be the machine half of the pair.
 
 What replaces it is the authorizer. Arca hands it the subject, the
 plane, and the path with every question ([[006-identity]]), so an
@@ -283,12 +285,14 @@ This is a decision worth a maintainer's eye: it removes a shipped,
 founder-requested guarantee from the server and makes it the operator's
 to restate.
 
-### Events and quota
+### Events and usage
 
 Every mutation emits one event after its commit: `put`, `delete`,
-`move`, `restore`. Quota is checked before a write and recomputed after
-a purge. Both belong to [[010-quotas-events-and-reaper]]; this spec only
-names where they hang.
+`move`, `restore`. Every mutation that moves bytes applies its delta to
+the space's usage in its own transaction, and a write is refused when
+the authorizer's answer carried a limit the charge would cross. Both
+belong to [[010-events-and-reaper]]; this spec only names where they
+hang.
 
 ### What arrives from Drive
 
@@ -300,13 +304,13 @@ archived specs `002-file-plane`, `013-trash-stars`,
 |---|---|
 | put, get, head, list, move, delete, and their ordering | the owner is the subject `<issuer>\|<sub>`, not `(owner_type, owner_id)`, and `me` is the only alias. There is no `org` alias, because there is no org claim to resolve it from |
 | the authorization calls in each handler | replaced by one question per handler, `authorized per [[006-identity]]`, with the action named. No handler reads `org_id`, `roles`, or `principal_type` |
-| the CAS contract, and the mandatory precondition on `memory/` | unchanged, and now the only reason a handler inspects a plane |
+| the CAS contract | unchanged as an option on every object; the mandatory precondition on a memory namespace goes with the namespace, so no handler inspects a plane to decide whether a write needs one |
 | trash, restore, purge, stars | unchanged in shape; retention becomes `ARCA_TRASH_RETENTION` |
 | versions, including the restore identity swap and the retention rule | unchanged; capture is simpler because every write already lands on a new id, so the `@<random>` key suffix disappears |
 | presign by default, `?dl=direct` to stream | inverted: stream at or below `ARCA_INLINE_BYTES`, redirect above, with `?inline=` naming the two modes |
 | the public carve-out paths `files/avatar` and `files/public/**` | gone. Publicity is a column set by [[008-shares-and-links]] |
 | provenance zones and agent visibility | gone, with the reasoning above |
-| the `agents/` namespace | gone; four planes, per [[001-architecture]] |
+| the `agents/` namespace and the separate memory plane | gone; two planes, per [[001-architecture]]. Conditional writes are the feature that namespace existed for, and every object has them |
 | `MAX_UPLOAD_SIZE`, the 2 MB avatar limit | `ARCA_MAX_UPLOAD_BYTES`, one limit for every path |
 
 ## Not in this spec
@@ -314,7 +318,7 @@ archived specs `002-file-plane`, `013-trash-stars`,
 Writes above `ARCA_INLINE_BYTES` ([[007-uploads]]), who may act
 ([[006-identity]]), sharing and publicity
 ([[008-shares-and-links]]), workspace trees ([[009-workspaces]]), the
-purge and retention passes ([[010-quotas-events-and-reaper]]), and the
+purge and retention passes ([[010-events-and-reaper]]), and the
 wire details of every route here ([[013-api]]).
 
 ## Acceptance criteria
@@ -325,12 +329,12 @@ wire details of every route here ([[013-api]]).
 | 2 | A put above `ARCA_INLINE_BYTES` is `413` and names the session API | `internal/files` handler test |
 | 3 | A put without `Content-Length` is `411`, and one over `ARCA_MAX_UPLOAD_BYTES` is `413` | `internal/files` handler tests |
 | 4 | Two concurrent `If-Match` writes of the same checksum leave one `200` and one `412`, and the bytes of the loser are gone | the store tier, two goroutines |
-| 5 | A write under `memory/` without a precondition is `428` | `internal/files` handler test |
+| 5 | A write with neither precondition succeeds on any path, and no handler branches on a prefix inside `files/` | `internal/files` handler test |
 | 6 | `If-None-Match: *` revives a trashed path and conflicts with a live one | handler tests, both arms |
 | 7 | A read at or below the inline size streams, one above it redirects, and `?inline=1` does not override the redirect | handler tests at both sides of the boundary |
 | 8 | A move makes zero bucket calls and carries versions, stars, and an exact-path share with it | `blob.Counting` plus a store tier assertion on each table |
 | 9 | A move onto an occupied path is `409` and changes nothing | handler test |
-| 10 | A delete under `files/` is soft and the path vanishes from listing, read, and share; a delete under `workspaces/` is hard | handler tests over both planes |
+| 10 | A delete under `files/` is soft and the path vanishes from listing, read, and share; a delete under `workspaces/` is hard | handler tests over the two planes |
 | 11 | Restore after a trash returns the bytes, and restore onto a reoccupied path is `409` | the e2e tier |
 | 12 | Two overwrites leave two versions, a restore round-trips the bytes, and the restored version leaves the list | the e2e tier |
 | 13 | A listing pages stably under concurrent inserts and synthesises directory prefixes | the store tier |

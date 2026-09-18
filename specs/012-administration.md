@@ -1,5 +1,5 @@
 ---
-title: "Administration: the view across spaces, moderation, restore, the audit log, the check command"
+title: "Administration: the overview across spaces, moderation, restore, the record of what was done, the check command"
 status: drafted
 track: core
 depends_on:
@@ -10,7 +10,7 @@ depends_on:
   - specs/006-identity.md
   - specs/008-shares-and-links.md
   - specs/009-workspaces.md
-  - specs/010-quotas-events-and-reaper.md
+  - specs/010-events-and-reaper.md
 affects: [internal/admin/, internal/check/, internal/api/, internal/store/, cmd/arcad/, docs/]
 effort: medium
 created: 2026-09-18
@@ -27,8 +27,9 @@ them. An operator who runs an installation needs to see how much it
 holds and who holds it, to open any space when a person asks what
 happened to a file, to remove content that must not stay, to undo a
 delete someone regrets, and to read back afterwards every administrative
-touch that was made. Those are seven routes under `/v1/admin` and one
-table.
+touch that was made. Those are two routes under `/v1/admin`, the
+ordinary routes of every other spec answered on somebody else's space,
+and the event log of [[010-events-and-reaper]] as the record.
 
 It also answers the question an operator asks before any of that: is
 this installation correctly configured. `arcad check` prints one line
@@ -49,8 +50,8 @@ administrator to work.
 ### Who is an administrator
 
 One action, `space.admin`, asked before every route below. The resource
-is kind `Space`; `owner` is the space the route names on the four routes
-that name one, and is absent on the three that read across all spaces.
+is kind `Space`; `owner` is the space the restore names, and is absent
+on the overview, which reads across every space.
 
 | Decider | Answer |
 |---|---|
@@ -58,9 +59,9 @@ that name one, and is absent on the three that read across all spaces.
 | the owner policy, otherwise | allow when the caller's subject is listed in `ARCA_ADMIN_SUBJECTS`, deny otherwise, including for a space's own owner |
 
 A space's owner is not an administrator of its own space. The routes
-here read other people's spaces, write audit rows, and restore across
-owners; the owner's own equivalents are [[005-files]]'s and
-[[009-workspaces]]'s and need no `space.admin`.
+here read across other people's spaces and restore across owners; the
+owner's own equivalents are [[005-files]]'s and [[009-workspaces]]'s and
+need no `space.admin`.
 
 A deny is a 403 with code `forbidden`, the same as any other refused
 action, and not the 404 the service Arca replaces answered in order to
@@ -77,69 +78,74 @@ only people to moderate says so in its authorizer.
 
 ### The routes
 
-Seven, all under `/v1/admin`, all asking `space.admin`, all returning
-the list envelope and cursor pagination of [[013-api]]. `{owner}` is a
+Two, both under `/v1/admin`, both asking `space.admin`. `{owner}` is a
 subject, URL-encoded, or `me`.
 
 | Method | Path | Does | `resource.owner` |
 |---|---|---|---|
-| GET | `/v1/admin/overview` | the counters below | absent |
-| GET | `/v1/admin/spaces` | one row per space that holds anything | absent |
-| GET | `/v1/admin/spaces/{owner}/files` | the objects of one space, any plane | the named space |
-| GET | `/v1/admin/spaces/{owner}/shares` | the grants on one space, revoked ones included | the named space |
-| GET | `/v1/admin/spaces/{owner}/deleted` | what is deleted in one space and still restorable | the named space |
+| GET | `/v1/admin/overview` | one row per space that holds anything, with its usage and its counts | absent |
 | POST | `/v1/admin/spaces/{owner}/restore` | restore one deleted object or workspace | the named space |
-| GET | `/v1/admin/audit` | the audit log | absent |
 
-The service Arca replaces served deleted objects at `/v1/admin/deleted`
-across every space and moderation at `/v1/admin/files/{id}`. Both move
-under `spaces/{owner}` so that one prefix has one owner and one
-authorizer question carries a space ([[013-api]]'s grammar).
+Everything else an administrator does is an ordinary route of another
+spec, answered on a space the caller does not own. Reading someone's
+objects is `GET /v1/files/{owner}/{path...}?list=1`, their grants is
+`GET /v1/shares?owner=`, what they can still recover is `GET
+/v1/trash?owner=` and `GET /v1/workspaces/deleted?owner=`, and what
+happened to their space is `GET /v1/events?owner=`. Each asks the action
+it always asks, and what makes the call administrative is that the
+authorizer allowed a caller who neither owns the space nor holds a grant
+on it. A second surface that answered the same questions from a second
+set of handlers would double every listing, every filter rule, and every
+pagination bug.
 
-There is no moderation route at all. A moderation delete is `DELETE
+There is no moderation route either. A moderation delete is `DELETE
 /v1/files/{owner}/{path...}` asking `file.delete` on someone else's
 space, which the authorizer allows for an administrator and the owner
 policy allows for a subject in `ARCA_ADMIN_SUBJECTS`. One route, one
 question, one delete implementation, and no id-addressed route that
-skips the space. What makes it administrative is not a second question
-but the audit row below.
+skips the space.
+
+The service Arca replaces served deleted objects at `/v1/admin/deleted`
+across every space and moderation at `/v1/admin/files/{id}`. The listing
+has no successor: it is `GET /v1/trash?owner=` and `GET
+/v1/workspaces/deleted?owner=` with a different subject asking. The
+moderation delete folds into `DELETE /v1/files/{owner}/{path...}`, which
+is the same route the owner uses and the reason there is one delete
+implementation instead of two.
 
 ### The overview
 
+One route, one row per space, the list envelope and cursor pagination of
+[[013-api]]:
+
 ```json
-GET /v1/admin/overview
+GET /v1/admin/overview?cursor=&limit=
 200
-{
-  "spaces": 412,
-  "files": 1840223,
-  "bytes": 9418273645,
-  "trashed_bytes": 402118234,
-  "workspaces": 96,
-  "leases": 3,
-  "links": 28
-}
-```
-
-Seven counters in one statement. `bytes` is live content only and
-`trashed_bytes` is what trash still holds, because the difference is
-what a reaper run would recover ([[010-quotas-events-and-reaper]]).
-`leases` counts live workspace leases, which is the number of sandboxes
-holding a writer lease right now ([[009-workspaces]]). The service Arca
-replaces also counted pending share approvals; the approval queue is not
-Arca's ([[008-shares-and-links]]), so that counter is gone.
-
-`GET /v1/admin/spaces` pages the same counters per space, keyed by
-subject, with `?cursor=` and `?limit=`:
-
-```json
 {
   "entries": [
     {"owner": "https://issuer.example|9ab3...", "files": 214, "bytes": 88213004,
-     "quota_bytes": 10737418240, "workspaces": 2, "last_write_at": "2026-09-17T08:41:02Z"}
+     "trashed_bytes": 402118, "workspaces": 2, "leases": 1, "links": 3,
+     "last_write_at": "2026-09-17T08:41:02Z"}
   ],
   "next_cursor": "https%3A%2F%2Fissuer.example%7C9ab3..."
 }
 ```
+
+Seven counters per space, in one statement, keyed by subject. `bytes` is
+the space's usage as [[010-events-and-reaper]]'s ledger holds it, which
+is the number a platform bills and compares against whatever limit its
+authorizer hands out; Arca stores no limit, so no column here names one.
+`trashed_bytes` is the part of that usage trash still holds, because the
+difference is what a reaper run would recover. `leases` counts live
+workspace leases, which is the number of sandboxes holding a writer
+lease right now ([[009-workspaces]]). The service Arca replaces also
+counted pending share approvals; the approval queue is not Arca's
+([[008-shares-and-links]]), so that counter is gone.
+
+The installation's totals are not a second route. An operator that wants
+one number sums the page or reads `arca_stored_bytes` from the metrics
+of [[018-observability]], which is already the aggregate and costs no
+query.
 
 No email, no display name, and no directory. The service Arca replaces
 kept a `principal_directory` table populated from the `email` claim so
@@ -147,97 +153,80 @@ its admin browser could show people instead of identifiers; that table
 reads a claim for meaning and does not arrive. A console that wants
 names resolves the subject against its own identity provider.
 
-### Listings across a space
-
-`files` and `shares` are the owner's own listings of [[005-files]] and
-[[008-shares-and-links]] with two differences: the authorizer question
-is `space.admin` rather than `file.list` or `share.list`, and neither
-applies the authorizer's `filter`, because an administrator's page is
-not narrowed by a grant. The row shapes are the same shapes, so a
-console renders one component for both surfaces.
-
-`deleted` answers everything in the space that is deleted and still
-restorable: trashed objects inside `ARCA_TRASH_RETENTION`, and
-soft-deleted workspaces inside the same window. One list, one `kind`
-field per row, because an administrator asking what is recoverable does
-not know in advance which of the two a person lost.
-
-```json
-GET /v1/admin/spaces/me/deleted?kind=workspace
-200
-{"entries": [
-  {"kind": "workspace", "id": "01J8...", "slug": "build", "deleted_at": "2026-09-16T11:02:33Z",
-   "purges_at": "2026-10-16T11:02:33Z", "bytes": 44012},
-  {"kind": "file", "id": "01J7...", "path": "files/reports/q3.pdf", "deleted_at": "...",
-   "purges_at": "...", "bytes": 48213}
-]}
-```
+### Restore across owners
 
 `POST /v1/admin/spaces/{owner}/restore` takes `{"id": "<object or
 workspace id>"}` and answers `200 {"id": ..., "kind": ..., "status":
 "restored"}`. It restores across owners, which is the whole reason it
-exists beside [[005-files]]'s own restore. An id already purged is a 404
-whose developer detail says the retention window has passed, so the
-administrator is not left guessing between a typo and an expiry. The
-restore touches the database only, per invariant 1 of
+exists beside [[005-files]]'s own restore, and it takes an id rather
+than a path so that one route returns either a trashed object or a
+soft-deleted workspace; `kind` in the answer says which it was. An id
+already purged is a 404 whose developer detail says the retention window
+has passed, so the administrator is not left guessing between a typo and
+an expiry. The restore touches the database only, per invariant 1 of
 [[001-architecture]].
 
-### The audit log
+An administrator finds the id in the owner's own listings, `GET
+/v1/trash?owner=` and `GET /v1/workspaces/deleted?owner=`, both of which
+carry `purges_at` derived from `ARCA_TRASH_RETENTION`.
 
-One table, `admin_audit`, whose columns join the schema of
-[[004-metadata-store]]:
+### The record of what an administrator did
 
-| Column | Holds |
-|---|---|
-| `id` | `BIGSERIAL`, the cursor |
-| `actor` | the administrator's subject `<issuer>\|<sub>` |
-| `method`, `route` | the request line, the route pattern and not the raw path |
-| `owner` | the subject of the space touched, null on the three routes that read across every space |
-| `detail` | JSONB: the ids and paths the action names, never a byte of content and never a token |
-| `at` | `TIMESTAMPTZ` |
+There is no audit table. The record is the event log of
+[[010-events-and-reaper]], the same log a consumer tails, because an
+administrative action is a thing that happened to a space and the space's
+log is where things that happened to it are written. A second table
+recorded the same facts a second time and answered them from a second
+surface with its own filters, its own cursor, and its own way of falling
+behind.
 
-A mutating administrative action writes its row inside the same
-transaction as the mutation. Either both commit or neither does, so the
-log cannot miss a moderation and cannot record one that was rolled back.
-A read of another subject's space writes its row best effort, outside the
-transaction, because a failed audit write must not fail a read.
+An administrative mutation appends its event inside the same transaction
+as the mutation. Either both commit or neither does, so the log cannot
+miss a moderation and cannot record one that was rolled back. That is
+the one exception to the best-effort append of [[010-events-and-reaper]],
+and it exists because a notification that may be dropped and a record
+that may not are different things.
 
-Two kinds of request write a row, and the second is the one that
-matters. Every route under `/v1/admin` writes one. So does every allow
-on a space the caller neither owns nor holds a covering grant on,
-wherever that allow happened, because such an allow was administrative
-whatever action carried it: a moderation delete on `/v1/files/...`, a
-read of someone's private object, a list of someone's workspace. The
-test is mechanical: the caller's subject is not the space's owner, and
-`shares.Covering` returns nothing for the path
+What marks an event as administrative is the actor. Every event carries
+the subject that caused it, so an event whose `actor` is not the space's
+owner was somebody else acting in the space, and `detail` carries
+`admin: true` when neither ownership nor a covering grant explains the
+allow. The test is mechanical: the caller's subject is not the space's
+owner, and `shares.Covering` returns nothing for the path
 ([[008-shares-and-links]]). An installation cannot see why its
 authorizer said yes, but it can see that neither ownership nor a grant
-explains the yes, and that is the definition worth auditing.
+explains the yes, and that is the definition worth recording.
 
-The test runs on every allow against a space the caller does not own,
-which includes every read a grantee makes. Under the owner policy that
-costs nothing, because `Covering` was already computed to reach the
-decision. Under an authorizer it is one extra indexed lookup on those
-requests, and it buys the property that no route can be added that
-reads another space unaudited.
+The mark is set where the decision is made and not in a handler, so a
+route added later is recorded without being told to be. Under the owner
+policy it costs nothing, because `Covering` was already computed to
+reach the decision. Under an authorizer it is one extra indexed lookup
+on requests against a space the caller does not own, and it buys the
+property that no route can be added that reads another space unrecorded.
 
-The row is written where the decision is made and not in a handler, so
-a route added later is audited without being told to be.
+A reader asks for the record the way a consumer asks for anything else:
 
 ```json
-GET /v1/admin/audit?actor=<subject>&owner=<subject>&cursor=<id>&limit=100
+GET /v1/events?owner=<subject>&cursor=<id>&limit=100
 200
 {"entries": [
-  {"id": 8841, "actor": "https://issuer.example|11c4...", "method": "DELETE",
-   "route": "/v1/files/{owner}/{path...}", "owner": "https://issuer.example|9ab3...",
-   "detail": {"id": "01J7...", "path": "files/reports/q3.pdf", "reason": "moderation"},
+  {"id": 8841, "action": "delete", "path": "files/reports/q3.pdf",
+   "actor": "https://issuer.example|11c4...",
+   "detail": {"admin": true, "reason": "moderation"},
    "at": "2026-09-17T09:14:51Z"}
 ], "next_cursor": "8841"}
 ```
 
-The log is append only. No route deletes from it and the reaper does not
-sweep it; an installation that must expire it does so in the database,
-which is the operator's decision to record.
+`GET /v1/events` asks `event.read`, which an administrator is allowed on
+any space and an owner only on its own, so the same route serves both
+readers. No `detail` carries a byte of object content and none carries a
+token.
+
+The log is pruned at thirty days ([[010-events-and-reaper]]). An
+installation that must keep a longer record tails the log and keeps the
+result somewhere built for keeping things, which is the same answer any
+consumer gets and is now the only answer, where the predecessor's table
+grew without bound until somebody noticed.
 
 ### The check subcommand
 
@@ -289,39 +278,38 @@ dependency and holds no connection open.
 | From | To | What changes |
 |---|---|---|
 | `drive/internal/handler/admin.go` | `internal/admin/` | the gate becomes the `space.admin` question; the `principal_type` gate on mutations goes; a deny is 403, not a hidden 404 |
-| the same file's `handleAdminOverview` | the overview | `pending_approvals` goes with the approval queue; `active_locks` becomes `leases`; `trashed_bytes` and `links` are added |
-| the same file's `/v1/admin/deleted` and `DELETE /v1/admin/files/{id}` | `/v1/admin/spaces/{owner}/deleted`, and `DELETE /v1/files/{owner}/{path...}` | one prefix, one owner; moderation reuses the file delete rather than a second implementation |
-| migration `000006_admin_audit` | the `admin_audit` table of [[004-metadata-store]] | `actor_id UUID` and `(owner_type, owner_id)` become subject strings; the indexes are the same two |
-| `drive/specs/.archive/009-admin-governance.md` | this spec | the surface and the transactional audit rule survive; the live `/tokeninfo` re-check on mutations goes, because Arca calls an issuer for a key set and nothing else |
+| the same file's `handleAdminOverview` | the overview | `pending_approvals` goes with the approval queue; `active_locks` becomes `leases`; `trashed_bytes` and `links` are added; the installation-wide totals become the metrics of [[018-observability]] and the route answers one row per space |
+| the same file's `/v1/admin/deleted` and `DELETE /v1/admin/files/{id}` | `GET /v1/trash?owner=`, `GET /v1/workspaces/deleted?owner=`, and `DELETE /v1/files/{owner}/{path...}` | no administrative copy of a listing or a delete; an administrator asks the owner's own route about somebody else's space |
+| migration `000006_admin_audit` | nothing | the `admin_audit` table does not arrive. The record is the event log of [[010-events-and-reaper]], written in the mutation's transaction |
+| `drive/specs/.archive/009-admin-governance.md` | this spec | the surface and the transactional record survive; the separate audit table and its routes go; the live `/tokeninfo` re-check on mutations goes, because Arca calls an issuer for a key set and nothing else |
 | `drive/internal/handler/directory.go`, `principal_directory` | nothing | display data built from the `email` claim; a console resolves names against its identity provider |
 | nothing | `internal/check/`, `arcad check` | new; the service Arca replaces had one deployment and no installer, so it had nothing to check |
 
 ## Not in this spec
 
-The owner's own trash, restore, and workspace routes ([[005-files]],
-[[009-workspaces]]). Setting a quota, which is `quota.write` on
-`/v1/quotas/{owner}` and not an administrative route
-([[010-quotas-events-and-reaper]]). The per-space event log, which is a
-consumer's tail and not an audit of administrators
-([[010-quotas-events-and-reaper]]). The status codes and error bodies
-([[013-api]]). The metrics and traces `check` does not emit
-([[018-observability]]).
+What the owner's own trash, restore, and workspace routes do once an
+administrator is allowed on them ([[005-files]], [[009-workspaces]]).
+The ledger this spec's overview reads and the log it uses as its record
+([[010-events-and-reaper]]). Any limit on a space: Arca stores none, so
+there is nothing here to set ([[010-events-and-reaper]]). The status
+codes and error bodies ([[013-api]]). The metrics and traces `check`
+does not emit ([[018-observability]]).
 
 ## Acceptance criteria
 
 | # | Criterion | Proved by |
 |---|---|---|
-| 1 | Every route under `/v1/admin` asks `space.admin` before it acts, with `resource.owner` set on the four that name a space and absent on the three that do not | `TestAdminRouteActions` against a recording authorizer, one case per row |
+| 1 | Both routes under `/v1/admin` ask `space.admin` before they act, with `resource.owner` set on the restore and absent on the overview | `TestAdminRouteActions` against a recording authorizer, one case per row |
 | 2 | A caller the authorizer denies gets 403 `forbidden`; a space's own owner with no `space.admin` gets 403 on its own space | the same test |
-| 3 | With no authorizer and an empty `ARCA_ADMIN_SUBJECTS`, every admin route answers 403 to every caller including the space owner | `internal/admin` policy test |
+| 3 | With no authorizer and an empty `ARCA_ADMIN_SUBJECTS`, both admin routes answer 403 to every caller including the space owner | `internal/admin` policy test |
 | 4 | A non-human caller the authorizer allows may moderate; no handler reads `principal_type` | `TestAdminReadsNoClaims`, plus the `identity` gate's `claims` rule |
-| 5 | The overview's seven counters equal a direct count of the fixtures, and no counter reads the approvals table, which does not exist | e2e against Postgres |
-| 6 | `deleted` lists trashed objects and soft-deleted workspaces of one space with `purges_at` derived from `ARCA_TRASH_RETENTION`, and `?kind=` filters | e2e |
-| 7 | A restore across owners returns the object to its path; an id past the retention window is 404 with the window named in the developer detail | e2e |
-| 8 | A moderation delete and its audit row commit together: a forced failure after the delete leaves neither | `internal/admin` test on a transaction that is made to fail at commit |
-| 9 | An allow on a space the caller neither owns nor holds a covering grant on writes an audit row wherever it happened; a read of the caller's own space and a read through a grant write none | e2e: a moderation delete on `/v1/files/...` appears in `/v1/admin/audit`, and a grantee's read of the same path does not |
-| 10 | `/v1/admin/audit` pages by `cursor`, filters by `actor` and `owner`, and no route deletes from the table | e2e |
-| 11 | No audit `detail` carries object content or a link token | `TestAuditDetailIsMetadataOnly` over the shapes the writers pass |
+| 5 | The overview's seven counters per space equal a direct count of the fixtures, `bytes` equals the ledger, and no counter reads the approvals table, which does not exist | e2e against Postgres |
+| 6 | The overview pages by `cursor` across more spaces than one page holds, and lists no space that holds nothing | e2e |
+| 7 | A restore across owners returns the object to its path and a soft-deleted workspace to its slug; an id past the retention window is 404 with the window named in the developer detail | e2e |
+| 8 | A moderation delete and its event commit together: a forced failure after the delete leaves neither | `internal/admin` test on a transaction that is made to fail at commit |
+| 9 | An allow on a space the caller neither owns nor holds a covering grant on marks its event `admin` wherever it happened; a read of the caller's own space and a read through a grant mark none | e2e: a moderation delete on `/v1/files/...` appears on `/v1/events?owner=` marked `admin`, and a grantee's read of the same path does not |
+| 10 | `GET /v1/events` serves that record to an administrator for any space and to an owner for its own, and no route in this spec deletes from the log | e2e |
+| 11 | No event `detail` carries object content or a link token | `TestEventDetailIsMetadataOnly` over the shapes the writers pass |
 | 12 | `arcad check` prints one line per requirement in table order, exits 0 when all pass and 1 when any fails, and two runs against a healthy installation print identical output | `internal/check` test against the stubs of [[014-test-stubs-and-tiers]] |
 | 13 | `check` fails on an unreachable bucket, a bucket it cannot write under the prefix, an unreachable database, a schema behind the embedded migrations, an issuer whose discovery does not answer, and an authorizer that allows the probe | `internal/check` table test, one case per failure |
 | 14 | `check` deletes the object it wrote, and a bucket listing after a run holds nothing under `_check/` | the store tier of [[014-test-stubs-and-tiers]] |

@@ -66,7 +66,7 @@ flowchart LR
 | 3 | 005, 007 | `files.go`, `versions.go`, `trash.go`, `uploads.go`, `serveblob` | the zone rule by principal type goes; every handler asks its action | `zoneWriteAllowed` |
 | 4 | 008 | `shares.go` (grants, with-me), `links.go` (the three API routes) | grantees are subjects; the approval queue does not arrive | `share_requests` and `/v1/orgs/{org}/share-requests/*` |
 | 5 | 009 | `workspaces.go`, `attach.go`, `sync.go` | none of substance; the lease and materialize contract is Cella's mount contract as it stands | |
-| 6 | 010, 011 | `quota.go`, `events.go`, `internal/gc`, `webhooks.go`, `internal/webhook` | the reaper gains the `reap` subcommand; quotas take the authorizer's `limits` | |
+| 6 | 010 | `events.go`, the usage accounting inside `quota.go`, `internal/gc` | the reaper gains the `reap` subcommand; usage is counted and the authorizer's `limits.quota_bytes` is honoured when it answers one | the stored quota, its two routes and table; `webhooks.go`, `internal/webhook`, their two migrations |
 | 7 | 012, 015, 018 | `admin.go`, `directory.go`, the metrics in the handlers | `check` is new; the threat model is written for the first time | |
 | 8 | 017, 016 | `test/release-smoke.sh`, `test/smoke`, `release.yml`'s cosign and smoke steps | the pipeline becomes the family's (multi-arch, SBOM, provenance, `lateregate release`); the conformance suite is new | the `doctl` deploy step of one company |
 | 9 | cutover | the data | see below | |
@@ -89,6 +89,7 @@ metadata in one Postgres database. Neither is copied.
 | bytes | none. Arca is deployed with `ARCA_BUCKET_PREFIX=drive/` against the same bucket, so every key Drive wrote is a key Arca reads. Invariant 8 of [[001-architecture]] is what makes this free: a key derives from an id, and the ids do not change |
 | metadata | Arca owns a fresh database. `tools/migrate-drive` copies every table in one transaction per table with one rewrite: the owner columns `u-<id>` become `<issuer>|<id>` and `o-<id>` become the subject the platform's identity provider assigns that organization, read from a mapping the platform exports. The tool is idempotent, verifies row counts and a sample of checksums, and refuses to run against a database that already holds rows |
 | the ledger | copied as is; the event enum is a superset of Drive's, and `attach`, `sync` and `release` rows from the withdrawn sandbox auto-mount are history, not a reason to keep the mount |
+| what is removed | the tool does not copy the `quotas`, `webhooks`, `share_requests` and `agent_visibility` tables, drops the workspace kind and rewrites `repos/<name>/` slugs to `workspaces/<name>/`, and drops grants whose grantee is a role, a team or an email address, reporting each dropped row count |
 
 The cutover itself:
 
@@ -122,8 +123,8 @@ Everything that speaks to Drive today, and what changes for each.
 |---|---|---|
 | the console's Storage section | the platform's frontend, 5,000 lines | the base URL is already the origin; the paths that moved (`shares/links`, `shares/with-me`, `files/materialize`) and the approval screen, which loses its backend |
 | the platform's proxy and registry | the platform's `DefaultServices` | the storage service entry names Arca's audience and prefixes |
-| the platform's authorizer | the platform's decision endpoint | answers Arca's twenty-nine actions from its plans, memberships, and grants; the approval queue, if the platform keeps one, is decided here and stored there |
-| the CLI's storage command group | ten subcommands, 800 lines | renamed to `arca`, base URL the origin, the three moved paths |
+| the platform's authorizer | the platform's decision endpoint | answers Arca's twenty-three actions from its plans, memberships, and grants; a plan's byte limit is answered as `limits.quota_bytes`; the approval queue, if the platform keeps one, is decided here and stored there |
+| the CLI's storage command group | ten subcommands, 800 lines | renamed to `arca`, base URL the origin, the three moved paths; the quota subcommands go |
 | the sandbox plane's explicit pull and push | 440 lines | base URL the origin, audience `arca`; the withdrawn auto-mount and its sidecar are removed before the cutover, not after, so the ledger measures the explicit path alone |
 | the agents plane's workspace mount | 270 lines, off in every manifest | base URL and audience; stays off |
 | the identity provider's avatar upload | one handler | base URL the origin, and the `/api/v1/` prefix it still uses, which has been broken since Drive went headless, is fixed in the same change |
@@ -153,17 +154,56 @@ The same day, once the smoke of step 5 holds:
    routes switch (criterion 4), and the bucket, which holds every byte,
    is untouched, so there is nothing a retained database would recover.
 
-### What is left behind, and why
+### What is removed, and why
 
-| Left behind | Why |
+Arca is not Drive under a new name. The migration is also the moment
+the service is simplified: everything below was in Drive on 2026-09-18
+and does not arrive. Each row says what Drive had it for, why it goes,
+and where the need is met if it returns. The first group is the
+maintainer's decisions of 2026-09-18; the second follows from the
+identity shape of [[006-identity]]; the third is what the family had
+already retired or moved before Arca existed.
+
+**Decided on 2026-09-18, to simplify the service.**
+
+| Removed | Drive had it for | Why it goes | If the need returns |
+|---|---|---|---|
+| a stored quota per space, `PUT /v1/quotas/{owner}`, the `quotas` table, `ARCA_DEFAULT_QUOTA_BYTES`, `quota.read` and `quota.write` | a free tier on a service that decided access itself, 2026-07 | a limit is a plan, and a plan is the platform's. A core that also holds a limit is a second decision-maker | Arca keeps counting: bytes per space in the ledger, on the admin overview and in the authorizer question. When the authorizer's answer carries `limits.quota_bytes`, Arca refuses a write past it for the answer's ttl, one comparison on a field the family contract already has ([[010-events-and-reaper]]) |
+| outbound webhooks: `/v1/webhooks`, the `webhooks` table and its delivery lease, `ARCA_WEBHOOK_SIGNING_KEY`, four `webhook.*` actions, the delivery worker, the sink stub | "events leave the building", spec DR-19, 2026-08 | no consumer exists and none is planned. A delivery system with leases, retries, retirement and signing is a service of its own for nobody | the event log stays and is tailed by cursor with `event.read`; a consumer that needs push subscribes to the log from its own side. Spec number 011 is retired unused |
+| provenance zones: the human-only `files/` and agent-only `agents/` split, and the rule that a machine may not write where a person curates | a founder requirement of 2026-07-11, spec DR-14 | the rule was decided from `principal_type`, a claim read for meaning, which invariant 5 forbids; and the separation was never used | one rule in the platform's authorizer over subject, plane and path; the question already carries all three |
+| the `repos/` plane, workspace `kind: repo`, the Repos tab of the console's Storage section | Drive as the checkout of a repository whose history lived on Origo, spec DR-26 | Origo is the repository service and the console gets its own Repos section over it; a checked-out tree a sandbox needs is a workspace or the sandbox's own disk | none in Arca. `tools/migrate-drive` rewrites the `repos/<name>/` slugs to `workspaces/<name>/` and drops the kind |
+| the `memory/` plane as a plane of its own | agent memory files with ETag conditional writes, spec 000 | conditional writes are a files feature; a plane that differs from `files/` only in its name is a convention, not a design | `memory/` stays a prefix under `files/` that agents use by convention; `If-Match` and `If-None-Match` work on every object |
+| the admin surface beyond an overview and restore: per-space file and share listings for administrators, the moderation delete route | operator governance of a hosted product, spec DR-09 | an administrator reads a space through the same routes as its owner, with `space.admin` answered by the authorizer; a moderation delete is `DELETE /v1/files/...` on a space the caller does not own; audit rows are the event log | the overview and cross-space restore stay in [[012-administration]] |
+
+**Consequences of the identity shape, [[006-identity]].**
+
+| Removed | Why |
 |---|---|
-| share requests and approvals | an approval queue over an organization's members is a policy of the platform, and the platform's authorizer is where membership lives. If the platform wants approvals, it stores the queue and answers `share.create` from it |
-| agent visibility | a rule about which of a platform's principals may see which, expressed over claims Arca no longer reads |
+| share requests and approvals, `/v1/orgs/{org}/share-requests/*`, the `pending` and `denied` grant statuses | an approval queue over an organization's members is a policy of the platform, and the platform's authorizer is where membership lives. If the platform wants approvals, it stores the queue and answers `share.create` from it |
+| agent visibility, `/v1/agent-visibility`, the `agent_visibility` table, `workspaces.agent_access` | a rule about which of a platform's principals may see which, expressed over claims Arca no longer reads |
 | `/v1/orgs/*`, `/v1/whoami` | identity's routes, served by the identity provider and the platform, not by a storage core |
 | the `u-`/`o-` addressing and the "two spaces per token" rule | a space is a subject; a token acts in the spaces the authorizer allows, however many |
-| the zone rule by principal type | a claim read for meaning |
-| the sandbox auto-mount | withdrawn by the family on 2026-09-06 and still running; removed before the measurement, per the platform epic's storage leaf |
-| the DigitalOcean deploy step and endpoint default | one company's deployment; the operator's overlay carries it |
+| grants to a role or a team, and grants by email invitation with the mailer behind them | a grantee is a subject, an address the authorizer resolves, a link, or the public; Arca sends no mail |
+| the `platform_admin` role read from the token | an administrator is whoever the authorizer, or `ARCA_ADMIN_SUBJECTS`, says |
+
+**Already retired or moved before Arca, and not arriving.**
+
+| Removed | When and by what |
+|---|---|
+| Drive's own web UI, the share-link HTML page, the session cookie and its OIDC client | 2026-09-16, Drive DR-28: the console's Storage section renders storage, the service went headless |
+| git smart-HTTP and LFS in Drive | 2026-09-12, Drive DR-26: git hosting is Origo's |
+| team grants | 2026-09-13, the family's membership contract |
+| the sandbox auto-mount of Drive and its sync sidecar | withdrawn by the family on 2026-09-06 and still running in the sandbox plane; removed before the cutover, not after |
+| the DigitalOcean deploy step and the endpoint default derived from it | one company's deployment; the operator's overlay carries it |
+
+What remains is the storage service itself: files with versions, trash
+and stars; uploads in parts; shares with a permission ladder and public
+links; workspaces with a writer lease, materialize and sync; the event
+log; the reaper; and the identity, API, tiers, threat model, release,
+conformance and observability every core carries. Sixty routes in Drive
+become the table of [[013-api]], twenty-nine actions become twenty-three,
+seventeen migrations become one per owning spec ([[004-metadata-store]]
+counts them), and four planes become two.
 
 ## Decisions for the maintainer
 
@@ -187,6 +227,28 @@ The plan takes these; each is reversible before its phase begins.
    minutes, announced.
 5. **The console section stays "Storage".** The family decided the
    product name goes; the section name was never the product name.
+6. **Usage, not quota.** Arca counts bytes per space and honours the
+   authorizer's `limits.quota_bytes`; it stores no limit of its own.
+   Decided by the maintainer on 2026-09-18.
+7. **No webhooks.** The event log is the integration point. Decided by
+   the maintainer on 2026-09-18; spec number 011 is retired unused.
+8. **No repos plane.** Repositories are Origo's; a workspace has no
+   kind. Decided by the maintainer on 2026-09-18.
+9. **`memory/` folds into `files/`.** Planes are `files/` and
+   `workspaces/`. Decided by the maintainer on 2026-09-18.
+10. **The admin surface is an overview and restore.** Audit is the
+    event log. Decided by the maintainer on 2026-09-18.
+
+The drafting decisions of the component specs, confirmed by the
+maintainer on 2026-09-18 after reading this deck: keys derive from a
+per-write UUIDv7 under the prefix ([[003-object-store]]); migrations
+are forward-only ([[004-metadata-store]]); agent visibility and
+provenance zones do not arrive; approvals leave the core; the usage
+gauge is published in aggregate bands and never labelled by subject
+([[018-observability]]); the tiers run on a Makefile-owned compose file
+rather than testcontainers ([[014-test-stubs-and-tiers]]); two rate
+limit variables join the configuration table
+([[015-security-and-threat-model]]); the licence is MIT.
 
 ## Acceptance criteria
 

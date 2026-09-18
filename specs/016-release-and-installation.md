@@ -123,6 +123,30 @@ renders `deploy/examples/kind` with the image references overridden to
 the development image built earlier in the same run. On a tag,
 `install-release` supersedes it against the published artifacts.
 
+### The deployment is confirmed in GitHub
+
+The `deploy` job runs under `environment: production`, with `url` set to
+the installation's public address, so the rollout is a GitHub deployment
+and not a step buried in a log.
+
+The repository's `production` environment carries two rules. A required
+reviewer names the maintainer, and a deployment branch policy admits
+tags matching `v*` and nothing else. Together they make the shape of a
+release plain: a `v*` tag builds, signs, and attests with nobody
+present, then pauses at `deploy` until the maintainer approves it in the
+run's "Review deployments" dialog. The deployment then appears on the
+repository's Deployments page with the URL and the release smoke's
+evidence beside it, so what is live and who let it go live are read from
+the repository rather than reconstructed from a pipeline log.
+
+The environment was created on 2026-09-18 with exactly Origo's settings:
+the required reviewer, the `v*` tag policy, custom branch policies on,
+and protected branches off. Two repositories of the family approving
+releases through the same dialog is one habit rather than two.
+
+A fork inherits none of this. `ARCA_RELEASE_DEPLOY` is unset there, the
+job is skipped, and no environment is consulted.
+
 ### Cutting a tag
 
 `go tool lateregate release <version>` is the only way a tag is made.
@@ -162,7 +186,7 @@ escalation, and a read-only root filesystem with no writable volume,
 because `arcad` keeps nothing on local disk. A second Deployment, off
 by default in the base and enabled by a patch, runs `arcad reap` for an
 installation that wants the reconciler of
-[[010-quotas-events-and-reaper]] off the API replicas. `arcad migrate`
+[[010-events-and-reaper]] off the API replicas. `arcad migrate`
 is a Job the operator runs before each upgrade, never an init container,
 so two replicas rolling at once do not migrate twice.
 
@@ -243,7 +267,7 @@ across a migration is refused by the schema guard above, and
 database taken before the migration, with the bucket untouched, because
 the bucket holds no schema and a row that names a key the database no
 longer has is a reaper finding and not a loss
-([[010-quotas-events-and-reaper]]).
+([[010-events-and-reaper]]).
 
 The two most recent minor series receive patches. A release is cut only
 from a green `main` with [[017-conformance-suite]] passed against the
@@ -297,3 +321,4 @@ it runs ([[017-conformance-suite]]). The contents of the alert rules
 | 8 | A binary started against a schema recorded above its own refuses to start and names both versions | `TestSchemaGuardRefusesADowngrade` against [[004-metadata-store]]'s guard |
 | 9 | The previous release's conformance suite passes against this release's binary, which is what N-1 compatibility means | the `conformance` job, running the suite [[017-conformance-suite]] pins to the previous tag; that spec owns the criterion |
 | 10 | A tag with no CHANGELOG section is refused before anything is pushed | the gate's pre-push hook and the `publish` job |
+| 11 | A `v*` tag run pauses at `deploy` until a reviewer approves, and the run's deployment record names `production` and the URL | the first tag run |
