@@ -167,7 +167,7 @@ Authorization: Bearer {ARCA_AUTHORIZER_TOKEN}
 | deny | 403 `forbidden` with the reason in the developer detail; a deny at lookup is 404 `not_found`, indistinguishable from a missing object |
 | `limits.quota_bytes` | the space's byte limit for the answer's `ttl`; without it a space has no limit, because Arca stores none ([[010-events-and-reaper]]) |
 | `filter` | on a `list` action, the owners and labels the page is narrowed to |
-| probe | the resource id `probe` of kind `Space`, which every authorizer denies for every subject; `arcad check` asks it and refuses an endpoint that allows |
+| probe | the shared contract's reserved resource id, `authz.ProbeID`, of kind `Space`, which every authorizer denies for every subject; `arcad check` asks it and refuses an endpoint that allows. The id is the family's one value and not a word of Arca's own, so one check command reads one answer from every endpoint of the family; `authorizer.Probe` builds the resource |
 
 The authorizer client is the shared one, so its transport carries the
 request's trace and every call is a span.
