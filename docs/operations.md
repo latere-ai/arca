@@ -1,8 +1,46 @@
 # Operating Arca
 
-What to do after [`install.md`](install.md): upgrades, rollbacks, what a
-version number promises, and what happens when something a replica depends
-on goes away.
+What to do after [`install.md`](install.md): checking an installation,
+upgrades, rollbacks, what a version number promises, and what happens when
+something a replica depends on goes away.
+
+## Checking an installation
+
+`arcad check` reads the same configuration as the server, reaches everything
+the server depends on once, and prints one line per requirement. It exits 0
+when every line passed and 1 when any failed. It opens no listener, runs no
+migration, and writes nothing it does not delete, so it is safe to run
+against production at any time.
+
+```sh
+kubectl -n arca exec deploy/arcad -- arcad check
+```
+
+```
+ok    bucket      arca-prod at https://s3.example, prefix arca/: wrote, read, deleted
+ok    database    PostgreSQL 18.0, schema at 0005_usage_events, clean
+ok    issuer      https://issuer.example: discovery ok, 3 keys, RS256 ES256
+fail  authorizer  https://authz.example/decide: allowed the probe resource
+ok    public-url  https://arca.example: answers the version endpoint
+arcad: 1 of 5 checks failed
+```
+
+The table goes to stdout and the summary to stderr, so a script reads the
+table and a person reads both. The lines are always these five in this
+order, and a requirement that does not apply says so on its own line, so two
+runs against a healthy installation print exactly the same thing.
+
+| Line | Passes when | Fix a failure by |
+|---|---|---|
+| `bucket` | the bucket answers, and a small object written under `ARCA_BUCKET_PREFIX`, read back, and deleted all succeed | checking `ARCA_BUCKET`, `ARCA_BUCKET_ENDPOINT`, `ARCA_BUCKET_REGION` and the credentials; a listing-only credential passes nothing here |
+| `database` | the connection opens, the server answers, and the schema holds every migration this binary carries | running the migration job for this version: `arcad migrate` |
+| `issuer` | every issuer in `ARCA_OIDC_ISSUERS` serves a discovery document and a key set holding at least one RS256 or ES256 key | checking the issuer list and that the issuer is reachable from the cluster |
+| `authorizer` | `ARCA_AUTHORIZER_URL` answers the reserved probe resource with a deny. Unset is not a failure: the line says the built-in owner policy applies and how many subjects `ARCA_ADMIN_SUBJECTS` lists | an endpoint that **allowed** the probe: it is not reading the request, and it will allow every action Arca ever adds. Fix the endpoint before anything else |
+| `public-url` | `ARCA_PUBLIC_URL` answers this server's `/version`. A URL that cannot be reached from where the check runs is not a failure, because an ingress often does not answer from inside its own cluster | a URL that answers something else: it names another installation, and every URL this server writes points there |
+
+Run it after every configuration change, after every upgrade, and first when
+something is wrong. A failure here is a fact about the installation, not
+about the load it is under.
 
 ## What a release is
 

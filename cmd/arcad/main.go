@@ -28,6 +28,7 @@ import (
 	"latere.ai/x/arca/internal/api"
 	"latere.ai/x/arca/internal/auth"
 	"latere.ai/x/arca/internal/blob"
+	"latere.ai/x/arca/internal/check"
 	"latere.ai/x/arca/internal/config"
 	"latere.ai/x/arca/internal/events"
 	"latere.ai/x/arca/internal/reaper"
@@ -63,8 +64,10 @@ func run(ctx context.Context, args []string, getenv config.Getenv, stdout, stder
 		return migrate(rest, getenv, stdout, stderr)
 	case "reap":
 		return reap(ctx, rest, getenv, stdout, stderr)
+	case "check":
+		return check.Command(ctx, rest, getenv, stdout, stderr)
 	default:
-		_, _ = fmt.Fprintf(stderr, "arcad: unknown subcommand %q; serve, migrate and reap are the ones this binary has\n", name)
+		_, _ = fmt.Fprintf(stderr, "arcad: unknown subcommand %q; serve, migrate, reap and check are the ones this binary has\n", name)
 		return 2
 	}
 }

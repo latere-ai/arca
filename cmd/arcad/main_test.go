@@ -29,6 +29,7 @@ import (
 	"latere.ai/x/arca/authorizer"
 	"latere.ai/x/arca/internal/auth"
 	"latere.ai/x/arca/internal/blob"
+	"latere.ai/x/arca/internal/check"
 	"latere.ai/x/arca/internal/config"
 	"latere.ai/x/arca/internal/events"
 	"latere.ai/x/arca/internal/reaper"
@@ -102,6 +103,43 @@ func TestBadFlagIsAUsageError(t *testing.T) {
 	var errOut bytes.Buffer
 	if code := run(t.Context(), []string{"serve", "-no-such-flag"}, env(nil), io.Discard, &errOut); code != 2 {
 		t.Fatalf("exit %d", code)
+	}
+}
+
+// TestTheCheckSubcommandIsDispatched: spec 002's table names four, and the
+// usage line names the same four, so an operator who mistypes one is told
+// what this binary has.
+func TestTheCheckSubcommandIsDispatched(t *testing.T) {
+	var out, errOut bytes.Buffer
+	// A configuration the check cannot read fails before any dependency is
+	// reached, which is enough to prove the dispatch: the requirements
+	// themselves are internal/check's own tests.
+	if code := run(t.Context(), []string{"check"}, env(nil), &out, &errOut); code != 1 {
+		t.Fatalf("exit %d, stderr %q", code, errOut.String())
+	}
+	if !strings.HasPrefix(errOut.String(), "arcad: configuration: ") {
+		t.Fatalf("stderr = %q", errOut.String())
+	}
+	errOut.Reset()
+	if code := run(t.Context(), []string{"frobnicate"}, env(nil), io.Discard, &errOut); code != 2 {
+		t.Fatalf("exit %d", code)
+	}
+	if !strings.Contains(errOut.String(), "serve, migrate, reap and check") {
+		t.Fatalf("the usage line is %q and does not name the four subcommands", errOut.String())
+	}
+}
+
+// TestTheCheckAndTheNodeOpenOneBucket: `arcad check` reaches the bucket the
+// node reaches, from one reading of spec 002's table. A variable added to one
+// mapping and not the other would make the check pass an installation the
+// server cannot serve, which is the one thing the check may not do.
+func TestTheCheckAndTheNodeOpenOneBucket(t *testing.T) {
+	cfg := config.Config{
+		Bucket: "arca-prod", BucketEndpoint: "https://s3.example", BucketRegion: "eu-central-1",
+		BucketAccessKey: "a-key", BucketSecretKey: "a-secret", BucketPathStyle: true,
+	}
+	if got, want := bucketOptions(cfg), check.BucketOptions(cfg); got != want {
+		t.Errorf("the node opens %+v and the check opens %+v", got, want)
 	}
 }
 
