@@ -25,6 +25,8 @@ import (
 
 	"latere.ai/x/arca/internal/api"
 	"latere.ai/x/arca/internal/apidocs"
+	"latere.ai/x/arca/internal/files"
+	"latere.ai/x/arca/internal/uploads"
 )
 
 // Path is where the document is committed, relative to the repository root.
@@ -66,7 +68,7 @@ func run(root string) error {
 func Render() []byte {
 	return mustYAML(apidocs.Build(apidocs.Options{
 		Title: api.Title, Version: api.DocumentVersion, Description: api.Description,
-		Routes: api.Described(), Errors: api.Errors(),
+		Routes: api.Described(files.Table(), uploads.Table()), Errors: api.Errors(),
 	}).JSON())
 }
 

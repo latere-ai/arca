@@ -28,7 +28,9 @@ import (
 	"latere.ai/x/arca/internal/auth"
 	"latere.ai/x/arca/internal/blob"
 	"latere.ai/x/arca/internal/config"
+	"latere.ai/x/arca/internal/files"
 	"latere.ai/x/arca/internal/store"
+	"latere.ai/x/arca/internal/uploads"
 	"latere.ai/x/arca/internal/version"
 )
 
@@ -172,11 +174,19 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	if err != nil {
 		return fail(stderr, err)
 	}
+	// The routes of the specs that own their behaviour, bound to their
+	// handlers and registered through the one table of spec 013. The ledger
+	// and the log of spec 010 and the workspace liveness of spec 009 are
+	// seams these packages default; the node binds them when those specs
+	// land.
+	content := files.Options{DB: db, Bucket: bucket, Decide: identity.Authorizer, Config: cfg}
 	surface, err := api.New(api.Options{
 		Verifier: identity.Verifier, Authorizer: identity.Authorizer,
 		PublicURL:                        cfg.PublicURL,
 		RequestsPerMinute:                cfg.RequestsPerMinute,
 		UnauthenticatedRequestsPerMinute: cfg.UnauthenticatedRequestsPerMinute,
+		Routes: append(files.Routes(content),
+			uploads.Routes(uploads.Options{Options: content})...),
 	})
 	if err != nil {
 		return fail(stderr, err)
