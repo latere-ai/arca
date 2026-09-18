@@ -111,12 +111,25 @@ member per thing the reconciler of
 [[010-events-and-reaper]] can find: `orphan_object`,
 `orphan_candidate`, `missing_bytes`, `workspace_purged`,
 `file_purged`, `trash_purged`, `share_expired`, `event_pruned`,
-`star_pruned`, `version_pruned`, `upload_aborted`, `usage_corrected`.
+`star_pruned`, `version_pruned`, `upload_aborted`, `usage_corrected`,
+`lease_expired`.
 `usage_corrected` is pass 10's finding, a space whose ledger row
 disagreed with the rows holding its bytes, and a healthy installation
 reports none. `missing_bytes` is
 the finding of invariant 2, a row whose object the bucket does not
 hold, and it is the one a human always reads.
+
+`lease_expired` is the thirteenth member and pass 3's finding: an
+attachment past its expiry whose writer lease the pass cleared. The
+first draft of this table left it out, because
+`arca_lease_expiries_total` counts the same event, and
+[[010-events-and-reaper]] asked for it while building that pass. A pass
+whose findings no run reports is a pass an operator cannot see run at
+all, and a run whose table names twelve kinds while the reconciler
+sweeps thirteen reads as a pass that found nothing. The two are not a
+duplicate: the counter is the rate a platform alerts on, and the finding
+is the row of the run's own table, beside the twelve others, that says
+the pass ran.
 
 **Usage is sampled per space and published in aggregate.** The reaper
 reads the ledger once per run and, for every space, observes its bytes
