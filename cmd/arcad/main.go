@@ -189,7 +189,8 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	}
 	surface, err := api.New(api.Options{
 		Verifier: identity.Verifier, Authorizer: identity.Authorizer,
-		Shares:                           sharing,
+		Routes:                           shares.Routes(sharing),
+		Links:                            sharing,
 		PublicURL:                        cfg.PublicURL,
 		RequestsPerMinute:                cfg.RequestsPerMinute,
 		UnauthenticatedRequestsPerMinute: cfg.UnauthenticatedRequestsPerMinute,

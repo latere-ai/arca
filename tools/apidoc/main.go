@@ -25,6 +25,7 @@ import (
 
 	"latere.ai/x/arca/internal/api"
 	"latere.ai/x/arca/internal/apidocs"
+	"latere.ai/x/arca/internal/shares"
 )
 
 // Path is where the document is committed, relative to the repository root.
@@ -66,8 +67,16 @@ func run(root string) error {
 func Render() []byte {
 	return mustYAML(apidocs.Build(apidocs.Options{
 		Title: api.Title, Version: api.DocumentVersion, Description: api.Description,
-		Routes: api.Routes(), Errors: api.Errors(),
+		Routes: routes(), Errors: api.Errors(),
 	}).JSON())
+}
+
+// routes is the whole surface this build registers: the frame's own rows and
+// the rows each owning package declares. The node builds its mux from the
+// same declarations, so the committed document and the registrations are one
+// list read twice and cannot disagree.
+func routes() []apidocs.Route {
+	return append(api.Routes(), api.Described(shares.Table())...)
 }
 
 // mustYAML converts a JSON document to YAML, and panics on bytes that are

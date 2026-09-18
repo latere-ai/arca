@@ -579,3 +579,22 @@ func TestARefusedRedemptionNamesNoToken(t *testing.T) {
 		}
 	}
 }
+
+// TestARedemptionAnAuthorizerCannotAnswerIsUnavailable: what a redemption
+// answers when the question could not be asked is not what it answers to a
+// deny. A deny is hidden behind the not-found every other refusal of these
+// routes gives; an endpoint that produced no decision is an outage, which
+// spec 006 says is never a deny.
+func TestARedemptionAnAuthorizerCannotAnswerIsUnavailable(t *testing.T) {
+	h := newHarness(t)
+	link := mint(t, h, "files/reports", "")
+	h.endpoint.Fail(http.StatusInternalServerError)
+
+	w := h.do(t, http.MethodGet, "/v1/shares/links/"+link.Token+"/meta", "", nil)
+	if got := refusalOf(t, w); got != api.CodeAuthorizerUnavailable {
+		t.Fatalf("a redemption no authorizer answered = %q %d", got, w.Code)
+	}
+	if body := w.Body.String(); strings.Contains(body, link.Token) {
+		t.Errorf("the refusal names the token: %s", body)
+	}
+}

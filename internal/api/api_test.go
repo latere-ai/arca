@@ -58,7 +58,7 @@ func TestAPublicLinkRouteTakesNoBearer(t *testing.T) {
 // at its right place in a build that bound no service, so the exception to
 // the verifier is a property of the table and not of the handler.
 func TestAPublicLinkRouteWithNoServiceIsNotImplemented(t *testing.T) {
-	h := newHarness(t, routeTable, func(o *Options) { o.Shares = nil })
+	h := newHarness(t, routeTable, func(o *Options) { o.Links = nil })
 	w := h.do(t, http.MethodGet, "/v1/shares/links/tkn/meta", "")
 	if w.Code != http.StatusNotImplemented {
 		t.Fatalf("the route answered %d: %s", w.Code, w.Body)

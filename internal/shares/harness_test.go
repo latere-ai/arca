@@ -70,7 +70,8 @@ func newHarness(t *testing.T, opts ...func(*shares.Options)) *harness {
 		t.Fatalf("the service would not build: %v", err)
 	}
 	surface, err := api.New(api.Options{
-		Verifier: id.Verifier, Authorizer: id.Authorizer, Shares: h.service,
+		Verifier: id.Verifier, Authorizer: id.Authorizer,
+		Routes: shares.Routes(h.service), Links: h.service,
 		PublicURL: "https://storage.example",
 	})
 	if err != nil {

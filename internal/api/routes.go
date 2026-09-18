@@ -6,7 +6,6 @@ package api
 import (
 	"net/http"
 
-	"latere.ai/x/arca/authorizer"
 	"latere.ai/x/arca/internal/apidocs"
 )
 
@@ -41,126 +40,60 @@ type route struct {
 	handler func(*API, http.ResponseWriter, *http.Request)
 }
 
-// Shares is the surface of spec 008 as internal/shares implements it: one
-// method per row of the route table below, each the handler of one route.
+// Links is the half of spec 008's surface the frame registers: the three
+// routes that redeem a token, which sit outside the verifier because the
+// token in the URL is the whole of their authorization.
 //
-// It is an interface because the behaviour of a route belongs to the spec
-// that owns it and the declaration of the surface belongs here. A package of
-// a later phase implements the interface of its own rows, the node hands the
-// implementation over at start, and neither package imports the other's
-// handlers.
-type Shares interface {
-	// CreateGrant answers POST /v1/shares.
-	CreateGrant(w http.ResponseWriter, r *http.Request)
-	// ListGrants answers GET /v1/shares.
-	ListGrants(w http.ResponseWriter, r *http.Request)
-	// GrantsWithMe answers GET /v1/shares/with-me.
-	GrantsWithMe(w http.ResponseWriter, r *http.Request)
-	// ReadGrant answers GET /v1/shares/{id}.
-	ReadGrant(w http.ResponseWriter, r *http.Request)
-	// RevokeGrant answers DELETE /v1/shares/{id}.
-	RevokeGrant(w http.ResponseWriter, r *http.Request)
-	// CreateLink answers POST /v1/shares/links.
-	CreateLink(w http.ResponseWriter, r *http.Request)
-	// ListLinks answers GET /v1/shares/links.
-	ListLinks(w http.ResponseWriter, r *http.Request)
-	// RevokeLink answers DELETE /v1/shares/links/{id}.
-	RevokeLink(w http.ResponseWriter, r *http.Request)
-	// LinkMeta answers GET /v1/shares/links/{token}/meta, outside the
-	// verifier.
+// The other eight rows of that spec are contributed through Options.Routes
+// like every other package's, because they are behind the verifier and ask
+// an action. These three cannot be: a row contributed there is refused when
+// it asks nothing, and a hole in the verifier is the frame's own business
+// rather than something a later phase opens by passing a field. So the frame
+// declares the rows and takes the service that answers them.
+type Links interface {
+	// LinkMeta answers GET /v1/shares/links/{token}/meta.
 	LinkMeta(w http.ResponseWriter, r *http.Request)
-	// LinkList answers GET /v1/shares/links/{token}, outside the verifier.
+	// LinkList answers GET /v1/shares/links/{token}.
 	LinkList(w http.ResponseWriter, r *http.Request)
-	// LinkFile answers GET /v1/shares/links/{token}/files/{path...},
-	// outside the verifier.
+	// LinkFile answers GET /v1/shares/links/{token}/files/{path...}.
 	LinkFile(w http.ResponseWriter, r *http.Request)
 }
 
-// share dispatches one row of spec 008's surface to the implementation the
-// node bound, and answers not_implemented in a build that bound none. A row
-// is registered at its right place either way, which is what keeps the
-// surface one declaration.
-func (a *API) share(w http.ResponseWriter, r *http.Request, h func(Shares, http.ResponseWriter, *http.Request)) {
-	if a.shares == nil {
+// link dispatches one of the three public rows to the service the node
+// bound, and answers not_implemented in a build that bound none. A row is
+// registered whether or not a build answers it, so the surface has one shape
+// everywhere and a build that cannot answer a row says so.
+func (a *API) link(w http.ResponseWriter, r *http.Request, h func(Links, http.ResponseWriter, *http.Request)) {
+	if a.links == nil {
 		WriteError(w, r, Refuse(CodeNotImplemented, "this build binds no shares and links service"))
 		return
 	}
-	h(a.shares, w, r)
+	h(a.links, w, r)
 }
 
-// routeTable is the surface. Today it is the frame of spec 013 and the whole
-// of spec 008: the five routes a grant is created, read, listed and revoked
-// through, the three a token grant is minted, listed and revoked through,
-// and the three that redeem a token, which are registered outside the
-// verifier because the token in the URL is the whole of their
-// authorization. Every other row of spec 013's table arrives with the spec
-// that owns its behaviour, on the phases of spec 019.
+// routeTable is the frame's own rows: the three public link routes of spec
+// 008, registered outside the verifier because that is where they belong and
+// because registering them later would be registering them somewhere else.
+// Every other row of spec 013's table arrives with the spec that owns its
+// behaviour, through Options.Routes.
 var routeTable = []route{
-	{
-		method: http.MethodPost, path: "/v1/shares",
-		action: authorizer.ActionShareCreate, status: http.StatusCreated,
-		summary: "Grant a subject a permission on a subtree of a space.",
-		handler: func(a *API, w http.ResponseWriter, r *http.Request) { a.share(w, r, Shares.CreateGrant) },
-	},
-	{
-		method: http.MethodGet, path: "/v1/shares",
-		action: authorizer.ActionShareList, status: http.StatusOK,
-		summary: "The grants on a space.",
-		handler: func(a *API, w http.ResponseWriter, r *http.Request) { a.share(w, r, Shares.ListGrants) },
-	},
-	{
-		method: http.MethodGet, path: "/v1/shares/with-me",
-		action: authorizer.ActionShareList, status: http.StatusOK,
-		summary: "The grants whose grantee is the caller.",
-		handler: func(a *API, w http.ResponseWriter, r *http.Request) { a.share(w, r, Shares.GrantsWithMe) },
-	},
-	{
-		method: http.MethodGet, path: "/v1/shares/{id}",
-		action: authorizer.ActionShareRead, status: http.StatusOK,
-		summary: "One grant.",
-		handler: func(a *API, w http.ResponseWriter, r *http.Request) { a.share(w, r, Shares.ReadGrant) },
-	},
-	{
-		method: http.MethodDelete, path: "/v1/shares/{id}",
-		action: authorizer.ActionShareRevoke, status: http.StatusNoContent,
-		summary: "Revoke a grant.",
-		handler: func(a *API, w http.ResponseWriter, r *http.Request) { a.share(w, r, Shares.RevokeGrant) },
-	},
-	{
-		method: http.MethodPost, path: "/v1/shares/links",
-		action: authorizer.ActionLinkCreate, status: http.StatusCreated,
-		summary: "Mint a token grant on a subtree; the token is answered once.",
-		handler: func(a *API, w http.ResponseWriter, r *http.Request) { a.share(w, r, Shares.CreateLink) },
-	},
-	{
-		method: http.MethodGet, path: "/v1/shares/links",
-		action: authorizer.ActionLinkRead, status: http.StatusOK,
-		summary: "The token grants on a space.",
-		handler: func(a *API, w http.ResponseWriter, r *http.Request) { a.share(w, r, Shares.ListLinks) },
-	},
-	{
-		method: http.MethodDelete, path: "/v1/shares/links/{id}",
-		action: authorizer.ActionLinkRevoke, status: http.StatusNoContent,
-		summary: "Revoke a token grant.",
-		handler: func(a *API, w http.ResponseWriter, r *http.Request) { a.share(w, r, Shares.RevokeLink) },
-	},
 	{
 		method: http.MethodGet, path: "/v1/shares/links/{token}/meta",
 		public: true, status: http.StatusOK,
 		summary: "What a link token names, before anything is fetched.",
-		handler: func(a *API, w http.ResponseWriter, r *http.Request) { a.share(w, r, Shares.LinkMeta) },
+		handler: func(a *API, w http.ResponseWriter, r *http.Request) { a.link(w, r, Links.LinkMeta) },
 	},
 	{
 		method: http.MethodGet, path: "/v1/shares/links/{token}",
 		public: true, status: http.StatusOK,
 		summary: "A listing of the subtree a link token names.",
-		handler: func(a *API, w http.ResponseWriter, r *http.Request) { a.share(w, r, Shares.LinkList) },
+		handler: func(a *API, w http.ResponseWriter, r *http.Request) { a.link(w, r, Links.LinkList) },
 	},
 	{
 		method: http.MethodGet, path: "/v1/shares/links/{token}/files/{path...}",
 		public: true, status: http.StatusOK,
 		summary: "One object under the subtree a link token names.",
-		handler: func(a *API, w http.ResponseWriter, r *http.Request) { a.share(w, r, Shares.LinkFile) },
+		handler: func(a *API, w http.ResponseWriter, r *http.Request) { a.link(w, r, Links.LinkFile) },
 	},
 }
 

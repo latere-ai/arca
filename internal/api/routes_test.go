@@ -64,21 +64,44 @@ func TestTheThreeVerifierExceptionsAndNoMore(t *testing.T) {
 // where a literal sits beside a wildcard in the same position, the literal
 // wins and the word is reserved. with-me is not a share id, and the route it
 // names asks a different action from the one an id would.
+//
+// Both rows are contributed ones, which is where that pair lives: the router
+// reads the merged registry, so the rule has to hold across the rows the
+// frame declares and the rows a package hands it.
 func TestAReservedWordWinsOverTheWildcardBesideIt(t *testing.T) {
-	h := newHarness(t, routeTable)
+	answer := func(name string) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			httpjson.Write(w, http.StatusOK, map[string]string{"reached": name})
+		})
+	}
+	h := newHarness(t, nil, func(o *Options) {
+		o.Routes = []Route{
+			{
+				Method: http.MethodGet, Path: "/v1/shares/{id}",
+				Action: authorizer.ActionShareRead, Status: http.StatusOK,
+				Summary: "One grant.", Handler: answer("id"),
+			},
+			{
+				Method: http.MethodGet, Path: "/v1/shares/with-me",
+				Action: authorizer.ActionShareList, Status: http.StatusOK,
+				Summary: "The grants whose grantee is the caller.", Handler: answer("with-me"),
+			},
+		}
+	})
 	h.endpoint.Allow(stub.Rule{Subject: "*", Action: "*", Resource: "*", Allow: true})
-	h.do(t, http.MethodGet, "/v1/shares/with-me", h.bearer())
-	asked := h.endpoint.Requests()
-	if len(asked) != 1 || asked[0].Action != authorizer.ActionShareList {
-		t.Fatalf("GET /v1/shares/with-me asked %v; with-me is a reserved word and not a share id", asked)
+	w := h.do(t, http.MethodGet, "/v1/shares/with-me", h.bearer())
+	if !strings.Contains(w.Body.String(), "with-me") {
+		t.Fatalf("GET /v1/shares/with-me reached %s; with-me is a reserved word and not a share id", w.Body)
 	}
 }
 
-// TestABuildThatBindsNoServiceAnswersNotImplemented: a row is registered at
-// its right place either way, which is what keeps the surface one
-// declaration through the phases of spec 019.
+// TestABuildThatBindsNoServiceAnswersNotImplemented: the three public rows
+// are registered at their right place either way, which is what keeps the
+// surface one declaration through the phases of spec 019. A row a package
+// contributes is not registered at all in a build that contributes none, so
+// this is the whole of what a build without a service answers.
 func TestABuildThatBindsNoServiceAnswersNotImplemented(t *testing.T) {
-	h := newHarness(t, routeTable, func(o *Options) { o.Shares = nil })
+	h := newHarness(t, routeTable, func(o *Options) { o.Links = nil })
 	for _, r := range routeTable {
 		w := h.do(t, r.method, fill(r.path), h.bearer())
 		if w.Code != http.StatusNotImplemented {
@@ -220,73 +243,23 @@ func fill(path string) string {
 	return out
 }
 
-// bound is the shares service this harness binds: one method per row of spec
-// 008's surface, each asking the action of its row through the seam every
-// handler decides through and acting afterwards.
+// bound is the links service this harness binds: the three public rows of
+// spec 008 and nothing else, because the eight rows behind the verifier are
+// contributed and carry their own handlers.
 //
-// It stands in for internal/shares, whose behaviour is proved in that
-// package. What the tests here need of it is the binding: a row of the table
-// reaches the implementation the node handed over, asks once, and does not
-// act on a deny.
-type bound struct{ decider *auth.Authorizer }
+// The three ask nothing. The token in the URL is the whole of their
+// authorization, and the test above holds them to asking nothing.
+type bound struct{}
 
-func (b bound) CreateGrant(w http.ResponseWriter, r *http.Request) {
-	b.ask(w, r, authorizer.ActionShareCreate)
-}
+func (bound) LinkMeta(w http.ResponseWriter, _ *http.Request) { acted(w) }
 
-func (b bound) ListGrants(w http.ResponseWriter, r *http.Request) {
-	b.ask(w, r, authorizer.ActionShareList)
-}
+func (bound) LinkList(w http.ResponseWriter, _ *http.Request) { acted(w) }
 
-func (b bound) GrantsWithMe(w http.ResponseWriter, r *http.Request) {
-	b.ask(w, r, authorizer.ActionShareList)
-}
+func (bound) LinkFile(w http.ResponseWriter, _ *http.Request) { acted(w) }
 
-func (b bound) ReadGrant(w http.ResponseWriter, r *http.Request) {
-	b.ask(w, r, authorizer.ActionShareRead)
-}
-
-func (b bound) RevokeGrant(w http.ResponseWriter, r *http.Request) {
-	b.ask(w, r, authorizer.ActionShareRevoke)
-}
-
-func (b bound) CreateLink(w http.ResponseWriter, r *http.Request) {
-	b.ask(w, r, authorizer.ActionLinkCreate)
-}
-
-func (b bound) ListLinks(w http.ResponseWriter, r *http.Request) {
-	b.ask(w, r, authorizer.ActionLinkRead)
-}
-
-func (b bound) RevokeLink(w http.ResponseWriter, r *http.Request) {
-	b.ask(w, r, authorizer.ActionLinkRevoke)
-}
-
-// The three that redeem a token ask nothing here. What they ask an
-// authorizer is link.read with an anonymous subject once the token has
-// resolved, which is internal/shares' and is proved there; what the table
-// below holds them to is that no question is asked before the row's own
-// handler runs.
-func (b bound) LinkMeta(w http.ResponseWriter, _ *http.Request) { b.acted(w) }
-
-func (b bound) LinkList(w http.ResponseWriter, _ *http.Request) { b.acted(w) }
-
-func (b bound) LinkFile(w http.ResponseWriter, _ *http.Request) { b.acted(w) }
-
-// ask puts the one question the row names and acts on an allow.
-func (b bound) ask(w http.ResponseWriter, r *http.Request, action string) {
-	res := authorizer.Share{
-		ID: r.PathValue("id"), Owner: "https://issuer.example|9ab3", Path: "files/reports",
-	}.Resource()
-	if _, err := b.decider.Decide(r.Context(), action, res); err != nil {
-		WriteError(w, r, FromAuth(err))
-		return
-	}
-	b.acted(w)
-}
-
-// acted is what a row answers once it has run.
-func (b bound) acted(w http.ResponseWriter) {
+// acted is what a handler that ran writes, so a test can tell a handler that
+// answered from one that was never reached.
+func acted(w http.ResponseWriter) {
 	httpjson.Write(w, http.StatusOK, map[string]string{"state": "acted"})
 }
 
@@ -314,7 +287,7 @@ func newHarness(t *testing.T, rows []route, opts ...func(*Options)) *harness {
 	}
 	o := Options{
 		Verifier: id.Verifier, Authorizer: id.Authorizer,
-		Shares:    bound{decider: id.Authorizer},
+		Links:     bound{},
 		PublicURL: "https://storage.example",
 	}
 	for _, opt := range opts {
@@ -325,6 +298,11 @@ func newHarness(t *testing.T, rows []route, opts ...func(*Options)) *harness {
 		t.Fatalf("the surface would not build: %v", err)
 	}
 	mux := http.NewServeMux()
+	if rows == nil {
+		// Nil is the surface's own list: the frame's table plus whatever the
+		// options contributed, which is what Mount registers.
+		rows = a.rows
+	}
 	a.mount(mux, rows)
 	return &harness{mux: mux, api: a, issuer: iss, endpoint: endpoint}
 }
