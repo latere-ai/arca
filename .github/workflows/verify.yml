@@ -50,6 +50,39 @@ jobs:
         run: |
           docker run --rm arcad:candidate -version | grep -q '^arcad '
 
+  # The alerts of spec 018. promtool reads a Prometheus rules file and not a
+  # Kubernetes object, so tools/rules prints the rules document inside the
+  # PrometheusRule and this job parses that. The Go tests of the same package
+  # hold the committed manifest to the table and every metric an alert names
+  # to internal/metrics; what only promtool can say is whether the PromQL
+  # parses, and that is this job.
+  rules:
+    name: the alert rules parse
+    if: "!startsWith(github.ref, 'refs/tags/')"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PROMETHEUS_VERSION: "3.7.3"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Install promtool
+        run: |
+          set -euo pipefail
+          tarball="prometheus-${PROMETHEUS_VERSION}.linux-amd64"
+          curl -fsSL -o "$tarball.tar.gz" \
+            "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/$tarball.tar.gz"
+          tar -xzf "$tarball.tar.gz"
+          sudo install "$tarball/promtool" /usr/local/bin/promtool
+          promtool --version
+      - name: The rules document parses
+        run: |
+          mkdir -p out
+          go run ./tools/rules > out/rules.yaml
+          promtool check rules out/rules.yaml
+
   # The two service tiers of spec 014. Each job starts the stack from
   # compose.yaml, the same file a contributor runs, so a tier reads one
   # definition of the services rather than a second one written for CI.

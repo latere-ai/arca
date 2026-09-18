@@ -28,8 +28,8 @@ resources:
 # the Prometheus operator's CustomResourceDefinition, which Arca does not
 # require and the kind example does not install, so a base that named it
 # would fail to apply on every installation without that operator. An
-# installation running the operator applies the file beside the base, and
-# spec 018 owns what is in it.
+# installation running the operator applies the file beside the base. Spec 018
+# owns what is in it, and tools/rules generates it.
 
 labels:
   - includeSelectors: false
