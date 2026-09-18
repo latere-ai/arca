@@ -1,6 +1,6 @@
 ---
 title: "Repository scaffold: module, binary, configuration, quality gate, image, workflow"
-status: testing
+status: complete
 track: core
 depends_on: []
 affects: [cmd/arcad/, internal/config/, internal/version/, Makefile, .lateregate.yaml, Dockerfile, .github/workflows/, .githooks/, docs/]
@@ -35,9 +35,8 @@ Built and in the tree on 2026-09-18. `cmd/arcad` serves the probes,
 `internal/config` reads two variables, `internal/version` carries the
 build identity, `.lateregate.yaml` configures the shared gate pinned as
 a Go tool, and `.github/workflows/verify.yml` calls the shared pipeline.
-The gate passes locally with fourteen gates; the spec moves to
-`complete` with the first green verify run on `main`, recorded in the
-Outcome.
+The gate passes locally and the first verify run on `main` is green on
+every job; the Outcome records it. This spec is complete as built.
 
 ## Design
 
@@ -176,4 +175,32 @@ ports 8080 and 8081, no volume: the server has no local state.
 
 ## Outcome
 
-Written when criterion 8 holds.
+Complete on 2026-09-18. The first push to `main`, commits `df57ea7`
+(the scaffold) and `0d549ed` (the spec deck), ran green on every job of
+verify run 35355077497: the shared gate's fifteen gates, `go mod tidy
+-diff`, and the developer image reporting its version. Locally the gate
+passed at the same commits with fourteen gates before the deck existed
+and fifteen with it, spec-lint joining once `specs/` had files.
+
+Divergences from the first draft, all recorded above rather than left
+in the tree:
+
+- The scaffold was taken from Cella's scaffold commit of 2026-09-12
+  rather than written fresh, then renamed and trimmed: `arcad` keeps no
+  local state, so the data directory, the runtime selector, and the disk
+  readiness check that Cella's server carries were removed with their
+  tests, and readiness today is the draining check alone.
+- The licence is MIT, the family's choice for Origo and Lux; Cella is
+  Apache-2.0. The SPDX headers and `license.spdx` say MIT.
+- Two identity rules, `verifier` and `authorizer`, carry dated waivers
+  naming [[006-identity]], the same bridge Cella used until its own
+  identity spec landed. The `no-latere-value` rule caught one hostname
+  in the README's second paragraph, which now names the hosted platform
+  without its address.
+- The configuration table gained three rows the deck's later specs
+  asked for: two rate limits from [[015-security-and-threat-model]] and
+  the conformance drift seam from [[017-conformance-suite]].
+- The `depcheck` allowance for `github.com/google/uuid` in the first
+  draft of `.lateregate.yaml` was removed: nothing in the scaffold
+  reaches it, and a stale allowance admits whatever later moves under
+  it. It returns with the first package that imports it.

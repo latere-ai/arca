@@ -48,7 +48,7 @@ validated spec is dispatched when every spec in its `depends_on` is at
 | Spec | Title | Status |
 |---|---|---|
 | [001](001-architecture.md) | Architecture: two stores, spaces and planes, packages, invariants | drafted |
-| [002](002-repository-scaffold.md) | Repository scaffold: module, binary, configuration, quality gate, image, workflow | testing |
+| [002](002-repository-scaffold.md) | Repository scaffold: module, binary, configuration, quality gate, image, workflow | complete |
 | [003](003-object-store.md) | Object store: the bucket contract, keys, integrity, presigned reads, multipart | drafted |
 | [004](004-metadata-store.md) | Metadata store: the schema, migrations, spaces, the ledger | drafted |
 | [005](005-files.md) | Files: put, get, list, move, delete; versions, trash, stars | drafted |
