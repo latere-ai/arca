@@ -1,0 +1,39 @@
+# A whole installation on one kind node: MinIO for the bucket, Postgres for
+# the metadata, the stub issuer and stub authorizer of spec 014 in one
+# image, and arcad on a node port. It is what `docs/install.md` is walked
+# against on every push, and what the release pipeline brings up from the
+# published images before a tag reaches a cluster.
+#
+# Every credential here is published on purpose. The stack is disposable,
+# it listens on one machine's loopback, and an example whose credentials
+# were hidden would be an example nobody could run.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: arca
+
+resources:
+  - ../../base
+  - namespace.yaml
+  - secrets.yaml
+  - minio.yaml
+  - postgres.yaml
+  - arca-stubs.yaml
+
+patches:
+  # One replica, and the stack's own origin and authorizer.
+  - path: patches/arcad-stack.yaml
+  # The autoscaler held at that one replica: the base allows 2 to 32,
+  # which one kind node has no room for.
+  - path: patches/hpa-single.yaml
+  # The public listener on a host port, which is how the smoke and the
+  # conformance suite reach the stack from the runner.
+  - path: patches/service-nodeport.yaml
+
+# up.sh loads the image under this tag, so the stack runs the bytes that
+# were built rather than whatever the registry holds.
+images:
+  - name: ghcr.io/latere-ai/arcad
+    newTag: candidate
+  - name: ghcr.io/latere-ai/arca-stubs
+    newTag: candidate

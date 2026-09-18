@@ -1,0 +1,24 @@
+# The public surface, which an installation's ingress routes to. Only the
+# API replicas are endpoints: the reconciler of spec 010 serves no request,
+# so the component label is part of the selector.
+#
+# The internal listener has no Service. It is scraped where the pod runs,
+# by a scraper that reads the pod's own address, and routing it would put
+# /metrics behind the same name the public API answers on.
+apiVersion: v1
+kind: Service
+metadata:
+  name: arcad
+  labels:
+    app.kubernetes.io/name: arcad
+    app.kubernetes.io/component: api
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: arcad
+    app.kubernetes.io/component: api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP

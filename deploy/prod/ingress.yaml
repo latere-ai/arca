@@ -1,0 +1,119 @@
+# The platform origin. api.latere.ai is one name in front of several
+# services, and this object claims only the path prefixes Arca owns, one per
+# /v1 namespace of spec 013. There is deliberately no `/` rule: a catch-all
+# here would take the whole origin and answer 404 for every route another
+# service adds.
+#
+# The host and its certificate are the platform's, shared by every service
+# routed under the origin, so there is no cert-manager annotation here and
+# no Certificate of Arca's: this object adds paths and nothing else. The
+# secret it names is the one the origin already holds.
+#
+# The seven prefixes are the storage half of the platform's resource
+# namespace table, which is the service Arca replaces minus what spec 013
+# does not register: `orgs` and `whoami` are identity's, `quotas`,
+# `webhooks` and `agent-visibility` are retired, and the `s/{token}` share
+# link is now `shares/links/{token}`, already covered by `shares`.
+#
+# `/v1/admin` is not here. Spec 013 registers the administration surface
+# under that prefix, but at a shared origin the prefix is the platform's and
+# not one service's; an administrator reaches it through the in-cluster
+# Service, or through whatever prefix the platform assigns it, and spec 012
+# owns that question.
+#
+# Two probes are here, as exact paths: `/readyz` and `/version`. They are
+# what the release smoke reads, and it must read them through the address
+# GitHub records as the deployment rather than through a forwarded port. A
+# rollout returns as soon as the new pods are ready, and a smoke that
+# reached a pod directly would not see an endpoint list that still holds an
+# old one; `/version` answering the tag at the origin is the only check that
+# does. An exact path takes precedence over every prefix rule on this host
+# and claims nothing beyond itself, which is why `/livez` is left out: the
+# kubelet reads it and nothing at the origin does.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: arcad
+  annotations:
+    # An object at or below ARCA_INLINE_BYTES streams through the server
+    # (spec 007); above it the parts go directly to the bucket and never
+    # through this controller. The limit that matters is
+    # ARCA_MAX_UPLOAD_BYTES, which the server enforces and reports as an
+    # error a client can read.
+    nginx.ingress.kubernetes.io/proxy-body-size: 100m
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - api.latere.ai
+      secretName: api-latere-ai-tls
+  rules:
+    - host: api.latere.ai
+      http:
+        paths:
+          - path: /v1/files
+            pathType: Prefix
+            backend:
+              service:
+                name: arcad
+                port:
+                  name: http
+          - path: /v1/uploads
+            pathType: Prefix
+            backend:
+              service:
+                name: arcad
+                port:
+                  name: http
+          - path: /v1/shares
+            pathType: Prefix
+            backend:
+              service:
+                name: arcad
+                port:
+                  name: http
+          - path: /v1/workspaces
+            pathType: Prefix
+            backend:
+              service:
+                name: arcad
+                port:
+                  name: http
+          - path: /v1/trash
+            pathType: Prefix
+            backend:
+              service:
+                name: arcad
+                port:
+                  name: http
+          - path: /v1/stars
+            pathType: Prefix
+            backend:
+              service:
+                name: arcad
+                port:
+                  name: http
+          - path: /v1/events
+            pathType: Prefix
+            backend:
+              service:
+                name: arcad
+                port:
+                  name: http
+          # The two the release smoke reads.
+          - path: /readyz
+            pathType: Exact
+            backend:
+              service:
+                name: arcad
+                port:
+                  name: http
+          - path: /version
+            pathType: Exact
+            backend:
+              service:
+                name: arcad
+                port:
+                  name: http

@@ -1,0 +1,83 @@
+# The stub issuer and the stub authorizer of spec 014, in one image and one
+# pod. An operator's first installation runs a released, signed image of
+# these rather than a checkout, which is why they are published by the
+# release pipeline beside arcad.
+#
+# Spec 014 owns the binary, its flags, and the two listeners. What is fixed
+# here is only how the stack reaches them: the issuer on 8081 and the
+# authorizer on 8082, both on node ports so a test on the runner can mint a
+# token and read what the authorizer was asked.
+#
+# The authorizer allows everything except the reserved probe resource,
+# which it always denies, so `arcad check` has a question whose answer
+# proves the endpoint decides rather than agrees.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: arca-stubs
+  labels:
+    app.kubernetes.io/name: arca-stubs
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: arca-stubs
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: arca-stubs
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: arca-stubs
+          image: ghcr.io/latere-ai/arca-stubs:unreleased
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          ports:
+            - name: issuer
+              containerPort: 8081
+            - name: authorizer
+              containerPort: 8082
+          readinessProbe:
+            httpGet:
+              path: /jwks
+              port: issuer
+            periodSeconds: 2
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: arca-stubs
+  labels:
+    app.kubernetes.io/name: arca-stubs
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: arca-stubs
+  ports:
+    - name: issuer
+      port: 8081
+      targetPort: issuer
+      nodePort: 30081
+    - name: authorizer
+      port: 8082
+      targetPort: authorizer
+      nodePort: 30082

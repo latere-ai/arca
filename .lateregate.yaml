@@ -2,6 +2,18 @@
 # latere.ai/x/ci-gate, pinned in go.mod; only repository-specific values are
 # here.
 
+# The files that name the release. `lateregate release` rewrites each
+# pattern's version to the tag it cuts, in the same commit as the changelog
+# section, so neither ever lags a tag and main does not go red after a cut.
+# A pattern that does not match its file exactly once refuses the release,
+# which is why each is anchored on words that appear nowhere else.
+release:
+  stamp:
+    - file: SECURITY.md
+      pattern: 'v\d+\.\d+\.\d+ is the\s+current release'
+    - file: deploy/prod/kustomization.yaml
+      pattern: 'newTag: v\d+\.\d+\.\d+'
+
 cover:
   trim_prefix: latere.ai/x/arca/
 
@@ -100,6 +112,15 @@ identity:
   # The default audience of the open core, verified only where the core is
   # self-hosted; Latere reaches it through the origin, spec 006.
   reached_by: self-hosted
+  # deploy/prod is Latere's own overlay inside the core's tree (spec 016).
+  skip:
+    - deploy/prod
+  # The same overlay, declared: the no-latere-value rule reads the
+  # addresses deploy/prod sets rather than refusing them, so the one
+  # directory that names the installation it serves is the one directory
+  # the rule does not hold, and a document may name an address it carries.
+  overlays:
+    - deploy/prod
   # Access is by role: the roles rule runs, and it is one way once set.
   roles_only: true
   # The two rules that read an import the scaffold does not make yet.

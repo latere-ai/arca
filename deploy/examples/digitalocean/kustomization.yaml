@@ -1,0 +1,29 @@
+# An installation on DigitalOcean Kubernetes with a Spaces bucket and a
+# managed Postgres.
+#
+# Copy this directory, change the names marked below, create the three
+# Secrets (deploy/bootstrap/secrets.example.yaml), run the migration Job,
+# and apply it. Nothing here is applied by CI: this repository has no cloud
+# account, so the overlay is proved by a kustomize render and by an
+# operator's own cluster.
+#
+# What to change:
+#   ingress.yaml     the hostname, twice
+#   public-url.yaml  the same hostname
+#   the Secret arcad-bucket: the Spaces endpoint, region, bucket and keys
+#   the Secret arcad-database: the managed cluster's connection string,
+#     which requires sslmode=require
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: arca
+
+resources:
+  - ../../base
+  # The Ingress is a resource and not a patch: the base holds none, because
+  # an ingress class is an installation's choice (spec 016).
+  - ingress.yaml
+
+patches:
+  - path: public-url.yaml
+  - path: replicas.yaml

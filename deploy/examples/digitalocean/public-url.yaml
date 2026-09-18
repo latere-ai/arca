@@ -1,0 +1,24 @@
+# The origin clients reach, which must be the hostname in ingress.yaml.
+# Every URL the server writes is built from it, a presigned redirect
+# included, so a value that does not match the ingress sends a client to an
+# address that answers nothing.
+#
+# A Spaces bucket is reachable from the internet under the same endpoint the
+# pods use, so ARCA_PUBLIC_CDN_URL is not set here: a presigned read is
+# signed against ARCA_BUCKET_ENDPOINT from the Secret and the client
+# follows it directly. An installation with the Spaces CDN in front of the
+# bucket sets that variable to the CDN's origin instead.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: arcad
+spec:
+  template:
+    spec:
+      containers:
+        - name: arcad
+          env:
+            - name: ARCA_PUBLIC_URL
+              value: https://arca.example.com
+            - name: ARCA_BUCKET_PREFIX
+              value: arca/

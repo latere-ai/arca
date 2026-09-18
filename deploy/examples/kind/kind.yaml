@@ -1,0 +1,29 @@
+# The cluster the stack runs on: one node whose host ports are the node
+# ports the overlay sets, so everything the stack publishes is reachable on
+# localhost.
+#
+#   30180  arcad, the public listener
+#   30081  the stub issuer
+#   30082  the stub authorizer
+#   30432  Postgres
+#   30900  MinIO
+#
+# The default CNI is left on. Arca's network policies are an installation's
+# confinement rather than something the stack asserts, and kindnet does not
+# enforce them; an installation that wants them enforced runs a CNI that
+# does, which docs/operations.md names.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - containerPort: 30180
+        hostPort: 30180
+      - containerPort: 30081
+        hostPort: 30081
+      - containerPort: 30082
+        hostPort: 30082
+      - containerPort: 30432
+        hostPort: 30432
+      - containerPort: 30900
+        hostPort: 30900

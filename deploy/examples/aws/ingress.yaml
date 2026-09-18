@@ -1,0 +1,34 @@
+# The AWS Load Balancer Controller. The certificate is an ACM one, named by
+# its ARN, so there is no cert-manager and no TLS Secret; change the ARN and
+# the hostname to your own and point the hostname's DNS record at the load
+# balancer the controller creates.
+#
+# proxy body size has no equivalent on an ALB, which has no request body
+# limit, so there is nothing to raise for an upload. The idle timeout is
+# raised instead: a large object streams through the server (spec 007) and
+# the default 60 seconds would cut it.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: arcad
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:000000000000:certificate/00000000-0000-0000-0000-000000000000
+    alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=600
+    alb.ingress.kubernetes.io/healthcheck-path: /readyz
+spec:
+  ingressClassName: alb
+  rules:
+    - host: arca.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: arcad
+                port:
+                  name: http

@@ -1,0 +1,29 @@
+# The stack's own values on the base's Deployment: one replica, the origin
+# the runner reaches it at, and the stub authorizer.
+#
+# ARCA_PUBLIC_URL is the node port rather than a cluster address, because
+# every URL the server writes is built from it and the client that follows
+# one is on the runner, outside the cluster.
+#
+# ARCA_AUTHORIZER_URL is plain environment and not a Secret: an endpoint is
+# not a credential, and a reviewer should read where a decision is asked
+# for in the manifest. Only the bearer is a secret, and it stays in
+# arcad-auth.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: arcad
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: arcad
+          # kind loads the image into the node; there is no registry to
+          # pull it from, so a policy of Always would fail.
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: ARCA_PUBLIC_URL
+              value: http://localhost:30180
+            - name: ARCA_AUTHORIZER_URL
+              value: http://arca-stubs:8082/authorize

@@ -1,0 +1,47 @@
+# The origin clients reach, and the prefix under which this installation's
+# keys are written.
+#
+# ARCA_PUBLIC_URL is the platform origin, which is where the console's
+# Storage section and every consumer call Arca. Every URL the server writes
+# is built from it, a presigned redirect included.
+#
+# ARCA_BUCKET_PREFIX is `drive/` and not the default `arca/`. This
+# installation reads the bucket the service Arca replaces wrote
+# (spec 019): a key derives from an id and the ids do not change, so
+# pointing Arca at the same prefix makes every object Drive wrote an object
+# Arca reads, with no copy. The prefix is configuration and names nothing a
+# user sees, so it stays as it is rather than costing a copy of every
+# object.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: arcad
+spec:
+  template:
+    spec:
+      containers:
+        - name: arcad
+          env:
+            - name: ARCA_PUBLIC_URL
+              value: https://api.latere.ai
+            - name: ARCA_BUCKET_PREFIX
+              value: drive/
+---
+# The reconciler reads the same prefix. It is held at zero replicas by the
+# base, but a reconciler that swept a different prefix from the one the
+# server writes under would find every object orphaned, so the two values
+# move together or not at all.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: arcad-reaper
+spec:
+  template:
+    spec:
+      containers:
+        - name: arcad
+          env:
+            - name: ARCA_PUBLIC_URL
+              value: https://api.latere.ai
+            - name: ARCA_BUCKET_PREFIX
+              value: drive/

@@ -1,13 +1,13 @@
 ---
 title: "Release and installation: the tag pipeline, the deploy tree, installing arcad, what a version promises"
-status: drafted
+status: testing
 track: core
 depends_on:
   - specs/001-architecture.md
   - specs/002-repository-scaffold.md
   - specs/014-test-stubs-and-tiers.md
   - specs/017-conformance-suite.md
-affects: [.github/workflows/release.yml, .github/workflows/verify.yml, Dockerfile.ci, Dockerfile.stubs, deploy/, tools/smoke/, docs/install.md, docs/upgrades/, CHANGELOG.md, .lateregate.yaml]
+affects: [.github/workflows/release.yml, .github/workflows/verify.yml, Dockerfile, Dockerfile.ci, Dockerfile.stubs, deploy/, test/deploy/, tools/smoke/, docs/install.md, docs/operations.md, SECURITY.md, CHANGELOG.md, .lateregate.yaml]
 effort: medium
 created: 2026-09-18
 updated: 2026-09-18
@@ -322,3 +322,90 @@ it runs ([[017-conformance-suite]]). The contents of the alert rules
 | 9 | The previous release's conformance suite passes against this release's binary, which is what N-1 compatibility means | the `conformance` job, running the suite [[017-conformance-suite]] pins to the previous tag; that spec owns the criterion |
 | 10 | A tag with no CHANGELOG section is refused before anything is pushed | the gate's pre-push hook and the `publish` job |
 | 11 | A `v*` tag run pauses at `deploy` until a reviewer approves, and the run's deployment record names `production` and the URL | the first tag run |
+
+## Outcome
+
+At `testing` on 2026-09-18. The deploy tree, the pipeline, the smoke and
+the two operator documents are in the tree and the gate is green at every
+commit; what is left is the one thing no commit can produce, which is a
+tag.
+
+### What is built
+
+| Built | Where | Proved by |
+|---|---|---|
+| the kustomize base: two workloads, the Service, two network policies, the budget, the autoscaler, the account with no token mounted, and the alert rules beside the kustomization | `deploy/base/` | `TestBaseIsConfined`, `TestTheBaseServesBothListeners`, `TestTheBaseLeavesThePrometheusRuleOut` |
+| the bootstrap: the namespace, the three Secrets by example, the migration Job, and the README that orders them | `deploy/bootstrap/` | `docs/install.md` steps 5 and 6 |
+| the kind stack, and the AWS and DigitalOcean overlays | `deploy/examples/` | `TestOverlaysResolve`, `TestEveryOverlaySetsThePublicURL`, `TestTheKindStackPublishesWhatATestReaches`, and the render step of `release.yml` |
+| Latere's overlay, and both gate declarations | `deploy/prod/`, `.lateregate.yaml` | `TestProdPinsAReleasedImage`, `TestProdIsDeclaredToTheGate`, `TestProdNamesOnlyAddressesTheFamilyAlreadyUses` |
+| the four-job pipeline: build, conformance, deploy, publish | `.github/workflows/release.yml` | `actionlint`, `TestReleasePublishesUnderTheOwnersNamespace`, `TestTheDeployJobIsGatedAndNamesTheEnvironment`, `TestEveryThirdPartyActionIsPinned` |
+| the release image, sharing the developer image's runtime stage byte for byte | `Dockerfile.ci`, `Dockerfile` | `TestRuntimeStagesMatch`, which is criterion 3 |
+| the release smoke and its test | `tools/smoke/` | criterion 7, over six cases, one of them a served version that is not the tag |
+| the install and the operations documents | `docs/install.md`, `docs/operations.md` | read, not yet walked; see below |
+| the two release stamps | `.lateregate.yaml`, `SECURITY.md`, `deploy/prod/kustomization.yaml` | each pattern matches its file exactly once, which is what `lateregate release` requires |
+
+### What waits
+
+| Waiting on | What |
+|---|---|
+| the first tag | criteria 1, 5, 9 and 11: every artifact, the signatures and the attestations, the deployment record under `production`, and the release body. Nothing before a tag produces them |
+| [[014-test-stubs-and-tiers]] | `Dockerfile.stubs`. The `build` job publishes `arca-stubs` from it and the kind example runs it; that spec writes it, and a tag cut before it fails in `build` |
+| [[017-conformance-suite]] | the real `conformance` run. The job brings the stack up from the published images today and, with no `test/conformance` in the tree, proves them with the release smoke instead. The branch that runs the suite is written and unreached |
+| [[004-metadata-store]] | `arcad migrate`, which `deploy/bootstrap/migrate-job.yaml` and `up.sh` both run |
+| [[012-administration]] | `arcad check`, which is step 8 of the install document |
+| [[013-api]] | `/openapi.json`, which the smoke requires and nothing serves yet |
+| the owner of [[002-repository-scaffold]] | the `install` job of `verify.yml`, which walks the install document on every push. That file is that spec's |
+| the cutover of [[019-migration-from-drive]] | who renews the certificate for the platform origin. The service Arca replaces holds the only object carrying the issuer annotation for that secret, and phase 10 deletes it |
+
+Three jobs of the pipeline table are not written: `candidate`,
+`install-release` and `release-verify`. Each needs something that does not
+exist yet, the stores and the install walk respectively, and each is a job
+of its own rather than a step inside another, so adding one later changes
+nothing already written.
+
+### Divergences from the design above
+
+- **`TestOverlaysRender` is `TestOverlaysResolve`.** The hermetic run
+  allows only the Go toolchain and the module takes no test-only
+  dependency for a kustomize library, so the Go test proves that every
+  path a render reads exists, and the render itself runs in CI in the
+  `build` job. The name says what it does; the criterion is met by the two
+  together.
+- **The manifests are read by a reader of the tree's own.** It reads the
+  YAML subset the deploy tree is written in and refuses an anchor, a merge
+  key, a block scalar, a non-empty flow mapping and a tab, so a construct
+  it would read wrongly stops it rather than passing a check it should
+  fail.
+- **The base carries no Ingress**, which the design already said, and each
+  example's Ingress is a resource of the overlay rather than a patch:
+  there is nothing in the base to merge onto.
+- **The base carries the reaper at zero replicas**, and labels are written
+  into each manifest rather than applied by a transformer with
+  `includeSelectors`: one pair written into every selector would make each
+  Deployment's selector match the other's pods.
+- **The prod Ingress claims two exact probe paths**, `/readyz` and
+  `/version`, and no catch-all. The smoke must read the origin GitHub
+  records as the deployment, because a rollout returns as soon as the new
+  replicas are ready and only a request through the ingress proves what
+  answers there. `/livez` is left out: the kubelet reads it and nothing at
+  the origin does.
+- **`/v1/admin` is not claimed at the origin.** [[013-api]] registers the
+  administration surface under it, but at a shared origin that prefix is
+  the platform's; [[012-administration]] owns where it is reached.
+- **The deploy archive is not built.** The design lists
+  `deploy-<tag>.tar.gz` as an artifact and `install-release` as the job
+  that reads it. Both arrive together, because an archive nothing walks
+  proves nothing.
+- **The developer image's `COPY` moved out of the shared marker block.**
+  Where the binary comes from is the one difference between the two
+  images, so it cannot be inside the part that must be identical.
+
+### What the render caught that a test could not
+
+The kind overlay's Service patch named the port and not the protocol. A
+Service's ports are a list keyed by port and protocol together, so the
+patch entry matched nothing, the merge dropped every field beside the key,
+and the node port the smoke and the conformance suite reach was absent
+from the rendered object while every file on disk read correctly. That is
+why the render is a step of the pipeline and not only an assertion about
+the files.

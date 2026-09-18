@@ -1,0 +1,25 @@
+# The public listener on a host port. The stack runs no ingress
+# controller, so this is how the release smoke, the install walk and the
+# conformance suite reach arcad from the runner: http://localhost:30180.
+#
+# The internal listener is not published. It serves /metrics and the
+# probes for the cluster, and an example that exposed it would teach the
+# wrong shape.
+apiVersion: v1
+kind: Service
+metadata:
+  name: arcad
+#
+# protocol is repeated although the base already sets it. A Service's ports
+# are a list keyed by port and protocol together, so an entry that names the
+# port alone does not match the base's entry and the merge drops every field
+# beside it, nodePort included. The render in CI is what catches that; this
+# line is what makes it pass.
+spec:
+  type: NodePort
+  ports:
+    - name: http
+      port: 80
+      protocol: TCP
+      targetPort: http
+      nodePort: 30180

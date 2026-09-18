@@ -7,7 +7,8 @@ a platform on the packages.
 
 | Page | |
 |---|---|
-| Install | not written yet; owned by the [release and installation spec](../specs/016-release-and-installation.md) |
+| [Install](install.md) | from an empty cluster to a serving installation: the bucket, the database, the issuers, the authorizer, the schema, the overlay, and the two commands that prove it |
+| [Operations](operations.md) | after the install: upgrades and rollbacks, what a version number promises, how to check a release's signatures, and what happens when a store goes away |
 | Configuration | the table in the [repository scaffold spec](../specs/002-repository-scaffold.md) until `docs/configuration.md` is generated from the code |
 | Identity | the [section in the README](../README.md#identity) is what an operator needs: the issuers, the authorizer, and the owner policy that applies without one |
 

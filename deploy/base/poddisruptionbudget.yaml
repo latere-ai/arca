@@ -1,0 +1,25 @@
+# A voluntary disruption, such as a node drain, may never take the last
+# ready replica.
+#
+# unhealthyPodEvictionPolicy is AlwaysAllow rather than the default. The
+# readiness probe reports the bucket and the database, so an outage of
+# either takes every replica out of the endpoint list while they all keep
+# running, and the default policy then refuses to evict any of them,
+# because it evicts a running unready pod only while the budget is already
+# met. A drain would block on the outage instead of proceeding through it.
+# A replica holds nothing a new one cannot read back, so an unready replica
+# protects nothing and is always safe to evict.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: arcad
+  labels:
+    app.kubernetes.io/name: arcad
+    app.kubernetes.io/component: api
+spec:
+  minAvailable: 1
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: arcad
+      app.kubernetes.io/component: api

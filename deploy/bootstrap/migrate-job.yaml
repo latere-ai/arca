@@ -1,0 +1,74 @@
+# `arcad migrate` as a Job, run by hand before each upgrade and never by a
+# release.
+#
+# It is not an init container. Two replicas rolling at once would each run
+# an init container, and two processes applying the same migrations at the
+# same time is the one thing a forward-only schema cannot survive. A Job is
+# one process, and the operator waits for it before rolling the Deployment.
+#
+# A Job's pod template is immutable, so re-running it means deleting it
+# first. That is why this file is in bootstrap and not in the base: the
+# release pipeline applies deploy/prod on every release and everything it
+# applies must be re-appliable.
+#
+#   kubectl -n arca delete job arcad-migrate --ignore-not-found
+#   kubectl -n arca apply -f deploy/bootstrap/migrate-job.yaml
+#   kubectl -n arca wait --for=condition=complete job/arcad-migrate --timeout=300s
+#
+# Set the image to the release being installed before applying it. The
+# server refuses to serve against a schema below its own (spec 004), so a
+# rollout that skipped this step fails its readiness probe rather than
+# serving against the wrong shape.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: arcad-migrate
+  namespace: arca
+  labels:
+    app.kubernetes.io/name: arcad
+    app.kubernetes.io/component: migrate
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: arcad
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: arcad
+          image: ghcr.io/latere-ai/arcad:unreleased
+          args: [migrate]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          env:
+            # `migrate` reads the connection string and nothing else, so it
+            # is given the database credential and neither of the others.
+            # The audience is named for the same reason every container of
+            # the tree names it: a container that read a different
+            # configuration would prove a different installation.
+            - name: ARCA_OIDC_AUDIENCE
+              value: arca
+            - name: ARCA_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: arcad-database
+                  key: ARCA_DATABASE_URL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
