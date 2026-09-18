@@ -1,0 +1,32 @@
+# SPDX-FileCopyrightText: 2026 Latere AI
+# SPDX-License-Identifier: MIT
+
+# The release image. It compiles nothing: the pipeline has already built,
+# checksummed and signed the binaries, and this copies its platform's onto
+# the same runtime stage the developer image runs. Building here instead
+# would mean the image an operator pulls was built by a different command
+# from the archive beside it on the release page, and a difference between
+# them would be found by whoever hit it first.
+#
+# The runtime stage below is Dockerfile's, byte for byte between the
+# markers. TestRuntimeStagesMatch holds the two together, so a change to the
+# developer image's base, its user, or its ports reaches the release image
+# in the same commit or fails the gate.
+
+ARG TARGETOS
+ARG TARGETARCH
+
+# >>> shared runtime base <<<
+# arcad forks no binary of its own, so the runtime stage is distroless:
+# CA roots for the bucket, the issuers, and the authorizer it dials,
+# nothing else.
+FROM gcr.io/distroless/static-debian12:nonroot
+EXPOSE 8080 8081
+USER nonroot:nonroot
+ENTRYPOINT ["/usr/local/bin/arcad"]
+# <<< shared runtime base >>>
+
+# The binary the pipeline cross-compiled for this platform. buildx sets
+# TARGETOS and TARGETARCH per platform of the manifest list, so one build
+# command produces both architectures from archives already built.
+COPY out/release/bin/${TARGETOS}_${TARGETARCH}/arcad /usr/local/bin/arcad
