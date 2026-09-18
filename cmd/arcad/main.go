@@ -28,6 +28,7 @@ import (
 	"latere.ai/x/arca/internal/auth"
 	"latere.ai/x/arca/internal/blob"
 	"latere.ai/x/arca/internal/config"
+	"latere.ai/x/arca/internal/shares"
 	"latere.ai/x/arca/internal/store"
 	"latere.ai/x/arca/internal/version"
 )
@@ -155,25 +156,40 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		return fail(stderr, fmt.Errorf("the database is behind this binary: %s is not applied; run arcad migrate", pending[0]))
 	}
 
+	// The grants table of spec 008, read by two callers: the owner policy,
+	// through the two seams of spec 006, and the routes of spec 008, through
+	// the service below. One query set serves both.
+	grants := store.NewShares()
+
 	// Spec 006's two, built once: the verifier over the listed issuers, warm
 	// before the first request, and the authorizer the operator configured or
 	// the owner policy. An issuer that does not answer and an endpoint with
 	// no bearer are start-up failures naming their variable, so a deployment
 	// is fixed rather than left answering 401 or 503 to everything.
-	//
-	// The grants and the links the owner policy reads arrive with spec 008;
-	// until then an installation has issued neither.
 	identity, err := auth.Start(ctx, auth.Options{
 		Issuers: cfg.OIDCIssuers, Audience: cfg.OIDCAudience,
 		InsecureIssuers: cfg.OIDCInsecureIssuers,
 		AuthorizerURL:   cfg.AuthorizerURL, AuthorizerToken: cfg.AuthorizerToken,
 		AdminSubjects: cfg.AdminSubjects,
+		Grants:        shares.Grants(db, grants),
+		Links:         shares.Links(db, grants),
+	})
+	if err != nil {
+		return fail(stderr, err)
+	}
+	// The shares and links of spec 008. The log of spec 010 and the read path
+	// of spec 005 are bound with those specs; until then a mutation records
+	// nowhere and the object route of a link answers not_implemented.
+	sharing, err := shares.New(shares.Options{
+		Authorizer: identity.Authorizer, DB: db, Store: grants,
+		Publisher: bucket, BucketPrefix: cfg.BucketPrefix,
 	})
 	if err != nil {
 		return fail(stderr, err)
 	}
 	surface, err := api.New(api.Options{
 		Verifier: identity.Verifier, Authorizer: identity.Authorizer,
+		Shares:                           sharing,
 		PublicURL:                        cfg.PublicURL,
 		RequestsPerMinute:                cfg.RequestsPerMinute,
 		UnauthenticatedRequestsPerMinute: cfg.UnauthenticatedRequestsPerMinute,
