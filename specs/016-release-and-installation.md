@@ -10,7 +10,7 @@ depends_on:
 affects: [.github/workflows/release.yml, .github/workflows/verify.yml, Dockerfile, Dockerfile.ci, Dockerfile.stubs, deploy/, test/deploy/, tools/smoke/, docs/install.md, docs/operations.md, SECURITY.md, CHANGELOG.md, .lateregate.yaml]
 effort: medium
 created: 2026-09-18
-updated: 2026-09-18
+updated: 2026-09-19
 author: changkun
 ---
 
@@ -38,6 +38,18 @@ needs a tag on a fork to publish every artifact under the fork's own
 namespace with no cluster anywhere near it.
 
 ## Current state
+
+The first tag, `v0.1.0` on 2026-09-19 at 01:50, failed in its build job
+before any image was pushed: `Dockerfile.ci` declared `TARGETOS` and
+`TARGETARCH` before the runtime stage's `FROM`, where an ARG is in scope
+for FROM lines only, so the stage's COPY read them empty and looked for
+`bin/_/arcad`; and `Dockerfile.stubs`, which the workflow builds, did not
+exist. Both are fixed on main with the two tests that would have caught
+them, `TestTheReleaseImageCopiesWhatThePipelineBuilt` reading the ARGs'
+position and `TestTheStubsImageBuildsTheStubsCommand`; both images were
+built and run locally with podman. The tag stands and its run is not
+re-run; the next cut is `v0.1.1`, which needs the maintainer's
+`-force-red` because the guard reads the previous tag's red run.
 
 Not built. `verify.yml` runs the gate ([[002-repository-scaffold]]),
 there is no `release.yml`, no `deploy/`, no `tools/`, and no install

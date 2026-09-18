@@ -75,9 +75,19 @@ func TestTheReleaseImageCopiesWhatThePipelineBuilt(t *testing.T) {
 	if !strings.Contains(string(raw), want) {
 		t.Errorf("Dockerfile.ci does not copy %q", want)
 	}
+	// An ARG declared before the first FROM is in scope for FROM lines
+	// only; a COPY inside the stage reads it as empty and the path becomes
+	// bin/_/arcad, which is what the first tag's build died on. The two
+	// must be declared inside the stage, after its FROM.
+	lastFrom := strings.LastIndex(string(raw), "\nFROM ")
 	for _, arg := range []string{"ARG TARGETOS", "ARG TARGETARCH"} {
-		if !strings.Contains(string(raw), arg) {
+		at := strings.LastIndex(string(raw), arg)
+		if at < 0 {
 			t.Errorf("Dockerfile.ci does not declare %s, so buildx cannot fill the path per platform", arg)
+			continue
+		}
+		if at < lastFrom {
+			t.Errorf("Dockerfile.ci declares %s before the runtime stage's FROM, where the stage's COPY cannot read it", arg)
 		}
 	}
 	workflow, err := os.ReadFile(filepath.Join(root(t), ".github/workflows/release.yml"))
@@ -86,5 +96,34 @@ func TestTheReleaseImageCopiesWhatThePipelineBuilt(t *testing.T) {
 	}
 	if !strings.Contains(string(workflow), "out/release/bin/") {
 		t.Error("release.yml does not write out/release/bin/, which Dockerfile.ci copies from")
+	}
+}
+
+// TestTheStubsImageBuildsTheStubsCommand keeps Dockerfile.stubs, which the
+// release workflow builds and the kind example runs, in the tree and
+// building the one command the stubs package exports. The first tag was
+// cut with the workflow naming a file that did not exist.
+func TestTheStubsImageBuildsTheStubsCommand(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(root(t), "Dockerfile.stubs"))
+	if err != nil {
+		t.Fatalf("the release workflow builds Dockerfile.stubs: %v", err)
+	}
+	text := string(raw)
+	for _, want := range []string{
+		"./test/stubs/cmd/arca-stubs",
+		"EXPOSE 8081 8082",
+		`ENTRYPOINT ["/usr/local/bin/arca-stubs"]`,
+		"USER nonroot:nonroot",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("Dockerfile.stubs lacks %q", want)
+		}
+	}
+	workflow, err := os.ReadFile(filepath.Join(root(t), ".github/workflows/release.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(workflow), "-f Dockerfile.stubs") {
+		t.Error("release.yml no longer builds Dockerfile.stubs; the kind example and the conformance job run that image")
 	}
 }

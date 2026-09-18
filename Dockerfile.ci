@@ -13,9 +13,6 @@
 # developer image's base, its user, or its ports reaches the release image
 # in the same commit or fails the gate.
 
-ARG TARGETOS
-ARG TARGETARCH
-
 # >>> shared runtime base <<<
 # arcad forks no binary of its own, so the runtime stage is distroless:
 # CA roots for the bucket, the issuers, and the authorizer it dials,
@@ -28,5 +25,9 @@ ENTRYPOINT ["/usr/local/bin/arcad"]
 
 # The binary the pipeline cross-compiled for this platform. buildx sets
 # TARGETOS and TARGETARCH per platform of the manifest list, so one build
-# command produces both architectures from archives already built.
+# command produces both architectures from archives already built. The
+# two are declared here, inside the stage: an ARG before the FROM is in
+# scope for FROM lines only, and the COPY would read them as empty.
+ARG TARGETOS
+ARG TARGETARCH
 COPY out/release/bin/${TARGETOS}_${TARGETARCH}/arcad /usr/local/bin/arcad
