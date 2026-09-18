@@ -66,7 +66,7 @@ func run(root string) error {
 func Render() []byte {
 	return mustYAML(apidocs.Build(apidocs.Options{
 		Title: api.Title, Version: api.DocumentVersion, Description: api.Description,
-		Routes: api.Routes(), Errors: api.Errors(),
+		Routes: api.Described(), Errors: api.Errors(),
 	}).JSON())
 }
 

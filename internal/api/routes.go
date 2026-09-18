@@ -66,10 +66,39 @@ var routeTable = []route{
 	},
 }
 
-// Routes is the route table as the OpenAPI document reads it: the
-// descriptive half of every row, in the table's order. The handlers are the
-// API's own and no document names them.
-func Routes() []apidocs.Route { return routesOf(routeTable) }
+// Described is the surface as the OpenAPI document reads it: the descriptive
+// half of every row, the frame's own first and then the table each owning
+// package declares. No handler is here, because no document names one.
+//
+// tools/apidoc passes the table of every package that registers routes, and
+// the node passes the same rows bound to their handlers through
+// Options.Routes, so the committed document and the served one describe one
+// surface and cannot drift.
+func Described(declared ...[]Route) []apidocs.Route {
+	rows, err := rowsOf(routeTable, described(declared))
+	if err != nil {
+		// A declaration this package cannot hold to spec 013 is a
+		// programming error in the package that wrote it, and it is found
+		// when the document is generated rather than at a request.
+		panic("api: " + err.Error())
+	}
+	return routesOf(rows)
+}
+
+// described gives every declared row a handler nothing reaches, so one
+// validation serves the document and the mux both: a row the surface would
+// refuse to mount is a row the generator refuses to describe.
+func described(declared [][]Route) []Route {
+	var out []Route
+	for _, rows := range declared {
+		for _, r := range rows {
+			out = append(out, r.Bind(func(w http.ResponseWriter, req *http.Request) {
+				WriteError(w, req, Refuse(CodeNotImplemented, "a described route is not a registered one"))
+			}))
+		}
+	}
+	return out
+}
 
 // Errors is the error table as the OpenAPI document reads it, sorted by
 // code so a regenerated document does not reorder.
