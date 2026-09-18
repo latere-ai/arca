@@ -24,6 +24,8 @@ import (
 
 	"latere.ai/x/pkg/health"
 
+	"latere.ai/x/arca/internal/api"
+	"latere.ai/x/arca/internal/auth"
 	"latere.ai/x/arca/internal/config"
 	"latere.ai/x/arca/internal/version"
 )
@@ -90,9 +92,36 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		return fail(stderr, err)
 	}
 
+	// Spec 006's two, built once: the verifier over the listed issuers, warm
+	// before the first request, and the authorizer the operator configured or
+	// the owner policy. An issuer that does not answer and an endpoint with
+	// no bearer are start-up failures naming their variable, so a deployment
+	// is fixed rather than left answering 401 or 503 to everything.
+	//
+	// The grants and the links the owner policy reads arrive with spec 008;
+	// until then an installation has issued neither.
+	identity, err := auth.Start(ctx, auth.Options{
+		Issuers: cfg.OIDCIssuers, Audience: cfg.OIDCAudience,
+		InsecureIssuers: cfg.OIDCInsecureIssuers,
+		AuthorizerURL:   cfg.AuthorizerURL, AuthorizerToken: cfg.AuthorizerToken,
+		AdminSubjects: cfg.AdminSubjects,
+	})
+	if err != nil {
+		return fail(stderr, err)
+	}
+	surface, err := api.New(api.Options{
+		Verifier: identity.Verifier, Authorizer: identity.Authorizer,
+		PublicURL:                        cfg.PublicURL,
+		RequestsPerMinute:                cfg.RequestsPerMinute,
+		UnauthenticatedRequestsPerMinute: cfg.UnauthenticatedRequestsPerMinute,
+	})
+	if err != nil {
+		return fail(stderr, err)
+	}
+
 	draining := make(chan struct{})
 	probes := health.Handler(health.Options{
-		Ready:     health.Checks(health.Check{Name: "draining", Run: notDraining(draining)}),
+		Ready:     health.Checks(readiness(identity, draining)...),
 		Timeout:   2 * time.Second,
 		Version:   version.Version,
 		Commit:    version.Commit,
@@ -107,6 +136,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = fmt.Fprintln(w, version.String())
 	})
+	surface.Mount(public)
 
 	var lc net.ListenConfig
 	publicLn, err := lc.Listen(ctx, "tcp", cfg.PublicAddr)
@@ -118,8 +148,10 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		_ = publicLn.Close()
 		return fail(stderr, fmt.Errorf("ARCA_INTERNAL_ADDR: %w", err))
 	}
-	_, _ = fmt.Fprintf(stdout, "arcad: %s listening public=%s internal=%s\n",
-		version.Version, publicLn.Addr(), internalLn.Addr())
+	// The mode is on the line an operator reads at start, so they know
+	// whether the endpoint they configured was picked up (spec 006).
+	_, _ = fmt.Fprintf(stdout, "arcad: %s listening public=%s internal=%s deciding=%q\n",
+		version.Version, publicLn.Addr(), internalLn.Addr(), identity.Mode)
 
 	servers := []*http.Server{
 		{Handler: public, ReadHeaderTimeout: 10 * time.Second},
@@ -157,6 +189,23 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 func fail(stderr io.Writer, err error) int {
 	_, _ = fmt.Fprintf(stderr, "arcad: %v\n", err)
 	return 1
+}
+
+// readiness is the checks /readyz runs, in the order it reports them. The
+// draining check is spec 002's and is always there. The authorizer check is
+// spec 006's and is there only where an endpoint is configured: it sends the
+// probe every authorizer of the family denies, so a replica whose endpoint
+// is out of reach, or whose endpoint answers an allow without reading the
+// request, leaves rotation rather than serving decisions nobody made.
+//
+// With no endpoint configured the owner policy decides in process, and a
+// check of it would be a check of this binary against itself.
+func readiness(identity *auth.Identity, draining <-chan struct{}) []health.Check {
+	checks := []health.Check{{Name: "draining", Run: notDraining(draining)}}
+	if identity.Mode == auth.ModeAuthorizer {
+		checks = append(checks, health.Check{Name: "authorizer", Run: identity.Authorizer.Check})
+	}
+	return checks
 }
 
 // notDraining fails readiness once shutdown has begun, so a load balancer

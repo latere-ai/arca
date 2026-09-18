@@ -47,13 +47,29 @@ depcheck:
   packages:
     latere.ai/x/arca/cmd/arcad:
       decision: >-
-        the server reaches latere.ai/x/pkg and the standard library; the
-        S3 client joins the list with spec 003, the Postgres driver with
-        spec 004, the OpenTelemetry SDK with spec 006, and nothing else
-        does without a row here (spec 001)
+        the server reaches latere.ai/x/pkg, the OpenTelemetry SDK that
+        pkg/otel exports through, and the standard library; the S3 client
+        joins the list with spec 003 and the Postgres driver with spec
+        004, and nothing else does without a row here (spec 001). The
+        OpenTelemetry rows arrived with spec 006, which the first draft
+        of this block named as the spec that would bring them: the
+        authorizer client and the verifier both send their calls through
+        an instrumented transport, so the request's trace reaches the
+        operator's endpoint and every call is a span
       allow:
         latere.ai/x/pkg: the shared library every Latere service is built on (spec 002)
-        github.com/google/uuid: reached behind latere.ai/x/pkg's error envelope, which the configuration reads the authorizer's subject parser from (spec 006); not a cloud SDK
+        github.com/google/uuid: reached behind latere.ai/x/pkg's error envelope, and not a cloud SDK (spec 006)
+        go.opentelemetry.io: the OpenTelemetry SDK, exporters, and instrumentation the traces and metrics of spec 018 go out through, reached through pkg/otel's instrumented transport (spec 006)
+        google.golang.org: protobuf and gRPC, the wire format and the transport of the OTLP exporters
+        golang.org/x/net: reached by the OTLP exporters
+        golang.org/x/sys: reached by the OTLP exporters
+        golang.org/x/text: reached by the OTLP exporters
+        golang.org/x/time: reached by the OTLP exporters and by pkg/ratelimit's token buckets (spec 015)
+        github.com/cenkalti/backoff: the OTLP exporters' retry schedule
+        github.com/cespare/xxhash: the metric SDK's aggregation keys
+        github.com/felixge/httpsnoop: otelhttp's response recorder
+        github.com/go-logr: the OpenTelemetry SDK's internal logging interface
+        github.com/grpc-ecosystem/grpc-gateway: the OTLP status marshalling the exporters read errors with
 
 license:
   spdx: MIT
