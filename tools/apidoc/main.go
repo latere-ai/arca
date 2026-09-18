@@ -23,6 +23,7 @@ import (
 
 	"github.com/goccy/go-yaml"
 
+	"latere.ai/x/arca/internal/admin"
 	"latere.ai/x/arca/internal/api"
 	"latere.ai/x/arca/internal/apidocs"
 	"latere.ai/x/arca/internal/workspaces"
@@ -76,7 +77,10 @@ func Render() []byte {
 // the same declarations, so the committed document and the registrations are
 // one list read twice and cannot disagree.
 func routes() []apidocs.Route {
-	return append(api.Routes(), api.Described(workspaces.Table())...)
+	out := api.Routes()
+	out = append(out, api.Described(workspaces.Table())...)
+	out = append(out, api.Described(admin.Table())...)
+	return out
 }
 
 // mustYAML converts a JSON document to YAML, and panics on bytes that are

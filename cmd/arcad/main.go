@@ -24,6 +24,7 @@ import (
 
 	"latere.ai/x/pkg/health"
 
+	"latere.ai/x/arca/internal/admin"
 	"latere.ai/x/arca/internal/api"
 	"latere.ai/x/arca/internal/auth"
 	"latere.ai/x/arca/internal/blob"
@@ -341,6 +342,18 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	if err != nil {
 		return fail(stderr, err)
 	}
+	// The administration of spec 012. Two of its seams are unbound in this
+	// build and say so rather than guessing: the restore across owners
+	// returns rows the trash of spec 005 and the deleted workspaces of spec
+	// 009 own, so the route answers not_implemented until a build binds one,
+	// and the link counter is spec 008's table, so the overview counts the
+	// links an installation on this build has issued, which is none.
+	administration, err := admin.New(admin.Options{
+		Querier: db.Querier(), Spaces: store.NewAdmin(), Authorizer: identity.Authorizer,
+	})
+	if err != nil {
+		return fail(stderr, err)
+	}
 	surface, err := api.New(api.Options{
 		Verifier: identity.Verifier, Authorizer: identity.Authorizer,
 		PublicURL:                        cfg.PublicURL,
@@ -349,9 +362,10 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		// The log of spec 010 and the database it reads through, which is
 		// what GET /v1/events tails.
 		Events: events.NewLog(), Querier: db.Querier(),
-		// The twelve rows of spec 009, contributed by the package that owns
-		// their behaviour and registered through the one seam of register.go.
-		Routes: workspaces.Routes(durable),
+		// The twelve rows of spec 009 and the two of spec 012, each
+		// contributed by the package that owns their behaviour and registered
+		// through the one seam of register.go.
+		Routes: append(workspaces.Routes(durable), admin.Routes(administration)...),
 	})
 	if err != nil {
 		return fail(stderr, err)
