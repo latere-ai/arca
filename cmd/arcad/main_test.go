@@ -32,6 +32,7 @@ import (
 	"latere.ai/x/arca/internal/config"
 	"latere.ai/x/arca/internal/events"
 	"latere.ai/x/arca/internal/reaper"
+	"latere.ai/x/arca/internal/shares"
 	"latere.ai/x/arca/internal/store"
 	"latere.ai/x/arca/internal/workspaces"
 )
@@ -831,6 +832,58 @@ func TestTheWorkspaceLedgerWritesThroughTheLogAndTheCounter(t *testing.T) {
 	}
 	if err := broken.Release(t.Context(), nil, event.Owner, 1); !errors.Is(err, failure) {
 		t.Errorf("a failed release = %v", err)
+	}
+}
+
+// TestEveryActionAShareAppendsIsOneOfSpec010sVocabulary: the same rule for
+// spec 008's two words. The column carries no constraint and the append
+// refuses a word the table does not name, so a word spelled one way in the
+// shares package and another in the log's would be a refused transaction on
+// a live installation rather than a compile failure here.
+func TestEveryActionAShareAppendsIsOneOfSpec010sVocabulary(t *testing.T) {
+	for _, action := range []string{shares.ActionShareCreated, shares.ActionShareRevoked} {
+		if !events.Action(action).Valid() {
+			t.Errorf("a share appends %q, which spec 010's vocabulary does not name", action)
+		}
+	}
+}
+
+// TestTheShareLedgerWritesThroughTheLogAndAnswersTheRowsID is the other
+// binding: a grant made and a grant revoked reach the log as rows of spec
+// 010's shape, and the id the append assigned comes back, because that id is
+// the cursor a consumer reads the row at.
+func TestTheShareLedgerWritesThroughTheLogAndAnswersTheRowsID(t *testing.T) {
+	log := &recordingLog{}
+	bound := shareLedger{log: log}
+
+	event := shares.Event{
+		Owner: "https://issuer.example|9ab3", Path: "files/reports",
+		Action: shares.ActionShareCreated, Actor: "https://issuer.example|9ab3",
+		Detail: map[string]any{"kind": "link"},
+	}
+	id, err := bound.Append(t.Context(), nil, event)
+	if err != nil {
+		t.Fatalf("the append = %v", err)
+	}
+	if id != 1 {
+		t.Errorf("the append answered the id %d, and the row it wrote is the first", id)
+	}
+	if len(log.appended) != 1 {
+		t.Fatalf("the log holds %d rows", len(log.appended))
+	}
+	got := log.appended[0]
+	if got.Owner != event.Owner || got.Path != event.Path || got.Actor != event.Actor ||
+		got.Action != events.ActionShareCreated || !reflect.DeepEqual(got.Detail, event.Detail) {
+		t.Errorf("the row is %+v", got)
+	}
+
+	// The append runs inside the transaction of the mutation it records, so
+	// a failure is the caller's: a grant that was made and not recorded is
+	// the one outcome this seam exists to prevent.
+	failure := errors.New("the store said no")
+	broken := shareLedger{log: &recordingLog{err: failure}}
+	if _, err := broken.Append(t.Context(), nil, event); !errors.Is(err, failure) {
+		t.Errorf("a failed append = %v", err)
 	}
 }
 

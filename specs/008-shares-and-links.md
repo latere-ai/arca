@@ -81,19 +81,22 @@ test that fails without the fix:
   caller whatever the public holds without a token. Here only a `subject`
   grant answers that step (`TestWhatTheGrantStepDoesNotAdmit`).
 
-Criteria 1, 3, 4, 5, 5b, 6, 7, 8, 9 and 11 have passing tests; criterion 2
-is proved per route in `internal/shares` and closes with
-[[017-conformance-suite]]'s row per action. Criterion 10 is open: the append
-is proved against the seam, and the tail that reads it back arrives with
-[[010-events-and-reaper]]. The spec stays at `testing` until both close.
+Criteria 1, 3, 4, 5, 5b, 6, 7, 8, 9, 10 and 11 have passing tests;
+criterion 2 is proved per route in `internal/shares` and closes with
+[[017-conformance-suite]]'s row per action. Criterion 10 closed when this
+spec merged with [[010-events-and-reaper]]: `cmd/arcad` binds `Ledger` to
+that spec's log through `shareLedger`, so a grant made and a grant revoked
+are rows of the closed vocabulary written inside the mutation's own
+transaction, and `GET /v1/events` is the tail that reads them back. The
+spec stays at `testing` until criterion 2 closes.
 
-Two seams are declared here and bound by a later spec. `Ledger` is the log
-of [[010-events-and-reaper]] as a mutation writes it, with a no-op default,
-and the append runs inside the mutation's own transaction: a change to who
-may act on a space is not a notification that may go missing. `ObjectReader`
-is the read path of [[005-files]], which the third link route serves an
-object through; a build that binds none answers `not_implemented` from that
-one route and serves the other two.
+Of the two seams declared here, one is bound and one is not. `Ledger` is
+bound, above. `ObjectReader` is the read path of [[005-files]], which the
+third link route serves an object through, and [[005-files]] has not
+landed: no build binds it, so `GET /v1/shares/links/{token}/files/{path...}`
+resolves its token, asks `link.read`, confines what may be read, and then
+answers `not_implemented`. The other two link routes serve. The node binds
+it with that spec.
 
 What the implementation decided, where this spec was silent:
 

@@ -194,6 +194,24 @@ func (l ledger) Release(ctx context.Context, q store.Querier, owner string, byte
 	return err
 }
 
+// shareLedger binds the log of spec 010 to the seam of spec 008. The append
+// runs inside the mutation's own transaction, which is what makes a grant
+// that was made a grant that was recorded: a change to who may act on a
+// space is not a notification that may go missing.
+type shareLedger struct{ log events.Log }
+
+// Append writes one row of the log and answers its id, which is the cursor a
+// consumer reads the row back at. The action is one word of spec 010's
+// closed vocabulary, spelled the same on both sides; the append refuses a
+// word the vocabulary does not name, so a mapping that drifted is a refused
+// transaction rather than a row no consumer can filter for.
+func (l shareLedger) Append(ctx context.Context, q store.Querier, e shares.Event) (int64, error) {
+	return l.log.Append(ctx, q, events.Event{
+		Owner: e.Owner, Path: e.Path, Action: events.Action(e.Action),
+		Actor: e.Actor, Detail: e.Detail,
+	})
+}
+
 // leasePass binds pass 3 of spec 010's table to the sweep of spec 009. The
 // reconciler hands every pass a querier and a dry flag; this sweep opens its
 // own transactions, one per row it ends, because a reap is a row, a lease and
@@ -331,12 +349,20 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	if err != nil {
 		return fail(stderr, err)
 	}
-	// The shares and links of spec 008. The log of spec 010 and the read path
-	// of spec 005 are bound with those specs; until then a mutation records
-	// nowhere and the object route of a link answers not_implemented.
+	// The one log of spec 010 in this process, bound to every seam that
+	// writes a row and to the tail that reads them back. It holds no state,
+	// and one value rather than four is what makes a row appended by a share
+	// and a row appended by a workspace the same log.
+	log := events.NewLog()
+
+	// The shares and links of spec 008. The log of spec 010 is bound below,
+	// so a grant made and a grant revoked are rows of it; the read path of
+	// spec 005 is still a seam, so the object route of a link answers
+	// not_implemented until that spec lands.
 	sharing, err := shares.New(shares.Options{
 		Authorizer: identity.Authorizer, DB: db, Store: grants,
 		Publisher: bucket, BucketPrefix: cfg.BucketPrefix,
+		Ledger: shareLedger{log: log},
 	})
 	if err != nil {
 		return fail(stderr, err)
@@ -351,7 +377,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		DB: db, Workspaces: store.NewWorkspaces(), Attachments: store.NewAttachments(),
 		Objects: store.NewWorkspaceObjects(), Bucket: bucket, Prefix: cfg.BucketPrefix,
 		Authorizer: identity.Authorizer,
-		Ledger:     ledger{log: events.NewLog(), usage: events.NewLedger()},
+		Ledger:     ledger{log: log, usage: events.NewLedger()},
 	})
 	if err != nil {
 		return fail(stderr, err)
@@ -364,7 +390,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		UnauthenticatedRequestsPerMinute: cfg.UnauthenticatedRequestsPerMinute,
 		// The log of spec 010 and the database it reads through, which is
 		// what GET /v1/events tails.
-		Events: events.NewLog(), Querier: db.Querier(),
+		Events: log, Querier: db.Querier(),
 		// The twenty rows two packages own: the twelve of spec 009 and the
 		// eight of spec 008 that sit behind the verifier. Each is declared
 		// by the package that answers it and registered through the one seam
