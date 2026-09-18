@@ -1,6 +1,6 @@
 ---
 title: "Object store: the bucket contract, keys, integrity, presigned reads, multipart"
-status: drafted
+status: testing
 track: core
 depends_on:
   - specs/001-architecture.md
@@ -26,6 +26,57 @@ The bucket is the authority on what an object contains and knows nothing
 about who owns it, what path it sits at, or whether it is shared. That
 separation is what makes a move a row update (invariant 8) and what lets
 one bucket carry several installations under different prefixes.
+
+## Current state
+
+Built and in the tree on 2026-09-18, phase 1 of [[019-migration-from-drive]].
+`object/` holds the id and the key derivation, `internal/blob` holds the
+client with `Memory` and `Counting` beside it, `internal/config` reads the
+eight variables, and `arcad` runs the `bucket` readiness check. The commits
+are `c64d821` (the object model), `2576334` (the client and the two stubs),
+`2bfaa4e` (the variables, the readiness check, and the dependency rows), and
+`df9c1ca` (the store tier against MinIO). The gate passes at each of them.
+
+What arrived from Drive is `internal/storage/s3.go`: the put buffering rule,
+the error classification by API code, the batched delete, the presigned
+reads, the four multipart calls, and `Head`. What changed on the way is the
+table in "What arrives from Drive" below, as written.
+
+Divergences from the design as drafted, each a decision rather than a gap:
+
+- `PutMultipart`, the server side part streamer, did not arrive. Its only
+  caller is the workspace writeback of [[009-workspaces]], so it comes with
+  that spec rather than as a method with no caller.
+- `blob.Options` carries two fields this spec does not name, `HTTPClient` and
+  `MaxAttempts`. Both are seams for a test: a client that trusts the
+  certificate of the endpoint it started, and one attempt so an injected
+  refusal is answered rather than waited on. Neither is configuration, and no
+  `ARCA_*` variable reaches either.
+- The degraded mode of criterion 4 is the client's half: a store that answers
+  `NotImplemented` to the conditional create is retried once without it when
+  the body can rewind, recorded on `S3.Unconditional`, and logged once per
+  process. Naming it on readiness and in `check` is [[012-administration]]'s,
+  which is where `check` is built.
+- The MinIO release the stack pins answers `NotImplemented` to an object ACL,
+  so criterion 11 is proved against the real store as well as against the
+  fake, and the store tier runs the shared table with publicity unsupported.
+- Criterion 8 counts round trips at the endpoint rather than through
+  `blob.Counting`: a wrapper over `Store` sees one call whatever the number
+  of keys, and what the criterion is about is the calls the client makes to
+  the store. The in-process endpoint of the unit tier counts them.
+- `object.ParseID` accepts any UUID version in its canonical text. `NewID`
+  mints version 7 and every key Arca writes carries one; a store filled
+  before that decision still reads.
+- `object/` also carries the planes and the checksum kinds
+  [[001-architecture]] names for it. The path rules beyond the plane prefix
+  are [[005-files]]'s.
+
+One question stays open for the maintainer, the one the Design already
+raises: whether the store tier should run MinIO behind TLS so both integrity
+mechanisms are exercised against a real store. Today the trailing digest is
+exercised against the in-process endpoint over TLS and the ETag comparison
+against MinIO over plain HTTP, and a body corrupted in flight is refused in
+both.
 
 ## Design
 

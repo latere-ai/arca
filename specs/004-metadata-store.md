@@ -1,6 +1,6 @@
 ---
 title: "Metadata store: the schema, migrations, transactions, the store interface"
-status: drafted
+status: testing
 track: core
 depends_on:
   - specs/001-architecture.md
@@ -26,6 +26,54 @@ mechanism, the transaction discipline, and the interface
 `internal/store` exposes. It does not own what the rows mean to a
 caller: each table names the spec that gives it meaning, and that spec
 ships the migration creating it.
+
+## Current state
+
+Built and in the tree on 2026-09-18, phase 1 of [[019-migration-from-drive]].
+`internal/store` holds the pool, the transactions, the migrator, and the two
+query sets this spec owns, and `arcad` has the `migrate` subcommand and the
+`database` readiness check. The commits are `7647e58` (the schema, the
+migrator, the transactions, the query sets), `a630c2c` (the subcommand, the
+variable, the schema check) and `df9c1ca` (the store tier against Postgres).
+The gate passes at each of them.
+
+What arrived from Drive is `internal/store` and `migrations/`: the pool
+bring-up, the stripping of the pool parameters the migrator's driver does not
+understand, and the shape of the four tables. What changed on the way is the
+table in "What arrives from Drive" below, as written.
+
+Divergences from the design as drafted, each a decision rather than a gap:
+
+- Migration `0001_files.up.sql` is the only one in the tree. The other four
+  are their owning specs', which is what the ownership table is for.
+- `ObjectReferenced` reads `files` and `file_versions`. The third member of
+  the union, `upload_sessions`, joins it with [[007-uploads]], which creates
+  the table; criterion 6 therefore holds for two tables of three.
+- The listing is keyset paginated in SQL rather than through
+  `latere.ai/x/pkg/pagination`: that package paginates a slice already in
+  memory, and what a listing needs is the `WHERE path > $cursor ORDER BY
+  path LIMIT n` the index answers. The cursor a caller sees is the same, the
+  last value of the ordered column.
+- The migrator reads a connection string of its own: the scheme selects the
+  golang-migrate driver and the `pgx/v5` driver registers `pgx5`, so
+  `postgres://` is rewritten before `pgxmigrate.Up` sees it.
+- The start-up check of criterion 2 refuses a database that answers and is
+  behind this binary. A database that does not answer is not a verdict, so
+  the `database` readiness check makes the same comparison once the database
+  is there, and a rolling deploy whose database is briefly unreachable does
+  not crash.
+- Readiness now reaches both stores, so `/readyz` in the unit tier of
+  `cmd/arcad` answers 503 naming the check that failed, and the 200 is proved
+  by the e2e tier of [[014-test-stubs-and-tiers]] against real stores. The
+  criterion of [[002-repository-scaffold]] that both listeners answer the
+  probes still holds; what changed is the body a test with no stores reads.
+- Pool sizing is left at the driver's defaults. Drive capped it at four
+  connections per replica because its cluster was shared, and sizing is
+  [[016-release-and-installation]]'s to decide for an installation.
+- The unit tier proves the Go half of every query against fakes: the
+  statement, the arguments it binds, the error it maps, and the row it
+  scans. What the SQL means is the store tier's, which is the only place a
+  transaction's semantics and a unique constraint can be proved at all.
 
 ## Design
 

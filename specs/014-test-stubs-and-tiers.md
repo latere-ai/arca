@@ -1,6 +1,6 @@
 ---
 title: "Test stubs and tiers: the stubs, the unit tier, the store tier, the e2e tier, make run, the CI jobs"
-status: drafted
+status: testing
 track: core
 depends_on:
   - specs/002-repository-scaffold.md
@@ -35,6 +35,60 @@ The stubs are in the tree and are a binary, `arca-stubs`, so the tiers
 and `make run` start the same code, and so a contributor who clones the
 repository gets a working installation with one command and no account
 anywhere.
+
+## Current state
+
+Built and in the tree on 2026-09-18, phase 1 of [[019-migration-from-drive]],
+as far as the specs it stands on reach. `test/stubs` holds the two stubs and
+the `arca-stubs` binary, `compose.yaml` holds the stack, the Makefile holds
+one target per tier and `make run`, `internal/blob` and `internal/store` have
+their store tier, `test/e2e` runs `arcad` as a process, and `verify.yml` has
+one job per service tier. The commits are `b4671bf` (the stubs), `3204b35`
+(the stack and the targets), `df9c1ca` (the two tiers) and `4663ec3` (the
+jobs and the documents). The gate passes at each of them.
+
+What arrived from Drive is `test/e2e/harness_test.go` and
+`docker-compose.yml`: the skip on the `E2E_` variables, the shared harness,
+Postgres 18 and the pinned MinIO release. What changed on the way is the
+table in "What arrives from Drive" below, as written, and the bucket is
+created by the stack rather than by the harness.
+
+Divergences from the design as drafted:
+
+- The harness is `test/e2e/harness_test.go` rather than `harness.go`. A
+  package with a non-test file behind a build tag is a measured package at
+  zero per cent in the untagged run, and a package whose only files are
+  excluded is one `go build ./...` refuses to read.
+- `make down` stops the stack and keeps its volumes, and `make clean` removes
+  the project with them. `make down -v` is not a make idiom: a target takes
+  no flags.
+- The coverage floor is enforced over the unit tier. The shared gate reads
+  several profiles, but the shared workflow that runs it takes no input for
+  them, so each tier job uploads its profile as an artifact instead and the
+  floor is the unit tier's, which every package clears. Reading three
+  profiles in one run needs a change to `latere-ai/ci`.
+- `make up` waits for facts of its own rather than for `compose up --wait`:
+  only one of the two container engines has that flag, and a contributor with
+  either should get the same stack.
+- The issuer's `-alg es256` signs with ES256. The shared issuer holds one key
+  at a time and rotates by replacement, so the second key of the row is not
+  reproducible without changing `latere.ai/x/pkg/authkit/issuertest`; what a
+  verifier's key-set check is pointed at is an issuer signing the other
+  algorithm.
+- `make run` runs five of its seven steps: the stack, the stubs, the
+  migrations, the server, and the token. `arcad check` is
+  [[012-administration]]'s and the `curl` that puts an object is
+  [[013-api]]'s, so what the run prints today is the address, the token, and
+  a request against the probes.
+- The tier variables are `E2E_DATABASE_URL`, `E2E_S3_ENDPOINT`, `E2E_S3_KEY`,
+  `E2E_S3_SECRET` and `E2E_S3_BUCKET`, as this spec's table names them.
+
+Criteria 1, 3, 5, 6, 7 and 12 hold in the tree. Criterion 2's `check` half is
+[[012-administration]]'s, criterion 4's limits half is
+[[010-events-and-reaper]]'s, criterion 10's `check` half is the same, and
+criteria 8, 9 and 11 wait on `make run` reaching its seventh step, on a test
+that runs two checkouts at once, and on the pipeline reading three profiles.
+This spec moves to `complete` when those land.
 
 ## Design
 
