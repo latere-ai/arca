@@ -2,6 +2,18 @@
 # latere.ai/x/ci-gate, pinned in go.mod; only repository-specific values are
 # here.
 
+# The files that name the release. `lateregate release` rewrites each
+# pattern's version to the tag it cuts, in the same commit as the changelog
+# section, so neither ever lags a tag and main does not go red after a cut.
+# A pattern that does not match its file exactly once refuses the release,
+# which is why each is anchored on words that appear nowhere else.
+release:
+  stamp:
+    - file: SECURITY.md
+      pattern: 'v\d+\.\d+\.\d+ is the\s+current release'
+    - file: deploy/prod/kustomization.yaml
+      pattern: 'newTag: v\d+\.\d+\.\d+'
+
 cover:
   trim_prefix: latere.ai/x/arca/
 
