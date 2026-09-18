@@ -50,8 +50,9 @@ Migration `0003_shares.up.sql` creates the table, the number
 gains the `Shares` seam its route table dispatches through, and the eleven
 rows of [[013-api]] that belong here; `cmd/arcad` binds one query set to
 both readers. The commits are `850e0b6` (the migration and the queries),
-`91ad501` (the grants), `16a35a7` (the links) and `2976467` (the wiring and
-the e2e tier). The gate passes with all fifteen gates on at each of them.
+`91ad501` (the grants), `16a35a7` (the links), `2976467` (the wiring and
+the e2e tier) and `a2dabc0` (the refusal that names no token). The gate
+passes with all fifteen gates on at each of them.
 
 What arrived from the service Arca replaces is
 `drive/internal/handler/shares.go` (create, list, what is shared with the
@@ -106,7 +107,22 @@ What the implementation decided, where this spec was silent:
   a grant that is not there gets.
 - A deny of `link.read` is answered `not_found` rather than `forbidden`, so
   an installation that turned public reading off is indistinguishable from a
-  token that never existed.
+  token that never existed. The three redemption routes carry the token in
+  their path, so their refusal is one fixed sentence that names neither the
+  URL nor the endpoint's reason: the developer detail is the field an error
+  log and a trace record, and [[015-security-and-threat-model]] keeps the capability out of
+  recorded text. Every other route still reads the reason a deny carried.
+- `GET /v1/shares/with-me` asks `share.list` with both `owner` and `grantee`
+  set to the caller, where the table below names only the grantee. The
+  built-in owner policy decides a list on the space it names, and a question
+  with no owner is a question about nobody's space; the two are the same
+  subject on this route, so the filter a foreign authorizer reads is
+  unchanged.
+- The file route asks `link.read` on the path the request named rather than
+  on the grant's prefix, after checking that the prefix covers it. The seam
+  [[006-identity]] declares takes a path and checks coverage, so an
+  authorizer that narrows a link to part of its subtree can answer, which it
+  could not if every read asked about the prefix.
 - An `expires_at` already past is `invalid_field`. A grant that grants
   nothing from the instant it is written is a caller's mistake, not a state
   worth storing.
@@ -116,7 +132,12 @@ What the implementation decided, where this spec was silent:
   the caller asked for and never more: the row is marked inside the
   transaction and the bucket is stamped after it commits, and a revoke
   clears the bucket first. A bucket that will not answer is
-  `storage_unavailable`.
+  `storage_unavailable`. A create whose stamp fails has already written the
+  grant and marked the row, and the object is not public in the bucket: the
+  link serves through this server, the world does not read the object
+  directly, and repeating the create stamps what the first attempt could
+  not. A revoke whose stamp fails leaves the grant live over an object that
+  is no longer public. Both failures land on the side that grants less.
 - The prefix a grant carries is normalised: a trailing slash is not part of
   a subtree's name, and the whole of a plane is a prefix, since a path in no
   plane is a path this server does not serve.
