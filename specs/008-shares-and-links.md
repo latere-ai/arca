@@ -1,6 +1,6 @@
 ---
 title: "Shares and links: grants and the permission ladder, public links, what a caller sees shared with them"
-status: drafted
+status: testing
 track: core
 depends_on:
   - specs/004-metadata-store.md
@@ -38,6 +38,94 @@ where the verification half of invariant 5 of [[001-architecture]] does
 not apply, and this spec states the exception in full so
 [[015-security-and-threat-model]] can reason about it. The asking half
 still holds: a redeemed token still asks `link.read`.
+
+## Current state
+
+Built and in the tree on 2026-09-18, phase 4 of [[019-migration-from-drive]].
+Migration `0003_shares.up.sql` creates the table, the number
+[[004-metadata-store]]'s ownership table gives this spec;
+`internal/store/shares.go` and `links.go` hold the query set;
+`internal/shares` holds the eleven handlers, the two lookups
+[[006-identity]] reads a decision through, and the token; `internal/api`
+gains the `Shares` seam its route table dispatches through, and the eleven
+rows of [[013-api]] that belong here; `cmd/arcad` binds one query set to
+both readers. The commits are `850e0b6` (the migration and the queries),
+`91ad501` (the grants), `16a35a7` (the links) and `2976467` (the wiring and
+the e2e tier). The gate passes with all fifteen gates on at each of them.
+
+What arrived from the service Arca replaces is
+`drive/internal/handler/shares.go` (create, list, what is shared with the
+caller, revoke), `drive/internal/handler/links.go` (the three token routes),
+the ladder of `drive/internal/handler/authz.go`, which is now the owner
+policy's, and migrations `000002`, `000010`, `000013` and `000017`, which
+become the one table above. The share-request routes, the approval statuses,
+the resolution columns, and the grantee kinds read from a claim do not
+arrive; three CHECK constraints hold the narrowing in the schema.
+
+Two defects of the code this port carries over are fixed here, each with a
+test that fails without the fix:
+
+- `drive/internal/handler/shares.go:358`, the listing of a space's shares,
+  answers the `token` column to every caller that may list. A token is the
+  capability, so a listing that carries one hands the capability to
+  everyone who may read the listing; only the grantee's own listing stripped
+  it (`shares.go:397`). Here the token is answered once, by the create, and
+  no other shape carries it (`TestMintingALinkAnswersTheTokenOnce`).
+- `drive/internal/handler/authz.go:166`, the grant step, admits a `public`
+  grant for any authenticated caller asking to read. A token grant is the
+  link step's, and answering it in the grant step gives every signed-in
+  caller whatever the public holds without a token. Here only a `subject`
+  grant answers that step (`TestWhatTheGrantStepDoesNotAdmit`).
+
+Criteria 1, 3, 4, 5, 5b, 6, 7, 8, 9 and 11 have passing tests; criterion 2
+is proved per route in `internal/shares` and closes with
+[[017-conformance-suite]]'s row per action. Criterion 10 is open: the append
+is proved against the seam, and the tail that reads it back arrives with
+[[010-events-and-reaper]]. The spec stays at `testing` until both close.
+
+Two seams are declared here and bound by a later spec. `Ledger` is the log
+of [[010-events-and-reaper]] as a mutation writes it, with a no-op default,
+and the append runs inside the mutation's own transaction: a change to who
+may act on a space is not a notification that may go missing. `ObjectReader`
+is the read path of [[005-files]], which the third link route serves an
+object through; a build that binds none answers `not_implemented` from that
+one route and serves the other two.
+
+What the implementation decided, where this spec was silent:
+
+- The route is `GET /v1/shares/with-me`, which is [[013-api]]'s grammar and
+  the rename [[019-migration-from-drive]] names. The table above said
+  `/v1/shared-with-me`, the predecessor's path, and is corrected.
+- `POST /v1/shares` grants to a subject and takes no kind; a token grant is
+  minted at `POST /v1/shares/links`, which takes `kind`, `link` or `public`.
+  A `permission` on that route is `read` or absent, and anything else is
+  `link_read_only`, which is where criterion 4 is answered.
+- The two kinds are read and revoked at their own routes, because they ask
+  two different actions. A link reached through `/v1/shares/{id}`, and a
+  subject grant reached through `/v1/shares/links/{id}`, are each the answer
+  a grant that is not there gets.
+- A deny of `link.read` is answered `not_found` rather than `forbidden`, so
+  an installation that turned public reading off is indistinguishable from a
+  token that never existed.
+- An `expires_at` already past is `invalid_field`. A grant that grants
+  nothing from the instant it is written is a caller's mistake, not a state
+  worth storing.
+- The event detail carries the grant's id beside the three fields the table
+  below names, so a consumer can pair a create with its revoke.
+- A public grant's two writes are ordered so that a failure grants less than
+  the caller asked for and never more: the row is marked inside the
+  transaction and the bucket is stamped after it commits, and a revoke
+  clears the bucket first. A bucket that will not answer is
+  `storage_unavailable`.
+- The prefix a grant carries is normalised: a trailing slash is not part of
+  a subtree's name, and the whole of a plane is a prefix, since a path in no
+  plane is a path this server does not serve.
+- A grant's listing is keyset paginated on the id as text, and the cursor is
+  compared in the same domain the order is taken in, so a walk resumes where
+  it stopped whatever collation the database was created with.
+- `internal/api` gained two pieces of [[013-api]]'s frame that a route with
+  a body needs and phase 2 had no caller for: the strict JSON decoder in the
+  error envelope, and the `{owner}` rule with its one alias.
 
 ## Design
 
@@ -108,18 +196,34 @@ organization sharing with no schema in Arca.
 
 ### The lookup
 
-`internal/shares` exposes one query and no decision:
+One query, and no decision:
 
 ```go
-// Covering returns the active, unexpired grants on space whose prefix
-// covers path, highest permission first.
-func (s *Shares) Covering(ctx context.Context, owner space.Subject, path string) ([]Grant, error)
+// Covering returns the active, unexpired grants on owner's space whose
+// prefix covers path, highest permission first.
+func (s Shares) Covering(ctx context.Context, q Querier, owner, path string) ([]Grant, error)
 ```
 
 One indexed statement fetches every candidate grant for the space and the
 prefixes of `path`, and the filter on `status` and `expires_at` is in the
 statement. [[006-identity]] owns what a decision does with the result.
 Nothing in `internal/shares` reads a claim.
+
+The query lives in `internal/store` with the table and the rest of the query
+set ([[004-metadata-store]]), and `internal/shares` binds it to the two
+seams [[006-identity]] declares:
+
+```go
+// Grants answers the grant step of the owner policy's flowchart, and Links
+// the link step. Both are read only and take no transaction.
+func Grants(db Database, queries store.Shares) auth.GrantLookup
+func Links(db Database, queries store.Shares) auth.LinkResolver
+```
+
+Only a `subject` grant answers the grant step. A token grant is the link
+step's, one branch further down the flowchart, and reading one in the grant
+step would hand every caller with a token of their own whatever the public
+holds.
 
 ### Routes
 
@@ -129,7 +233,7 @@ Nothing in `internal/shares` reads a claim.
 | GET | `/v1/shares` | `share.list` | `owner`, `path` |
 | GET | `/v1/shares/{id}` | `share.read` | `id`, `owner`, `path`, `grantee`, `permission` |
 | DELETE | `/v1/shares/{id}` | `share.revoke` | `id`, `owner`, `path`, `grantee`, `permission` |
-| GET | `/v1/shared-with-me` | `share.list` | `grantee`, the caller's own subject |
+| GET | `/v1/shares/with-me` | `share.list` | `grantee`, the caller's own subject |
 | POST | `/v1/shares/links` | `link.create` | `owner`, `path` |
 | GET | `/v1/shares/links` | `link.read` | `owner`, `path` |
 | DELETE | `/v1/shares/links/{id}` | `link.revoke` | `id`, `owner`, `path` |
@@ -170,7 +274,7 @@ POST /v1/shares
 }
 ```
 
-`GET /v1/shared-with-me` answers the grants whose `grantee` is the
+`GET /v1/shares/with-me` answers the grants whose `grantee` is the
 caller's own subject. It is one query on the grantee index and needs no
 membership anywhere. An authorizer that narrows a list answers the
 `share.list` question with a `filter`, and the handler applies it to its
@@ -307,7 +411,7 @@ grantee ([[010-events-and-reaper]]).
 | 5b | A resolvable token asks `link.read` with the grant's `id`, `owner`, and `path` and an empty subject, and an authorizer that denies it stops every link | the same, driven twice against an allowing and a denying stub |
 | 6 | A token route refuses a path outside the grant's prefix | the same |
 | 7 | A revoke takes effect on the next request with no sweep in between | e2e: read, revoke, read again |
-| 8 | `GET /v1/shared-with-me` answers grants where the caller is the grantee and reads no claim beyond the subject | e2e with two subjects from one issuer |
+| 8 | `GET /v1/shares/with-me` answers grants where the caller is the grantee and reads no claim beyond the subject | e2e with two subjects from one issuer |
 | 9 | An organization grantee takes the same code path as a person, with no group table and no org claim read | e2e where the authorizer names an organization subject as the grantee |
 | 10 | A create and a revoke each append one event with the grantee kind in the detail | [[010-events-and-reaper]]'s tail test |
 | 11 | No handler in `internal/shares` reads `org_id`, `roles`, or `email` | the `identity` gate's rule, plus a grep test in `internal/shares` |
