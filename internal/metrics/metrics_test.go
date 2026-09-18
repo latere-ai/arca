@@ -90,8 +90,13 @@ func TestALabelOutsideItsVocabularyIsNotRecorded(t *testing.T) {
 		strings.Contains(text, "teleported") || strings.Contains(text, "ignored") {
 		t.Error("a value outside a closed vocabulary reached the exposition")
 	}
-	if strings.Contains(text, `route="/v1/files/{path...}"`) {
-		t.Error("a refused recording still opened its route series")
+	// The duration is labelled by the route alone and carries no refused
+	// value, so its series exists; the counter's does not.
+	if !strings.Contains(text, `arca_request_duration_seconds_count{route="/v1/files/{path...}"}`) {
+		t.Error("a request the table could not classify was not timed")
+	}
+	if strings.Contains(text, `arca_requests_total{`) && strings.Contains(text, `code="teapot"`) {
+		t.Error("a refused recording still opened its counter series")
 	}
 }
 
@@ -128,6 +133,11 @@ func TestTheRecordingSurfaceWritesWhereTheTableSaysIt(t *testing.T) {
 	s.LimitRejected()
 	s.TokenRejected("expired")
 	s.TokenRejected("a reason the shared table added later")
+	s.UploadSession("created")
+	s.UploadSession("dissolved")
+	s.UploadPart("presigned")
+	s.UploadPart("shredded")
+	s.SessionsOpen(func() float64 { return 4 })
 	s.Decided("owner_policy", "allow")
 	s.AuthorizerCall("allow", 0.02)
 
@@ -146,6 +156,8 @@ func TestTheRecordingSurfaceWritesWhereTheTableSaysIt(t *testing.T) {
 		{"expired token", s.TokensRejected.Value(map[string]string{"reason": "expired"}), 1},
 		{"unknown reason as malformed", s.TokensRejected.Value(map[string]string{"reason": "malformed"}), 1},
 		{"owner policy allow", s.Decisions.Value(map[string]string{"source": "owner_policy", "outcome": "allow"}), 1},
+		{"a created session", s.UploadSessions.Value(map[string]string{"outcome": "created"}), 1},
+		{"a presigned part", s.UploadParts.Value(map[string]string{"outcome": "presigned"}), 1},
 	} {
 		if c.read != c.expect {
 			t.Errorf("%s reads %d, and %d was recorded", c.name, c.read, c.expect)
@@ -153,6 +165,17 @@ func TestTheRecordingSurfaceWritesWhereTheTableSaysIt(t *testing.T) {
 	}
 	if got := s.AuthorizerSeconds.Count(nil); got != 1 {
 		t.Errorf("the authorizer histogram holds %d observations", got)
+	}
+	// The two outcomes outside the vocabulary opened no series, and the
+	// gauge reports what the bound source says.
+	if got := s.UploadSessions.Value(map[string]string{"outcome": "dissolved"}); got != 0 {
+		t.Errorf("an outcome outside the vocabulary reads %d", got)
+	}
+	if got := s.UploadParts.Value(map[string]string{"outcome": "shredded"}); got != 0 {
+		t.Errorf("a part outcome outside the vocabulary reads %d", got)
+	}
+	if got := s.UploadSessionsOpen.collect(); len(got) != 1 || got[0].Value != 4 {
+		t.Errorf("the open sessions gauge reports %v", got)
 	}
 }
 
@@ -475,5 +498,23 @@ func TestTheAccessorsAnswerCopies(t *testing.T) {
 	rows[0].Name = "changed"
 	if Table()[0].Name == "changed" {
 		t.Error("Table answered the table itself")
+	}
+}
+
+// TestADurationIsObservedWhateverTheStatus: the duration is labelled by the
+// route alone, so a request whose status or code the table does not name was
+// still served in some amount of time and the histogram says so.
+func TestADurationIsObservedWhateverTheStatus(t *testing.T) {
+	s := Register(nil)
+	s.RequestStarted()
+	s.RequestFinished("/v1/events", "6xx", "teapot", 5*time.Millisecond)
+	if got := s.RequestDuration.Count(map[string]string{"route": "/v1/events"}); got != 1 {
+		t.Errorf("the duration histogram holds %d observations", got)
+	}
+	if got := s.Requests.Value(map[string]string{"route": "/v1/events", "status_class": "6xx", "code": "teapot"}); got != 0 {
+		t.Errorf("a status the table does not classify was counted %d times", got)
+	}
+	if got := s.inFlight.Load(); got != 0 {
+		t.Errorf("%d requests in flight after the one was answered", got)
 	}
 }

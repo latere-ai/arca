@@ -67,7 +67,7 @@ differs is whether a package writes to it yet.
 | `arca_events_appended_total` | recorded, where a workspace's mutation becomes a row of the log |
 | `arca_bytes_in_total{kind="sync"}`, `arca_bytes_out_total{kind="materialize"}` | recorded, at the boundary of [[009-workspaces]] |
 | `arca_bytes_in_total{kind="inline"}`, `arca_bytes_out_total{kind="inline"}` | waits on [[005-files]] |
-| `arca_bytes_in_total{kind="part"}`, `arca_upload_sessions_total`, `arca_upload_sessions_open`, `arca_upload_parts_total` | waits on [[007-uploads]] |
+| `arca_bytes_in_total{kind="part"}`, `arca_upload_sessions_total`, `arca_upload_sessions_open`, `arca_upload_parts_total` | registered, with the three seams [[007-uploads]] records through (`UploadSession`, `UploadPart`, `SessionsOpen`) waiting for that spec |
 | `arca_limit_rejections_total` | waits on the first write path that charges the ledger, [[005-files]] |
 | `arca_leases_held` | waits on a count of live leases; the sweep of [[009-workspaces]] reports what it ended and not what is held |
 | `arca_stored_bytes` | waits on a per-plane ledger read; see the divergence below |

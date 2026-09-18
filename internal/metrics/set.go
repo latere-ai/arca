@@ -163,11 +163,14 @@ func (s *Set) RequestStarted() { s.inFlight.Add(1) }
 // took. The route is the mux pattern and never the path.
 func (s *Set) RequestFinished(route, statusClass, code string, took time.Duration) {
 	s.inFlight.Add(-1)
+	// The duration is labelled by the route alone, so there is no
+	// vocabulary that could refuse it and a request whose status or code
+	// this table does not name was still served in some amount of time.
+	s.RequestDuration.Observe(map[string]string{"route": route}, took.Seconds())
 	if !slices.Contains(statusClasses, statusClass) || !slices.Contains(errorCodes, code) {
 		return
 	}
 	s.Requests.Inc(map[string]string{"route": route, "status_class": statusClass, "code": code})
-	s.RequestDuration.Observe(map[string]string{"route": route}, took.Seconds())
 }
 
 // TokenRejected records one bearer the verifier refused. A reason outside
@@ -242,6 +245,35 @@ func (s *Set) EventAppended(kind string) {
 // answer carried. Arca stores no limit, so the count of refusals is the only
 // thing about one it can publish.
 func (s *Set) LimitRejected() { s.LimitRejections.Inc(nil) }
+
+// The three seams spec 007 records through when it lands. They are methods
+// rather than the bare handles above for the reason every other method here
+// is one: a caller reaching a counter directly would write a label this
+// table does not name, and a closed vocabulary that any caller can add to is
+// not closed.
+
+// UploadSession records one session by what became of it: created,
+// completed, aborted or expired.
+func (s *Set) UploadSession(outcome string) {
+	if !slices.Contains(sessionOutcomes, outcome) {
+		return
+	}
+	s.UploadSessions.Inc(map[string]string{"outcome": outcome})
+}
+
+// UploadPart records one part by what became of it: presigned, completed or
+// missing.
+func (s *Set) UploadPart(outcome string) {
+	if !slices.Contains(partOutcomes, outcome) {
+		return
+	}
+	s.UploadParts.Inc(map[string]string{"outcome": outcome})
+}
+
+// SessionsOpen binds the gauge of sessions started and not yet finished to
+// the count spec 007 keeps. Until that spec lands the gauge reads zero,
+// which is what an installation with no upload route holds.
+func (s *Set) SessionsOpen(open func() float64) { s.UploadSessionsOpen.Bind(open) }
 
 // Handler answers this set's exposition in the Prometheus text format. It is
 // GET /metrics of spec 002, mounted on the internal listener and on no other:
