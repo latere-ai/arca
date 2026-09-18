@@ -228,12 +228,30 @@ type missingSeam struct{ what string }
 
 func (e *missingSeam) Error() string { return "workspaces: " + e.what }
 
-// now is the clock the lease is measured on.
+// StoredPrecision is what the two timestamp columns a deadline lands in
+// keep. `writer_expires_at` and `expires_at` are TIMESTAMPTZ, which
+// Postgres stores to the microsecond, so a value with anything finer is not
+// the value read back.
+const StoredPrecision = time.Microsecond
+
+// now is the clock the lease is measured on, at the precision the database
+// keeps.
+//
+// Every deadline this service stores is this clock plus a whole-second TTL,
+// and every one of them is also answered on the wire: the renew answers the
+// deadline it computed and the workspace view answers the deadline the
+// column holds. Truncating here is what makes those one value. Rounding
+// anywhere else would be the same fix written once per call site, and the
+// call site added next would not have it.
+//
+// Go's wall clock is nanosecond-resolution on Linux and microsecond on
+// macOS, so an untruncated deadline is a comparison that holds on one
+// machine and fails on the other.
 func (s *Service) now() time.Time {
 	if s.clock != nil {
-		return s.clock()
+		return s.clock().Truncate(StoredPrecision)
 	}
-	return time.Now()
+	return time.Now().Truncate(StoredPrecision)
 }
 
 // resource renders a workspace as the authorizer question carries it. The

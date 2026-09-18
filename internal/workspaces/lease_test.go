@@ -257,6 +257,54 @@ func TestARenewExtendsTheDeadlineAndMovesTheLeaseWithIt(t *testing.T) {
 	}
 }
 
+// TestADeadlineIsStoredAndAnsweredAtTheDatabasesPrecision: `expires_at` and
+// `writer_expires_at` are TIMESTAMPTZ, which Postgres keeps to the
+// microsecond. The attach and the renew answer the deadline they computed
+// and the workspace view answers the deadline the column holds, so a clock
+// finer than the column makes those two different times: the value a client
+// reads back is not the value it was given.
+//
+// The clock here carries nanoseconds no column can hold, which is what a
+// Linux wall clock carries and a macOS one does not, so the rule is measured
+// rather than left to the machine the suite runs on.
+func TestADeadlineIsStoredAndAnsweredAtTheDatabasesPrecision(t *testing.T) {
+	h := newHarness(t)
+	h.clock = func() time.Time { return time.Date(2026, 9, 18, 10, 0, 0, 123456789, time.UTC) }
+
+	ws := h.create(t, "build")
+	a := h.attach(t, ws, "sbx_a", "rw")
+	if !a.ExpiresAt.Equal(a.ExpiresAt.Truncate(StoredPrecision)) {
+		t.Errorf("the attach answered %s, and the column would hold %s",
+			a.ExpiresAt.Format(time.RFC3339Nano),
+			a.ExpiresAt.Truncate(StoredPrecision).Format(time.RFC3339Nano))
+	}
+
+	h.travel(30 * time.Minute)
+	got := h.do(t, http.MethodPost, "/v1/workspaces/"+ws.ID+"/attach/"+a.ID+"/renew",
+		map[string]any{"ttl_seconds": 7200})
+	if got.code != http.StatusOK {
+		t.Fatalf("the renew = %d: %s", got.code, got.body)
+	}
+	var renewed Renewal
+	got.decode(t, &renewed)
+	if !renewed.ExpiresAt.Equal(renewed.ExpiresAt.Truncate(StoredPrecision)) {
+		t.Errorf("the renew answered %s, and the column would hold %s",
+			renewed.ExpiresAt.Format(time.RFC3339Nano),
+			renewed.ExpiresAt.Truncate(StoredPrecision).Format(time.RFC3339Nano))
+	}
+
+	// The same deadline read back through the column it was written to. A
+	// store that truncates answers what the renew answered, which is the
+	// comparison the e2e tier makes against a real Postgres.
+	read := h.do(t, http.MethodGet, "/v1/workspaces/"+ws.ID, nil)
+	var after Workspace
+	read.decode(t, &after)
+	if after.Lease == nil || !after.Lease.ExpiresAt.Equal(renewed.ExpiresAt.Truncate(StoredPrecision)) {
+		t.Fatalf("the lease reads back as %+v against the renew's %s",
+			after.Lease, renewed.ExpiresAt.Format(time.RFC3339Nano))
+	}
+}
+
 func TestAReleaseClearsTheLeaseAndIsIdempotent(t *testing.T) {
 	h := newHarness(t)
 	ws := h.create(t, "build")

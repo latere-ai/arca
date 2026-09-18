@@ -336,6 +336,16 @@ build without the authorizer its handlers decide through and that process
 starts no verifier. `workspaces.Objects` is still `store.NewWorkspaceObjects()`:
 [[005-files]] has not landed.
 
+Every deadline the service stores is taken at the precision the database
+keeps. `writer_expires_at` and `expires_at` are TIMESTAMPTZ, which Postgres
+holds to the microsecond, and an attach and a renew both answer the deadline
+they computed while the workspace view answers the one the column holds, so
+a finer clock made the value a client read back a different time from the
+value it was given. `Service.now` truncates to `StoredPrecision`, which is
+the one place every stored deadline comes from. Go's wall clock is
+nanosecond-resolution on Linux and microsecond on macOS, so the defect
+failed the e2e tier in CI and passed it locally.
+
 The frame's route tests no longer read the frame's half of the surface. They
 iterate the list `api.New` merges, so a contributed row is held to the same
 rules a frame row is, and the union of every declaration this build
