@@ -68,7 +68,7 @@ func (s *Service) read(w http.ResponseWriter, r *http.Request, headOnly bool) {
 		ID: row.ID, Owner: t.Owner, Path: t.Path, Plane: string(t.Plane),
 		Size: authorizer.Bytes(row.SizeBytes),
 	}.Resource()); err != nil {
-		api.WriteError(w, r, api.FromAuth(err))
+		api.WriteError(w, r, s.Refused(err, "there is no object at %q", t.Path))
 		return
 	}
 

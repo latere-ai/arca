@@ -174,7 +174,7 @@ func (s *Service) session(r *http.Request) (store.Session, files.Limit, error) {
 		Owner: held.Owner, Path: held.Path, Size: authorizer.Bytes(held.DeclaredSize),
 	}.Resource())
 	if err != nil {
-		return store.Session{}, files.Limit{}, api.FromAuth(err)
+		return store.Session{}, files.Limit{}, s.content.Refused(err, "there is no upload with that id")
 	}
 	limit, err := files.LimitOf(d)
 	if err != nil {

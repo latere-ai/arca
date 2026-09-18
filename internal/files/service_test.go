@@ -23,6 +23,7 @@ import (
 	"latere.ai/x/arca/internal/api"
 	"latere.ai/x/arca/internal/auth"
 	"latere.ai/x/arca/internal/store"
+	"latere.ai/x/arca/object"
 )
 
 // routes are the twelve registrations of spec 013's first table, each with a
@@ -130,10 +131,24 @@ func seeded(t *testing.T) *harness {
 // refusal never tells a caller that a space it may not see exists, so a deny
 // on a space that is not the caller's own is the answer a missing object
 // gives.
+//
+// The two requests name one path. In the stranger's space it is there, so
+// the request reaches the question and is denied at lookup; in the caller's
+// own space it is not, so the request never reaches a question at all. The
+// answers have to be one answer. A developer detail that named the action,
+// or the refused path, would be an oracle: a caller could ask for any path
+// in a space it cannot see and read back whether somebody holds it.
 func TestADenyOnAnotherSpaceIsAMissingObject(t *testing.T) {
 	h := newHarness(t)
 	h.endpoint.SetRules(stub.Rule{Subject: "*", Action: "*", Resource: "*", Allow: false, Reason: "no rule allows it"})
 	stranger := "https://issuer.example|someone-else"
+	if err := h.store.Upsert(t.Context(), nil, store.File{
+		Owner: stranger, Path: "files/plan.md", ObjectID: object.NewID(),
+		CreatedBy: stranger, ContentType: "text/markdown", SizeBytes: 4,
+		Checksum: digest("seed"), ChecksumKind: object.ChecksumSHA256,
+	}); err != nil {
+		t.Fatalf("seeding the stranger's row: %v", err)
+	}
 	w := h.call(t, http.MethodGet, "/v1/files/"+url.PathEscape(stranger)+"/files/plan.md", nil)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("a deny on another space answered %d: %s", w.Code, w.Body)
@@ -142,23 +157,71 @@ func TestADenyOnAnotherSpaceIsAMissingObject(t *testing.T) {
 		t.Fatalf("a deny on another space is %q", got)
 	}
 	// Byte for byte the answer an absence gives, but for the request id.
-	absent := h.call(t, http.MethodGet, h.object("files/never.md"), nil)
+	absent := h.call(t, http.MethodGet, h.object("files/plan.md"), nil)
 	if strip(w.Body.String()) != strip(absent.Body.String()) {
 		t.Errorf("a deny answers\n %s\nand an absence answers\n %s", w.Body, absent.Body)
 	}
+	if w.Header().Get(api.HeaderContentType) != absent.Header().Get(api.HeaderContentType) {
+		t.Errorf("a deny is typed %q and an absence %q",
+			w.Header().Get(api.HeaderContentType), absent.Header().Get(api.HeaderContentType))
+	}
 }
 
-// strip removes what varies between two refusals of one shape: the request
-// id, the developer detail, and the path they name.
-func strip(body string) string {
-	var envelope struct {
-		Error struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
+// TestEveryLookupDenyIsTheAnswerAnAbsenceGives walks the rows that read a
+// row before they ask, which are the rows where the order could tell a
+// caller something. Each is driven twice against one path: once where the
+// path is there and the question is denied at lookup, once where the path is
+// not there and no question is asked at all. The two answers have to be one
+// answer, status, code, message and developer detail alike. Anything that
+// differs is a probe: ask for a path in a space you cannot see, and read
+// back whether somebody holds it.
+func TestEveryLookupDenyIsTheAnswerAnAbsenceGives(t *testing.T) {
+	// The rows whose handler reads a row and can answer a 404 of its own.
+	// A listing answers a page, a put creates, and an unstar reads nothing,
+	// so none of the three has an absence to be told apart from.
+	for _, name := range []string{"get", "head", "move", "restore version", "delete", "restore", "star"} {
+		t.Run(name, func(t *testing.T) {
+			i := slices.Index(routeNames, name)
+			held := seeded(t)
+			held.asked.refuse = &auth.Error{Code: auth.CodeNotFound, Detail: "no rule allows it"}
+			r := held.routes()[i]
+			denied := held.drive(t, r.method, r.target, r.body)
+
+			// The same request against a space holding nothing, where the
+			// handler answers before it asks.
+			empty := newHarness(t)
+			gone := empty.drive(t, r.method, r.target, r.body)
+
+			if denied.Code != gone.Code {
+				t.Errorf("a denied %s answers %d and a missing one %d", name, denied.Code, gone.Code)
+			}
+			if strip(denied.Body.String()) != strip(gone.Body.String()) {
+				t.Errorf("a denied %s answers\n %s\nand a missing one answers\n %s",
+					name, denied.Body, gone.Body)
+			}
+		})
 	}
-	_ = json.Unmarshal([]byte(body), &envelope)
-	return envelope.Error.Code + "|" + envelope.Error.Message
+}
+
+// strip renders a refusal without the one field two of them are allowed to
+// differ in: the request id. Everything else is compared, the developer
+// detail included, because a field a caller can read is a field a caller can
+// count.
+func strip(body string) string {
+	var envelope map[string]any
+	if err := json.Unmarshal([]byte(body), &envelope); err != nil {
+		return body
+	}
+	if refusal, ok := envelope["error"].(map[string]any); ok {
+		if details, ok := refusal["details"].(map[string]any); ok {
+			delete(details, "request_id")
+		}
+	}
+	out, err := json.Marshal(envelope)
+	if err != nil {
+		return body
+	}
+	return string(out)
 }
 
 // TestAStoreThatCannotAnswerIsAnOutageAndNeverAVerdict is invariant 2 of

@@ -34,6 +34,7 @@ import (
 
 	"latere.ai/x/pkg/authz"
 
+	"latere.ai/x/arca/internal/api"
 	"latere.ai/x/arca/internal/auth"
 	"latere.ai/x/arca/internal/blob"
 	"latere.ai/x/arca/internal/config"
@@ -279,6 +280,20 @@ func (s *Service) Ask(ctx context.Context, owner, action string, res authz.Resou
 		return s.decide.Decide(ctx, action, res)
 	}
 	return s.decide.Lookup(ctx, action, res)
+}
+
+// Refused renders the deny of one question about a named object. A deny at
+// lookup carries the whole answer an absence carries, developer detail
+// included, so a caller reading every byte of the envelope cannot tell a
+// refusal from a missing object: absent is the sentence the same handler
+// writes when the path is not there, and repeating it here is what keeps
+// the two one answer. Any other deny keeps the reason the authorizer gave,
+// because the caller may see the object the question was about.
+func (s *Service) Refused(err error, absent string, args ...any) error {
+	if auth.CodeOf(err) == auth.CodeNotFound {
+		return api.Refuse(api.CodeNotFound, absent, args...)
+	}
+	return api.FromAuth(err)
 }
 
 // noLedger counts nothing and records nothing, which is a build whose spec

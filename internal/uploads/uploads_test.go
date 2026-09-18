@@ -4,6 +4,7 @@
 package uploads
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"latere.ai/x/arca/internal/api"
 	"latere.ai/x/arca/internal/blob"
 	"latere.ai/x/arca/internal/files"
+	"latere.ai/x/arca/internal/store"
 	"latere.ai/x/arca/object"
 )
 
@@ -289,6 +291,52 @@ func TestASessionIsInvisibleToEverySubjectTheAuthorizerRefuses(t *testing.T) {
 			t.Errorf("a refused %s answered %d: %s", c.method, w.Code, w.Body)
 		}
 	}
+}
+
+// TestASessionAnotherSubjectHoldsIsASessionThatIsNotThere is invariant 6 of
+// spec 001 on the upload surface. A session id is a bearer-shaped string,
+// and a caller that guesses one must not learn from the answer whether it
+// named a real session. So a deny at lookup and an id nobody holds are one
+// answer, developer detail included.
+func TestASessionAnotherSubjectHoldsIsASessionThatIsNotThere(t *testing.T) {
+	h := newHarness(t)
+	stranger := "https://issuer.example|someone-else"
+	held, err := h.store.Insert2(t.Context(), nil, store.Session{
+		Owner: stranger, Path: "files/video/keynote.mp4", ObjectID: object.NewID(),
+		UploadID: "multipart-1", DeclaredSize: 20 << 20, ContentType: "video/mp4",
+		CreatedBy: stranger, CreatedAt: h.clock, ExpiresAt: h.clock.Add(TTL),
+	})
+	if err != nil {
+		t.Fatalf("seeding the stranger's session: %v", err)
+	}
+	h.endpoint.SetRules(stub.Rule{Subject: "*", Action: "*", Resource: "*", Allow: false, Reason: "no rule allows it"})
+	denied := h.call(t, http.MethodDelete, "/v1/uploads/"+held.ID, nil)
+	if denied.Code != http.StatusNotFound {
+		t.Fatalf("a session another subject holds answered %d: %s", denied.Code, denied.Body)
+	}
+	gone := h.call(t, http.MethodDelete, "/v1/uploads/01JQZ0000000000000000000A", nil)
+	if strip(denied.Body.String()) != strip(gone.Body.String()) {
+		t.Errorf("a denied session answers\n %s\nand an unknown id answers\n %s", denied.Body, gone.Body)
+	}
+}
+
+// strip renders a refusal without the one field two of them are allowed to
+// differ in: the request id.
+func strip(body string) string {
+	var envelope map[string]any
+	if err := json.Unmarshal([]byte(body), &envelope); err != nil {
+		return body
+	}
+	if refusal, ok := envelope["error"].(map[string]any); ok {
+		if details, ok := refusal["details"].(map[string]any); ok {
+			delete(details, "request_id")
+		}
+	}
+	out, err := json.Marshal(envelope)
+	if err != nil {
+		return body
+	}
+	return string(out)
 }
 
 func TestEverySessionRouteAsksUploadWriteAndNothingElse(t *testing.T) {

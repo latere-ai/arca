@@ -48,7 +48,7 @@ func (s *Service) star(w http.ResponseWriter, r *http.Request) {
 	if _, err := s.Ask(ctx, t.Owner, authorizer.ActionFileWrite, authorizer.File{
 		ID: row.ID, Owner: t.Owner, Path: t.Path, Plane: string(t.Plane),
 	}.Resource()); err != nil {
-		api.WriteError(w, r, api.FromAuth(err))
+		api.WriteError(w, r, s.Refused(err, "there is no object at %q", t.Path))
 		return
 	}
 	if err := s.stars.Add(ctx, s.db.Querier(), Caller(ctx), t.Owner, t.Path); err != nil {

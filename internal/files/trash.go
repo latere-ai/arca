@@ -98,7 +98,7 @@ func (s *Service) restoreTrash(w http.ResponseWriter, r *http.Request) {
 		ID: row.ID, Owner: t.Owner, Path: t.Path, Plane: string(t.Plane),
 		Size: authorizer.Bytes(row.SizeBytes),
 	}.Resource()); err != nil {
-		api.WriteError(w, r, api.FromAuth(err))
+		api.WriteError(w, r, s.Refused(err, "%q is not in the trash", t.Path))
 		return
 	}
 	restored, err := s.files.Restore(ctx, s.db.Querier(), t.Owner, t.Path, s.window())
