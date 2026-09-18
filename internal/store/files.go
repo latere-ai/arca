@@ -64,6 +64,23 @@ type Files interface {
 	// ListPrefix answers one page of live paths under a prefix, ordered by
 	// path, with the cursor the next page starts after.
 	ListPrefix(ctx context.Context, q Querier, owner, prefix, cursor string, limit int) ([]File, string, error)
+
+	// The write arms, the two deletes and the trash of spec 005, in
+	// files_write.go and files_trash.go, where the comment on each says what
+	// it is for.
+	//
+	// Insert and UpdateIfChecksum stay beside them. Insert writes a path
+	// nothing holds at all, which is what spec 004 built first; CreateOnly
+	// is the arm If-None-Match: * reaches, which also revives a trashed
+	// path, so the two are not one statement.
+	GetForUpdate(ctx context.Context, q Querier, owner, path string) (File, error)
+	Upsert(ctx context.Context, q Querier, f File) error
+	CreateOnly(ctx context.Context, q Querier, f File) (created bool, err error)
+	SoftDelete(ctx context.Context, q Querier, owner, path string) (bool, error)
+	HardDelete(ctx context.Context, q Querier, owner, path string) (File, bool, error)
+	Restore(ctx context.Context, q Querier, owner, path string, since time.Time) (bool, error)
+	ListTrash(ctx context.Context, q Querier, owner string, cursor TrashCursor, limit int, since time.Time) ([]File, error)
+	PurgeTrash(ctx context.Context, q Querier, owner, path string) ([]File, error)
 }
 
 // files is the query set over Postgres.
