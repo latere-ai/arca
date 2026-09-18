@@ -313,6 +313,12 @@ jobs:
       ARCA_TEST_URL: http://localhost:30180
       ARCA_TEST_ISSUER_URL: http://localhost:30081
       ARCA_TEST_AUTHORIZER_URL: http://localhost:30082
+      # The administrator the administration group of spec 012 drives. The
+      # stack's authorizer is the stub of spec 014, which answers space.admin
+      # for every subject, so naming one here is what admits the group: the
+      # suite mints that subject at the stub issuer and drives the two admin
+      # routes as it. A run that named none skipped them.
+      ARCA_TEST_ADMIN: admin
       ARCA_TEST_S3_ENDPOINT: http://localhost:30900
       ARCA_TEST_DATABASE_URL: postgres://arca:arca@localhost:30432/arca?sslmode=disable
     steps:
@@ -356,7 +362,7 @@ jobs:
           go test -v -count=1 -timeout 30m -tags=tiers ./test/conformance/... \
             -run '^(TestContract|TestTheSuiteReachesNoHelperOfThisTree)$' \
             -args -url "$ARCA_TEST_URL" -issuer "$ARCA_TEST_ISSUER_URL" \
-            -authorizer "$ARCA_TEST_AUTHORIZER_URL" 2>&1 | tee conformance.log
+            -authorizer "$ARCA_TEST_AUTHORIZER_URL" -admin "$ARCA_TEST_ADMIN" 2>&1 | tee conformance.log
           {
             echo "## Conformance"
             echo

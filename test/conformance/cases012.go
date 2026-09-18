@@ -18,8 +18,10 @@ import (
 // route of another spec asked about a space the caller does not own, so the
 // cases here drive the two and the ordinary routes with ?owner=.
 //
-// These cases are written from spec 013's shapes. A build that does not
-// answer the two admin routes yet holds them in the pending group.
+// These cases are written from spec 013's shapes. A target that does not
+// answer the two admin routes holds them in the pending group, and a target
+// that names no administrator in [Options.Admin] skips the group with that
+// as the reason.
 
 func cases012() []testCase {
 	admin := []string{"GET /v1/admin/overview", "POST /v1/admin/spaces/{owner}/restore"}

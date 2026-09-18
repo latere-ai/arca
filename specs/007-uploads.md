@@ -78,9 +78,12 @@ and its deletion are proved at the unit tier against the answer's limit, and
 the reaper's half of it is [[010-events-and-reaper]]'s. Criterion 6 is
 proved at the unit tier with the row write failed once, and the retry
 resumes from the row write. Criterion 9 is closed: the expiry query is proved
-against Postgres and the sweep that runs it is bound as pass 4 above. Criterion 10 waits
-for the conformance rows of [[017-conformance-suite]]. Criterion 12 is open:
-see the divergence below.
+against Postgres and the sweep that runs it is bound as pass 4 above. The uploads group of
+[[017-conformance-suite]] runs green against this build on 2026-09-19, four
+cases over the three routes. Criterion 10 waits on it still: no case in that
+group drives a second subject against a session, and the stack the suite runs
+on answers every subject every action, so the criterion's own question cannot
+be asked there. Criterion 12 is open: see the divergence below.
 
 What the implementation decided, where this spec was silent or where the
 tree made another reading better:

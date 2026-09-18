@@ -250,10 +250,14 @@ func case008LinkFile(t *testing.T, s *session) {
 	failIf(t, string(served.body) != "inside the subtree\n", "the link served %q", served.body)
 
 	// A path that leaves the subtree the token names is a missing object,
-	// whether it is a sibling or a traversal.
-	for _, escaping := range []string{outside, prefix + "/../" + outside} {
+	// whether it is a sibling or a traversal. The traversal is sent with its
+	// dots percent-encoded, because a router removes a dot segment from a
+	// request line before any handler reads it: what is asserted here is the
+	// answer of the route, and a redirect to the cleaned path is the
+	// router's answer and not the route's.
+	for _, escaping := range []string{outside, prefix + "/%2e%2e/" + outside} {
 		r := s.do(t, request{method: http.MethodGet, path: "/v1/shares/links/" + token + "/files/" + escaping})
 		failIf(t, r.status == http.StatusOK, "a link served an object outside the subtree it names: %q", escaping)
-		expectError(t, r, r.code())
+		expectError(t, r, CodeNotFound)
 	}
 }

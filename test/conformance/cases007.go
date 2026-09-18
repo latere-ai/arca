@@ -83,15 +83,17 @@ func case007Complete(t *testing.T, s *session) {
 	label := unquote(sent.header.Get("ETag"))
 	failIf(t, label == "", "the bucket answered no ETag for the part")
 
-	// A completion that leaves a part out is refused.
+	// A completion that leaves a part out is refused. The manifest names a
+	// part by n and by the label the bucket answered, which is the shape
+	// spec 007's completion takes.
 	if len(urls) > 1 {
 		expectError(t, s.call(t, Alice, http.MethodPost, "/v1/uploads/"+id+"/complete",
-			body(fields{"parts": []any{map[string]any{"number": 1, "etag": label}}})), CodeManifestIncomplete)
+			body(fields{"parts": []any{map[string]any{"n": 1, "etag": label}}})), CodeManifestIncomplete)
 		return
 	}
 
 	done := s.call(t, Alice, http.MethodPost, "/v1/uploads/"+id+"/complete",
-		body(fields{"parts": []any{map[string]any{"number": 1, "etag": label}}}))
+		body(fields{"parts": []any{map[string]any{"n": 1, "etag": label}}}))
 	expectAWrite(t, done)
 	s.record("object "+path, func(t testing.TB) error {
 		s.call(t, Alice, http.MethodDelete, s.fileRoute(owner, path)+"?permanent=1", "")

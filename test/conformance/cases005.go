@@ -19,9 +19,9 @@ import (
 // is invariant 4; versions, trash and stars.
 //
 // These cases are written from spec 013's shapes and drive the routes that
-// spec registers. A build that does not answer them yet holds every one in
-// the pending group, which fails with the routes and the spec they wait on,
-// so a partial build is red and never quietly green.
+// spec registers. A target that does not answer one of them holds the cases
+// that drive it in the pending group, which fails with the routes and the
+// spec they wait on, so a partial target is red and never quietly green.
 
 func cases005() []testCase {
 	object := []string{
@@ -158,11 +158,18 @@ func case005MoveKeepsTheETag(t *testing.T, s *session) {
 	before := unquote(written.header.Get("ETag"))
 
 	moved := expectStatus(t, s.call(t, Alice, http.MethodPost, s.fileRoute(owner, from), body(fields{"move_to": to})), http.StatusOK)
-	after := unquote(moved.header.Get("ETag"))
+	tag, rendered := unquote(moved.header.Get("ETag")), str(moved.json, "checksum")
+	after := tag
 	if after == "" {
-		after = str(moved.json, "checksum")
+		after = rendered
 	}
 	failIf(t, after != before, "the move answered the ETag %q, and the object's was %q; invariant 8 makes a move a row update", after, before)
+	// The validator and the row are one answer, so the two carry one value:
+	// spec 013 makes an ETag the object's checksum and renders that checksum
+	// in the body beside it. A build whose validator is not the checksum
+	// answers a pair that does not agree, whatever a move did to it.
+	failIf(t, tag != "" && rendered != "" && tag != rendered,
+		"the move answered the ETag %q and rendered the checksum %q; an ETag is the object's checksum", tag, rendered)
 
 	read := expectStatus(t, s.call(t, Alice, http.MethodGet, s.fileRoute(owner, to)+"?inline=1", ""), http.StatusOK)
 	failIf(t, string(read.body) != content, "the moved object read back as %q", read.body)
@@ -276,10 +283,15 @@ func case005Versions(t *testing.T, s *session) {
 	path := s.filePath("versioned.txt")
 	expectAWrite(t, s.put(t, Alice, path, "one\n", "text/plain"))
 	expectAWrite(t, s.put(t, Alice, path, "two\n", "text/plain"))
+	expectAWrite(t, s.put(t, Alice, path, "three\n", "text/plain"))
 
+	// The history is what an overwrite kept, and the object at the path is
+	// not in it: three writes leave two versions, oldest first. A case that
+	// expected the current row in the list would be reading a shape spec
+	// 005 does not serve.
 	versions := expectStatus(t, s.call(t, Alice, http.MethodGet, s.fileRoute(owner, path)+"?versions=1", ""), http.StatusOK)
 	entries := list(versions.json, "entries")
-	failIf(t, len(entries) < 2, "two writes made %d versions", len(entries))
+	failIf(t, len(entries) != 2, "three writes made %d versions, want the two the overwrites kept", len(entries))
 	failIf(t, unquote(str(entries[0], "checksum")) != sha256Of("one\n"),
 		"the version list is not oldest first: the first entry is %v", entries[0])
 
@@ -321,7 +333,10 @@ func case005Trash(t *testing.T, s *session) {
 	expectStatus(t, s.call(t, Alice, http.MethodGet, s.fileRoute(owner, path)+"?inline=1", ""), http.StatusOK)
 
 	expectStatus(t, s.call(t, Alice, http.MethodDelete, s.fileRoute(owner, path), ""), http.StatusNoContent)
-	expectStatus(t, s.call(t, Alice, http.MethodDelete, "/v1/trash?owner=me&path="+escape(path), ""), http.StatusNoContent)
+	// A purge answers how many entries left for good, which is why this row
+	// carries a body where the soft delete above answers none.
+	emptied := expectStatus(t, s.call(t, Alice, http.MethodDelete, "/v1/trash?owner=me&path="+escape(path), ""), http.StatusOK)
+	failIf(t, num(emptied.json, "purged") != 1, "purging one path answered %s", emptied.body)
 	expectError(t, s.call(t, Alice, http.MethodPost, "/v1/trash/restore", body(fields{"owner": "me", "path": path})), CodeNotFound)
 }
 
@@ -332,8 +347,10 @@ func case005Stars(t *testing.T, s *session) {
 	path := s.filePath("starred.txt")
 	expectAWrite(t, s.put(t, Alice, path, "star me\n", "text/plain"))
 
-	expectStatus(t, s.call(t, Alice, http.MethodPut, "/v1/stars", body(fields{"owner": "me", "path": path})), http.StatusOK)
-	expectStatus(t, s.call(t, Alice, http.MethodPut, "/v1/stars", body(fields{"owner": "me", "path": path})), http.StatusOK)
+	// Both writes answer the same: a star is a row that is there or is not,
+	// so setting one twice is one state and the answer carries no body.
+	expectStatus(t, s.call(t, Alice, http.MethodPut, "/v1/stars", body(fields{"owner": "me", "path": path})), http.StatusNoContent)
+	expectStatus(t, s.call(t, Alice, http.MethodPut, "/v1/stars", body(fields{"owner": "me", "path": path})), http.StatusNoContent)
 
 	page := expectStatus(t, s.call(t, Alice, http.MethodGet, "/v1/stars?limit=1000", ""), http.StatusOK)
 	found := false

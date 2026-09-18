@@ -130,12 +130,16 @@ test-e2e: up build build-stubs
 # outage and the byte limit cases run rather than skip. The same command runs
 # against any other installation with -url and either -issuer or -token.
 #
-# It is not part of check-all. Seventeen of spec 013's forty-one routes are
-# not answered by this build, so the suite's pending group fails until they
-# land; that is what the group is for, and a target that turns the default
-# bar red on work another spec owns is not.
+# ARCA_TEST_ADMIN is the administrator the administration group of spec 012
+# drives. It is one name read twice: the installation is told to treat that
+# subject as an administrator, and the suite mints its token at the stub
+# issuer, so the group runs rather than skipping for want of Options.Admin.
+#
+# It is not part of check-all. The suite starts a server per drift and runs
+# itself in a subprocess against each, which is minutes of stores and
+# processes rather than the seconds the default bar is written to take.
 test-conformance: up build build-stubs
-	$(TIER_ENV) ARCA_BINARY="$(CURDIR)/$(OUT_DIR)/$(SERVICE)" \
+	$(TIER_ENV) ARCA_BINARY="$(CURDIR)/$(OUT_DIR)/$(SERVICE)" ARCA_TEST_ADMIN=admin \
 		$(GO) test -tags=tiers -count=1 -timeout 30m -v \
 		-run '^(TestContract|TestConcurrentRuns|TestSuiteCatchesADrift|TestTheSuiteReachesNoHelperOfThisTree)$$' \
 		./test/conformance/...

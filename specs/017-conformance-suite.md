@@ -45,10 +45,12 @@ test-conformance` runs it against the compose stack, and the
 `conformance` job of [[016-release-and-installation]] runs it against
 the published image on the kind stack.
 
-Against this build, which answers twenty-four of [[013-api]]'s
-forty-one routes, a run is **thirty-three cases passed, seventeen
-skipped with a reason, and one failed**: the pending group, which is
-what it is for.
+Against this build, which answers all forty-one of [[013-api]]'s
+routes, a run is **fifty-one cases passed, none failed, and none
+skipped**. The pending group passes with no route outstanding, which is
+the evidence [[016-release-and-installation]]'s gate reads: the
+installation this build makes serves the whole contract and not part of
+it.
 
 Twenty-six of the thirty rows of [[013-api]]'s error table are provoked
 by a case, which declares the codes it makes the target answer, and the
@@ -58,27 +60,51 @@ fault inside it, `rate_limited` would be a denial of service against
 whoever else is using a shared installation, and `not_implemented` is
 read off the served document by the pending group.
 
-| Group | On this build | Waiting on |
+| Group | On this build | Recorded |
 |---|---|---|
 | identity | passes, 4 cases | the expired token and the wrong audience are `Unverified`, below |
 | authorizer | passes, 3 cases | |
 | paths | passes, 1 case | the file routes add nothing it cannot already see through `POST /v1/shares` |
+| files | passes, 4 cases | |
+| bytes | passes, 1 case | |
+| versions | passes, 1 case | |
+| trash | passes, 1 case | |
+| stars | passes, 1 case | the star a caller may not read is `Unverified`, below |
+| conditional writes | passes, 1 case | |
+| uploads | passes, 4 cases | |
 | shares | passes, 3 cases | |
-| links | passes, 3 cases | `008/LinkFile` is pending, [[005-files]] |
+| links | passes, 4 cases | the anonymous half is `Unverified`, below |
 | workspaces | passes, 6 cases | |
 | events | passes, 4 cases | |
-| usage | passes, 2 cases | the byte limit half is `Unverified`, [[005-files]] |
-| errors | passes, 7 cases | six codes of the table are reached by the groups below, [[005-files]], [[007-uploads]] |
-| files, bytes, versions, trash, stars, conditional writes | pending, 9 cases | [[005-files]], twelve routes |
-| uploads | pending, 4 cases | [[007-uploads]], three routes |
-| administration | skips, 3 cases | `Options.Admin` is unset on this target; the two routes wait on [[012-administration]] |
-| pending | **fails**, 17 routes outstanding | [[005-files]] 12, [[007-uploads]] 3, [[012-administration]] 2 |
+| usage | passes, 2 cases | |
+| administration | passes, 3 cases | the ordinary caller's half is `Unverified`, below |
+| errors | passes, 7 cases | |
+| pending | passes, no route outstanding | |
 
-A pending case is not hidden. The pending group is one case that fails
-with every outstanding route and the spec that owns it, and each case
-that waits on one reports the routes by name. A run against a partial
-build is therefore red, and it goes green when the last route lands
-with no edit here.
+Five assertions are recorded in `Report.Unverified` rather than made,
+each because the target gave no way to make it and none because it
+failed. Two are the identity rows below: a token past its expiry and one
+addressed to another audience. Three more are answered away by the
+stack's stub authorizer, which allows every caller every space and every
+action, so there is no refusal to read: a refused space
+(`006/AnotherSpace`), a star on an object the caller may not read
+(`005/Stars`), and an administrative route seen by an ordinary caller
+(`012/NotAnAdministrator`). The fifth is a public link served with no
+bearer (`008/Link`), which needs `Options.Anonymous`.
+
+The pending group stays, and it is not a formality. It is one case that
+fails with every route [[013-api]] names and the target does not answer,
+and each case that drives such a route reports it by name rather than
+skipping. It is empty here; against a partial build, an alternative
+implementation, or a consumer's own front, it is the difference between
+a target that serves the contract and one that serves part of it.
+
+The administration group runs because the tier now names an
+administrator. `make test-conformance` passes `ARCA_TEST_ADMIN`, which
+is one name read twice: the installation the tier starts is told to
+treat that subject as an administrator, and the suite mints its token at
+the stub issuer. The release job's step passes the same name against the
+kind stack.
 
 Criteria 1, 2, 3, 4, 5, 6 and 7 have passing tests. Criterion 2's route
 half is `TestEveryRouteHasACase` and its code half is
@@ -131,9 +157,12 @@ tree made another reading better:
 - The three drifts are applied at the one place that owns each answer:
   `paths` at the frame's plane check, which `internal/shares` now asks
   instead of reading [[001-architecture]]'s two prefixes itself; `codes`
-  at `WriteError`; `etag` at `SetETag`. `etag` is therefore already
-  right for [[005-files]] and is not observable until those routes land,
-  which the test reports by name rather than passing quietly.
+  at `WriteError`; `etag` at `SetETag`. All three are caught against this
+  build. `etag` is read by the three cases that assert a validator, and
+  not by `005/Versions`: a version history names a checksum in the body
+  of a listing and no validator, so a build whose `ETag` is not the
+  object's checksum answers that listing exactly as a conforming build
+  does.
   `ARCA_TEST_DRIFT` is read in the ordinary build rather than refused
   outside a test build, which is what this spec's own argument asks for:
   every value refuses something or answers with the wrong shape, none
@@ -169,9 +198,22 @@ tree made another reading better:
   minted. Nothing caught it: the release smoke reads the probes, which
   carry no bearer. The overlay now names the in-cluster address, which
   is what this spec's job is the first thing to need.
-- `make test-conformance` is not part of `make check-all`. The pending
-  group fails until the outstanding routes land, and a target that turns
-  the default bar red on another spec's work is not one.
+- `make test-conformance` is not part of `make check-all`. It starts a
+  server per drift and runs the suite against each in a subprocess,
+  which is minutes of stores and processes rather than the seconds the
+  default bar is written to take.
+- Six cases were written from [[013-api]]'s shapes before the routes
+  they drive were answered, and six read a shape the served build does
+  not have: a version history holds what an overwrite kept and not the
+  row at the path, a purge answers how many entries went, a star answers
+  no body, an upload manifest names a part by `n`, and the two cases
+  that follow a presigned URL were holding the bucket's answer to this
+  API's request-id header. Each was corrected against the spec that owns
+  the shape, and one assertion was added where a case could not
+  otherwise see the `etag` drift: a move answers an `ETag` and renders a
+  `checksum`, and [[013-api]] makes them one value. The server was not
+  changed. No case found a route answering other than [[005-files]],
+  [[007-uploads]] and [[012-administration]] fix it.
 
 ## Design
 

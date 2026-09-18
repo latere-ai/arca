@@ -41,6 +41,12 @@ type response struct {
 	header http.Header
 	body   []byte
 	json   map[string]any
+	// foreign reports that the answer came from a host the case was handed
+	// rather than from the installation: a presigned URL of the bucket, or
+	// a stub's control API. Spec 013 binds the installation's answers and
+	// nothing else, so the assertions below hold a foreign answer to its
+	// status alone.
+	foreign bool
 }
 
 // call sends a request as the subject with a JSON body when one is given.
@@ -71,9 +77,9 @@ func (s *session) with(t testing.TB, subject, method, path, body string, header 
 // API go through the same client.
 func (s *session) do(t testing.TB, r request) response {
 	t.Helper()
-	url := r.path
+	url, foreign := r.path, true
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
-		url = s.options.URL + r.path
+		url, foreign = s.options.URL+r.path, false
 	}
 	req, err := http.NewRequestWithContext(s.context(), r.method, url, r.body)
 	failIf(t, err != nil, "build %s %s: %v", r.method, r.path, err)
@@ -91,7 +97,7 @@ func (s *session) do(t testing.TB, r request) response {
 	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(resp.Body)
 	failIf(t, err != nil, "read %s %s: %v", r.method, r.path, err)
-	out := response{status: resp.StatusCode, header: resp.Header, body: raw}
+	out := response{status: resp.StatusCode, header: resp.Header, body: raw, foreign: foreign}
 	if strings.Contains(resp.Header.Get("Content-Type"), "json") {
 		_ = json.Unmarshal(raw, &out.json)
 	}
@@ -142,10 +148,15 @@ func (r response) details() map[string]any {
 
 // expectStatus asserts a status and that the request id spec 013 requires
 // came back.
+//
+// The request id is asked of the installation's answers alone. A presigned
+// URL is served by the bucket, which is a host the installation named and
+// not the installation, and holding it to spec 013's header would fail the
+// two cases that follow one on the store rather than on the server.
 func expectStatus(t testing.TB, r response, status int) response {
 	t.Helper()
 	failIf(t, r.status != status, "status %d, want %d: %s", r.status, status, r.body)
-	failIf(t, r.header.Get(HeaderRequestID) == "", "the answer carries no %s", HeaderRequestID)
+	failIf(t, !r.foreign && r.header.Get(HeaderRequestID) == "", "the answer carries no %s", HeaderRequestID)
 	return r
 }
 

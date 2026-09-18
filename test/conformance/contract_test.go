@@ -60,6 +60,22 @@ var (
 // pointed at. It names the flag and the command that starts a target.
 const skipWithoutATarget = "set -url or ARCA_TEST_URL (make test-conformance brings one up)"
 
+// defaultAdmin is the subject an installation this tier starts itself is
+// told to treat as an administrator, when -admin names no other. The
+// administration group of spec 017 drives the two routes of spec 012 as this
+// principal, and a run that named none skipped the group.
+const defaultAdmin = "admin"
+
+// admin answers the subject the run's administrator is, which is one value
+// read in two places: the token the suite mints, and the installation this
+// tier starts.
+func admin() string {
+	if *flagAdmin != "" {
+		return *flagAdmin
+	}
+	return defaultAdmin
+}
+
 // TestContract is the suite against the target. It fails on any case that
 // failed, reports what skipped and why, and reports the routes of spec 013
 // the target does not serve, which the pending group has already failed on.
@@ -106,6 +122,7 @@ func options(t *testing.T) conformance.Options {
 		own := start(t, s)
 		return conformance.Options{
 			URL:               own.publicURL,
+			Admin:             admin(),
 			AuthorizerControl: own.authorizerURL,
 			Token: func(ctx context.Context, subject string) (string, error) {
 				return mint(ctx, own.issuerURL, subject)
@@ -226,11 +243,15 @@ func TestSuiteCatchesADrift(t *testing.T) {
 			"009/SlugTaken":  {"POST /v1/workspaces"},
 			"013/ErrorTable": {"POST /v1/workspaces"},
 		}},
+		// The etag drift reaches the validator a route answers, so the
+		// cases that read one catch it. The version history is not one of
+		// them: it names a checksum in the body of a listing and no
+		// validator, so a build whose ETag is not the checksum answers that
+		// listing the same way a conforming build does.
 		{"etag", map[string][]string{
 			"005/PutGetHeadDelete": {"PUT /v1/files/{owner}/{path...}"},
 			"005/MoveKeepsTheETag": {"POST /v1/files/{owner}/{path...}"},
 			"005/Conditional":      {"PUT /v1/files/{owner}/{path...}"},
-			"005/Versions":         {"GET /v1/files/{owner}/{path...}"},
 		}},
 	} {
 		t.Run(tc.drift, func(t *testing.T) {
@@ -491,6 +512,13 @@ func start(t *testing.T, s stack, extra ...string) *installation {
 		"ARCA_OIDC_INSECURE_ISSUERS=true",
 		"ARCA_AUTHORIZER_URL="+authz.URL(),
 		"ARCA_AUTHORIZER_TOKEN="+authz.Token(),
+		// The administrator of the run, named in the installation's own
+		// spelling of a subject. The stub authorizer answers every action
+		// for every subject, so it is what admits the administration group
+		// here; the variable names the same principal to the owner policy,
+		// so an installation started from this environment without an
+		// authorizer treats the same subject as the administrator.
+		"ARCA_ADMIN_SUBJECTS="+iss.URL()+"|"+admin(),
 		"ARCA_REAP_INTERVAL=0",
 	)
 	env = append(env, extra...)

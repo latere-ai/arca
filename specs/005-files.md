@@ -68,8 +68,10 @@ spec owns, and [[004-metadata-store]]'s ownership table says so.
 Criteria 1, 2, 3, 5, 6, 7, 8's bucket half, 9, 10, 11, 12, 13 and 14 have
 passing tests. Criterion 4 is proved at the store tier for the two answers
 and for the loser's bytes. Criterion 15 is proved at the unit tier against a
-recording seam, one case per handler, and closes for the whole surface with
-the conformance rows of [[017-conformance-suite]]. The one half still open
+recording seam, one case per handler, and the surface those handlers serve
+is driven whole by the conformance rows of [[017-conformance-suite]], which
+run green against this build on 2026-09-19: the files, bytes, versions,
+trash, stars and conditional-write groups, nine cases. The one half still open
 is criterion 8's share: the grants table arrives with
 [[008-shares-and-links]], so a move carries versions and stars today and
 gains its fourth statement there.
