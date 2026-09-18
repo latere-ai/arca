@@ -330,36 +330,44 @@ jobs:
       - name: Bring the stack up
         run: deploy/examples/kind/up.sh out/images/arcad.tar out/images/arca-stubs.tar
 
-      # The suite is spec 017's and lives in test/conformance. Until that
-      # spec lands there is nothing to run, so the release is held to the
-      # probes of the published image on a real cluster, which is what this
-      # job could prove before the suite existed. Spec 017 replaces the
-      # `else` branch with its own run and owns that criterion.
+      # The suite is spec 017's, in test/conformance, and this is its run:
+      # the cases of that spec against the published image on a real
+      # cluster, with the stub issuer minting every subject and the stub
+      # authorizer's control API reachable, so the deny, the outage and the
+      # byte limit cases run rather than skip.
+      #
+      # The smoke of spec 016 runs first and stays. It proves the probes
+      # answer, so a suite failure is read as the image answering a request
+      # wrong rather than as a stack that never came up, and its evidence is
+      # appended to the conformance section the release body carries.
+      #
+      # The job fails on any failed case, which includes the suite's pending
+      # group while the build does not answer every route of spec 013. That
+      # is the gate spec 016's table asks for: a release does not publish an
+      # installation that serves part of the contract.
       - name: Run the conformance suite against the stack
         env:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           mkdir -p release-evidence
-          if [ -d test/conformance ]; then
-            go test -v -count=1 -timeout 30m -tags=e2e ./test/conformance/... 2>&1 | tee conformance.log
-            {
-              echo "## Conformance"
-              echo
-              echo '```'
-              grep -E '^(--- (PASS|FAIL|SKIP)|ok|FAIL)' conformance.log | tail -60
-              echo '```'
-            } > release-evidence/conformance.md
-          else
-            BASE_URL="$ARCA_TEST_URL" OUTPUT_MD=release-evidence/conformance.md \
-              tools/smoke/release.sh
-            {
-              echo
-              echo "The conformance suite of spec 017 is not in the tree yet, so the"
-              echo "published image was proved on the kind stack by the release smoke"
-              echo "alone. Spec 017 owns the suite and this job's real run."
-            } >> release-evidence/conformance.md
-          fi
+          BASE_URL="$ARCA_TEST_URL" OUTPUT_MD=release-evidence/smoke-on-kind.md \
+            tools/smoke/release.sh
+          go test -v -count=1 -timeout 30m -tags=tiers ./test/conformance/... \
+            -run '^(TestContract|TestTheSuiteReachesNoHelperOfThisTree)$' \
+            -args -url "$ARCA_TEST_URL" -issuer "$ARCA_TEST_ISSUER_URL" \
+            -authorizer "$ARCA_TEST_AUTHORIZER_URL" 2>&1 | tee conformance.log
+          {
+            echo "## Conformance"
+            echo
+            echo "The suite of spec 017 against the published image, on the kind"
+            echo "stack of spec 016."
+            echo
+            echo '```'
+            grep -E '^(    contract_test\.go|--- (PASS|FAIL|SKIP)|ok|FAIL)' conformance.log | tail -60
+            echo '```'
+          } > release-evidence/conformance.md
+          cat release-evidence/smoke-on-kind.md >> release-evidence/conformance.md
 
       # The server's view, only when a step above failed: the client sees a
       # reset, and what reset it is in the pods' logs.
