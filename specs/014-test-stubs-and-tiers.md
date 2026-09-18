@@ -44,8 +44,9 @@ the `arca-stubs` binary, `compose.yaml` holds the stack, the Makefile holds
 one target per tier and `make run`, `internal/blob` and `internal/store` have
 their store tier, `test/e2e` runs `arcad` as a process, and `verify.yml` has
 one job per service tier. The commits are `b4671bf` (the stubs), `3204b35`
-(the stack and the targets), `df9c1ca` (the two tiers) and `4663ec3` (the
-jobs and the documents). The gate passes at each of them.
+(the stack and the targets), `df9c1ca` (the two tiers), `4663ec3` (the jobs
+and the documents) and `c099323` (the test that holds the jobs to the table
+below). The gate passes at each of them.
 
 What arrived from Drive is `test/e2e/harness_test.go` and
 `docker-compose.yml`: the skip on the `E2E_` variables, the shared harness,
@@ -82,6 +83,10 @@ Divergences from the design as drafted:
   a request against the probes.
 - The tier variables are `E2E_DATABASE_URL`, `E2E_S3_ENDPOINT`, `E2E_S3_KEY`,
   `E2E_S3_SECRET` and `E2E_S3_BUCKET`, as this spec's table names them.
+- `Dockerfile.stubs` is not in the tree, though this spec's `affects` names
+  it. The image is [[016-release-and-installation]]'s to publish and nothing
+  yet installs from one; the binary it would wrap is here, and the tiers run
+  it from the checkout.
 
 Criteria 1, 3, 5, 6, 7 and 12 hold in the tree. Criterion 2's `check` half is
 [[012-administration]]'s, criterion 4's limits half is

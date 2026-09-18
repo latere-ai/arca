@@ -48,7 +48,15 @@ Divergences from the design as drafted, each a decision rather than a gap:
   are their owning specs', which is what the ownership table is for.
 - `ObjectReferenced` reads `files` and `file_versions`. The third member of
   the union, `upload_sessions`, joins it with [[007-uploads]], which creates
-  the table; criterion 6 therefore holds for two tables of three.
+  the table; criterion 6 therefore holds for two tables of three. The
+  predecessor's equivalent, `StorageKeyReferenced` in
+  `drive/internal/store/refs.go`, reads the same two while calling itself
+  "the single invariant deciding whether a blob may be deleted", and its
+  `upload_sessions` table holds a storage key its own migration calls the
+  only durable pointer to an upload's parts. What keeps that omission out of
+  reach in Drive is the reaper's 24 hour orphan grace window, not the
+  invariant; Arca writes the union as three tables so a shorter window
+  cannot make it reachable.
 - The listing is keyset paginated in SQL rather than through
   `latere.ai/x/pkg/pagination`: that package paginates a slice already in
   memory, and what a listing needs is the `WHERE path > $cursor ORDER BY
