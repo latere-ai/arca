@@ -111,6 +111,8 @@ The cutover itself:
 
 There is no window in which both serve writes, so there is nothing to
 reconcile afterwards, and no window in which either serves stale reads.
+The cut is hard: the maintainer decided on 2026-09-18 that Drive is not
+kept for a rollback window after the smoke holds.
 
 ### The consumers
 
@@ -135,7 +137,7 @@ switch.
 
 ### The sunset
 
-After the smoke of step 5 holds for one day:
+The same day, once the smoke of step 5 holds:
 
 1. Drive's deployment, service, and ingresses are deleted from the
    cluster. The redirect and the 410 move to the origin's ingress so the
@@ -147,7 +149,9 @@ After the smoke of step 5 holds for one day:
 3. The family's documents that name Drive as a service get the dated
    banner and a pointer to Arca; the console keeps calling the section
    Storage.
-4. Drive's database is kept read-only for thirty days, then dropped.
+4. Drive's database is dropped. The row copy is verified before the
+   routes switch (criterion 4), and the bucket, which holds every byte,
+   is untouched, so there is nothing a retained database would recover.
 
 ### What is left behind, and why
 
@@ -166,9 +170,12 @@ After the smoke of step 5 holds for one day:
 The plan takes these; each is reversible before its phase begins.
 
 1. **Fresh database, not Drive's.** Copying rows with an owner rewrite
-   costs minutes and leaves Drive's database untouched for the rollback
-   window. Running Arca's migrations over Drive's database would save
-   the copy and lose the rollback.
+   costs minutes and gives Arca a schema of its own from day one, with
+   the owner columns rewritten in one pass rather than migrated in
+   place. Running Arca's migrations over Drive's database would save
+   the copy and leave the `u-`/`o-` values to a second migration. The
+   old database is dropped on the cutover day; the copy is verified
+   before the routes switch, so it is not kept as a rollback.
 2. **The bucket prefix stays `drive/`.** Moving bytes buys nothing and
    costs a copy of every object; the prefix is configuration and names
    nothing a user sees.
@@ -193,7 +200,7 @@ The plan takes these; each is reversible before its phase begins.
 | 6 | The origin routes the storage prefixes to Arca and nothing routes to Drive | the origin's route table and the release smoke |
 | 7 | Every consumer in the table above is repointed by a commit that names this spec | `git log --grep` in each repository, listed in the Outcome |
 | 8 | The maintainer's smoke holds: a put through the console, a read through the origin with a narrowed key, a refused write with reason `grant` | the maintainer, recorded in the Outcome with the date |
-| 9 | Drive's deployment is gone, its host answers a redirect and a 410, its repository is archived, and its database is dropped after thirty days | the cluster, the host, GitHub, and the Outcome's dates |
+| 9 | Drive's deployment is gone, its host answers a redirect and a 410, its repository is archived, and its database is dropped, all on the cutover day | the cluster, the host, GitHub, and the Outcome's dates |
 
 ## Not in this spec
 
