@@ -46,13 +46,15 @@ Migration `0003_shares.up.sql` creates the table, the number
 [[004-metadata-store]]'s ownership table gives this spec;
 `internal/store/shares.go` and `links.go` hold the query set;
 `internal/shares` holds the eleven handlers, the two lookups
-[[006-identity]] reads a decision through, and the token; `internal/api`
-gains the `Shares` seam its route table dispatches through, and the eleven
-rows of [[013-api]] that belong here; `cmd/arcad` binds one query set to
-both readers. The commits are `850e0b6` (the migration and the queries),
+[[006-identity]] reads a decision through, the token, and the eight rows of
+[[013-api]] the node registers through `api.Options.Routes`; `internal/api`
+keeps the three that redeem a token, which no contributed row may be, and
+takes the service that answers them through a `Links` seam; `cmd/arcad`
+binds one query set to both readers. The commits are `850e0b6` (the migration and the queries),
 `91ad501` (the grants), `16a35a7` (the links), `2976467` (the wiring and
-the e2e tier) and `a2dabc0` (the refusal that names no token). The gate
-passes with all fifteen gates on at each of them.
+the e2e tier), `a2dabc0` (the refusal that names no token) and `32fdacc`
+(the rows declared where they are answered). The gate passes with all
+fifteen gates on at each of them.
 
 What arrived from the service Arca replaces is
 `drive/internal/handler/shares.go` (create, list, what is shared with the
@@ -147,6 +149,14 @@ What the implementation decided, where this spec was silent:
 - `internal/api` gained two pieces of [[013-api]]'s frame that a route with
   a body needs and phase 2 had no caller for: the strict JSON decoder in the
   error envelope, and the `{owner}` rule with its one alias.
+- The eight rows behind the verifier are declared in `internal/shares` and
+  contributed through `api.Options.Routes`, which is the registration seam
+  [[009-workspaces]] introduced; `Routes` binds the handlers for the node
+  and `Table` answers the generator of the committed document, which builds
+  no service. The three that redeem a token stay in the frame's own table: a
+  contributed row is refused when it asks nothing, so the exception to the
+  verifier is written where the test that names the three can read it, and
+  the service that answers them is handed over instead.
 
 ## Design
 
