@@ -18,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	"latere.ai/x/arca/internal/config"
+	"latere.ai/x/arca/internal/reaper"
 	"latere.ai/x/arca/internal/store"
 )
 
@@ -375,5 +377,129 @@ func TestSleepCtxReturnsEarlyWhenTheContextEnds(t *testing.T) {
 	sleepCtx(ctx, time.Minute)
 	if time.Since(start) > time.Second {
 		t.Fatal("sleepCtx waited for the timer despite a cancelled context")
+	}
+}
+
+// Criterion 20 of spec 010: ARCA_REAP_INTERVAL of 0 leaves serve with no
+// reconciliation loop. Which it is, is a fact an operator reads on the
+// start-up line rather than infers from a metric that never moves.
+func TestServeSaysWhetherThisReplicaReconciles(t *testing.T) {
+	for _, c := range []struct{ interval, line string }{
+		{"", "the reconciler runs every 5m0s"},
+		{"90s", "the reconciler runs every 1m30s"},
+		{"0", "the reconciler is off on this replica"},
+	} {
+		t.Run(c.line, func(t *testing.T) {
+			out, stop := serveReading(t, map[string]string{"ARCA_REAP_INTERVAL": c.interval})
+			defer func() {
+				if code := stop(); code != 0 {
+					t.Fatalf("exit %d", code)
+				}
+			}()
+			if !strings.Contains(out.String(), c.line) {
+				t.Fatalf("the start-up said %q", out.String())
+			}
+		})
+	}
+}
+
+// serveReading runs serve on loopback ports and answers its stdout and a
+// stop function, for a case that reads what start-up printed.
+func serveReading(t *testing.T, overrides map[string]string) (*syncBuffer, func() int) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	out, errOut := &syncBuffer{}, &bytes.Buffer{}
+	codec := make(chan int, 1)
+	go func() {
+		addresses := map[string]string{"ARCA_PUBLIC_ADDR": "127.0.0.1:0", "ARCA_INTERNAL_ADDR": "127.0.0.1:0"}
+		maps.Copy(addresses, overrides)
+		codec <- run(ctx, nil, stores(t, addresses), out, errOut)
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for !listening.MatchString(out.String()) {
+		select {
+		case code := <-codec:
+			t.Fatalf("serve exited %d before listening; stderr %q", code, errOut.String())
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("serve never reported its listeners; stdout %q", out.String())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return out, func() int {
+		cancel()
+		select {
+		case code := <-codec:
+			return code
+		case <-time.After(gracePeriod + 10*time.Second):
+			t.Fatal("serve did not stop")
+			return -1
+		}
+	}
+}
+
+func TestReapIsASubcommandWithTwoFlags(t *testing.T) {
+	var errOut bytes.Buffer
+	if code := run(t.Context(), []string{"reap", "-no-such-flag"}, env(nil), io.Discard, &errOut); code != 2 {
+		t.Fatalf("a bad flag exited %d", code)
+	}
+	// Zero is the value that turns the in-process loop off, and a process
+	// whose whole job is that loop cannot take it: exiting 0 having done
+	// nothing is how a CronJob looks healthy while nothing is reconciled.
+	errOut.Reset()
+	code := run(t.Context(), []string{"reap"}, stores(t, map[string]string{"ARCA_REAP_INTERVAL": "0"}), io.Discard, &errOut)
+	if code != 1 || !strings.Contains(errOut.String(), "ARCA_REAP_INTERVAL is 0") {
+		t.Fatalf("exit %d, stderr %q", code, errOut.String())
+	}
+	// A sequence that could not reach a store is a failure and not a quiet
+	// success. A sequence that reaches both is the e2e tier's.
+	errOut.Reset()
+	code = run(t.Context(), []string{"reap", "-once"}, stores(t, nil), io.Discard, &errOut)
+	if code != 1 || !strings.HasPrefix(errOut.String(), "arcad: ") {
+		t.Fatalf("exit %d, stderr %q", code, errOut.String())
+	}
+	// And a configuration it cannot read is exit 1 with one line.
+	errOut.Reset()
+	if code := run(t.Context(), []string{"reap", "-once"}, env(nil), io.Discard, &errOut); code != 1 {
+		t.Fatalf("exit %d, stderr %q", code, errOut.String())
+	}
+}
+
+func TestReapAsALoopRunsUntilItIsStopped(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	var out, errOut bytes.Buffer
+	code := run(ctx, []string{"reap"}, stores(t, map[string]string{"ARCA_REAP_INTERVAL": "1h"}), &out, &errOut)
+	if code != 0 {
+		t.Fatalf("exit %d, stderr %q", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "the reconciler runs every 1h0m0s") {
+		t.Fatalf("stdout = %q", out.String())
+	}
+}
+
+func TestTheReconcilerIsNotStartedOnAConfigurationItCannotRun(t *testing.T) {
+	var out bytes.Buffer
+	if err := startReaper(t.Context(), config.Config{ReapInterval: time.Minute}, nil, nil, &out); err == nil {
+		t.Fatal("a reconciler with no stores was started anyway")
+	}
+}
+
+func TestOneSequenceReportsWhatItFound(t *testing.T) {
+	var f reaper.Findings
+	f.Add(reaper.KindUsageCorrected, reaper.Repaired, 2)
+
+	var live, dry bytes.Buffer
+	report(&live, f, false)
+	report(&dry, f, true)
+	if !strings.Contains(live.String(), "usage_corrected") || !strings.Contains(live.String(), "repaired") {
+		t.Fatalf("a live run printed %q", live.String())
+	}
+	if strings.Contains(live.String(), "nothing was changed") {
+		t.Fatalf("a live run printed %q", live.String())
+	}
+	if !strings.Contains(dry.String(), "nothing was changed") {
+		t.Fatalf("a dry run printed %q", dry.String())
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"maps"
 	"strings"
 	"testing"
+	"time"
 )
 
 func env(m map[string]string) Getenv {
@@ -37,6 +38,9 @@ func TestLoadAppliesEveryDefault(t *testing.T) {
 		BucketRegion: "us-east-1",
 		BucketPrefix: "arca/",
 		DatabaseURL:  "postgres://arca:arca@db:5432/arca?sslmode=disable",
+
+		ReapInterval:   DefaultReapInterval,
+		TrashRetention: DefaultTrashRetention,
 	}
 	if c != want {
 		t.Fatalf("Load() = %+v, want %+v", c, want)
@@ -56,6 +60,8 @@ func TestLoadReadsEveryVariable(t *testing.T) {
 		"ARCA_BUCKET_SECRET_KEY": "secret",
 		"ARCA_PUBLIC_CDN_URL":    "https://cdn.example/",
 		"ARCA_DATABASE_URL":      "postgresql://arca@db/arca",
+		"ARCA_REAP_INTERVAL":     "90s",
+		"ARCA_TRASH_RETENTION":   "168h",
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -72,6 +78,9 @@ func TestLoadReadsEveryVariable(t *testing.T) {
 		BucketSecretKey: "secret",
 		PublicCDNURL:    "https://cdn.example",
 		DatabaseURL:     "postgresql://arca@db/arca",
+
+		ReapInterval:   90 * time.Second,
+		TrashRetention: 168 * time.Hour,
 	}
 	if c != want {
 		t.Fatalf("Load() = %+v, want %+v", c, want)
@@ -201,5 +210,44 @@ func TestTheCredentialsAreSetAsAPairOrNotAtAll(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "set as a pair") {
 			t.Errorf("%s alone loaded with %v", only, err)
 		}
+	}
+}
+
+func TestTheWindowsOfTheReconcilerAreReadAndChecked(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		variable string
+		value    string
+		want     time.Duration
+		problem  string
+	}{
+		{"an interval", "ARCA_REAP_INTERVAL", "30s", 30 * time.Second, ""},
+		{"an interval of zero, which turns the loop off", "ARCA_REAP_INTERVAL", "0s", 0, ""},
+		{"an interval in no spelling", "ARCA_REAP_INTERVAL", "often", 0, "written the way"},
+		{"an interval that runs backwards", "ARCA_REAP_INTERVAL", "-5m", 0, "backwards"},
+		{"a retention", "ARCA_TRASH_RETENTION", "168h", 168 * time.Hour, ""},
+		{"a retention in no spelling", "ARCA_TRASH_RETENTION", "a month", 0, "written the way"},
+		{"a retention of no time", "ARCA_TRASH_RETENTION", "0", 0, "no time"},
+		{"a retention that runs backwards", "ARCA_TRASH_RETENTION", "-1h", 0, "backwards"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := Load(with(map[string]string{c.variable: c.value}))
+			if c.problem != "" {
+				if err == nil || !strings.Contains(err.Error(), c.problem) {
+					t.Fatalf("%s of %q loaded with %v", c.variable, c.value, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			read := got.ReapInterval
+			if c.variable == "ARCA_TRASH_RETENTION" {
+				read = got.TrashRetention
+			}
+			if read != c.want {
+				t.Fatalf("%s of %q read as %s", c.variable, c.value, read)
+			}
+		})
 	}
 }

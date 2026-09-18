@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Defaults for the optional variables.
@@ -23,6 +24,17 @@ const (
 	DefaultPublicAddr   = ":8080"
 	DefaultInternalAddr = ":8081"
 	DefaultBucketPrefix = "arca/"
+)
+
+// Defaults for the two windows the reconciler of spec 010 works to.
+const (
+	// DefaultReapInterval is how often the reconciler runs inside serve. A
+	// value of zero disables the in-process loop, which is what an
+	// installation that runs arcad reap as a process of its own sets on its
+	// API replicas.
+	DefaultReapInterval = 5 * time.Minute
+	// DefaultTrashRetention is how long a trashed object stays restorable.
+	DefaultTrashRetention = 720 * time.Hour
 )
 
 // prefixShape is what a bucket prefix may hold: the characters a key is
@@ -64,6 +76,12 @@ type Config struct {
 	PublicCDNURL string
 	// DatabaseURL is the Postgres connection string.
 	DatabaseURL string
+	// ReapInterval is how often the reconciler of spec 010 runs inside
+	// serve. Zero leaves serve with no reconciliation loop.
+	ReapInterval time.Duration
+	// TrashRetention is how long a trashed object stays restorable before
+	// the reconciler purges it from both stores.
+	TrashRetention time.Duration
 }
 
 // Database reads the one variable the migrate subcommand needs, so a
@@ -150,6 +168,16 @@ func Load(getenv Getenv) (Config, error) {
 	if problem := checkDatabaseURL(c.DatabaseURL); problem != "" {
 		problems = append(problems, problem)
 	}
+	interval, problem := duration(getenv, "ARCA_REAP_INTERVAL", DefaultReapInterval, true)
+	if problem != "" {
+		problems = append(problems, problem)
+	}
+	c.ReapInterval = interval
+	retention, problem := duration(getenv, "ARCA_TRASH_RETENTION", DefaultTrashRetention, false)
+	if problem != "" {
+		problems = append(problems, problem)
+	}
+	c.TrashRetention = retention
 	if len(problems) > 0 {
 		sort.Strings(problems)
 		return Config{}, errors.New("configuration: " + strings.Join(problems, "; "))
@@ -166,6 +194,28 @@ func withDefault(v, def string) string {
 
 // value is the variable as the server reads it: a blank value is unset.
 func value(v string) string { return strings.TrimSpace(v) }
+
+// duration reads one window, in the spelling time.ParseDuration accepts, and
+// answers the problem with it or the empty string. offSwitch says whether
+// zero is a value the variable takes: an interval of zero turns a loop off,
+// and a retention of zero would purge what was deleted a moment ago.
+func duration(getenv Getenv, name string, def time.Duration, offSwitch bool) (time.Duration, string) {
+	raw := value(getenv(name))
+	if raw == "" {
+		return def, ""
+	}
+	d, err := time.ParseDuration(raw)
+	switch {
+	case err != nil:
+		return 0, fmt.Sprintf("%s is %q, and a window is written the way 5m, 2h30m or 720h is", name, raw)
+	case d < 0:
+		return 0, fmt.Sprintf("%s is %q, and a window does not run backwards", name, raw)
+	case d == 0 && !offSwitch:
+		return 0, fmt.Sprintf("%s is %q, and a window of no time acts on what happened a moment ago", name, raw)
+	default:
+		return d, ""
+	}
+}
 
 // normalisePrefix is spec 003's rule: a missing trailing slash is appended,
 // a leading slash is a configuration error, and the value holds only the
