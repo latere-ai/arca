@@ -205,6 +205,11 @@ func (p *probe) answer(w http.ResponseWriter, r *http.Request) {
 // table and the row they contribute, merged the way New merges them. The mux
 // and the document are both built from it, so a test that reads it reads the
 // surface and not one half of it.
+//
+// The contributed row is load bearing and not spare weight: without it the
+// three tests below read the frame's four rows and the rule they measure
+// stops being measured for the kind of row every later phase adds. It goes
+// when spec 005 lands handlers on that path, not before.
 func registry(t *testing.T) []route {
 	t.Helper()
 	rows, err := merge(routeTable, []Route{(&probe{}).route()})

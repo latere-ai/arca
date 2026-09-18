@@ -111,12 +111,12 @@ writes the status, the one user sentence and the request id.
 | 12 | Holds. `TestStoreADeleteThatFailedAfterTheRowIsReaped` |
 | 13 | Deferred to [[007-uploads]]. The union `store.ObjectReferenced` asks is held to the schema by a test, so the table joins it with the migration that creates it |
 | 14 | Holds. `TestPassTwoReportsARowWithoutItsBytesAndDeletesNothing` and `TestStoreARowWithoutItsBytesIsReportedAndKept` |
-| 15 | Deferred to [[009-workspaces]]. Pass 3 is a `Pass` the reconciler is given, with a unit test on a fake |
+| 15 | Holds. Pass 3 is a `Pass` the reconciler is given, bound in `cmd/arcad` to [[009-workspaces]]' `Service.ExpireLeases`, with a unit test on a fake here and the expiry itself tested in that package |
 | 16 | The trash half holds: `TestStoreTrashPastItsRetentionLeavesBothStores`. The tombstone half is deferred to [[009-workspaces]] |
 | 16b | Holds at the statement: `TestPassEightDropsAStarWhoseTargetIsGoneAndKeepsOneOnATrashedTarget`. The star routes are [[005-files]]'s |
 | 17 | Holds. `TestStoreLedgerReconciles` against Postgres, with the healthy run correcting nothing |
 | 18 | Holds. `TestARunTwiceLeavesWhatOneRunLeft` and the settled sweep of the store tier. Two reapers at once are two conditional statements, which is what the second run is |
-| 19 | Holds. `TestDryRunReportsWhatARunWouldChange` runs one fixture dry and live and holds the found counts equal |
+| 19 | Holds for the nothing-changes half, absolutely, and for the same-findings half over every pass whose statements this package owns: `TestDryRunReportsWhatARunWouldChange` runs one fixture dry and live and holds the found counts equal. Pass 3 is the exception and is under-reported: its sweep is [[009-workspaces]]' and every statement it issues is a write, so a dry run does not call it and reports nothing for it. Closing it is a counting half in that package |
 | 20 | Holds. `TestServeSaysWhetherThisReplicaReconciles` and `TestE2EReapRunsOneSequenceAndExits` |
 
 ### Divergences
@@ -411,6 +411,15 @@ loop, and runs `arcad reap` as a Deployment or a CronJob of its own
 runs the same passes on the same interval and takes `-dry-run`, which
 logs every finding and changes nothing; `-once` runs one pass sequence
 and exits, which is the CronJob shape.
+
+Pass 3 is the one exception, and it is a hole in that arrangement today.
+Its sweep is a method of [[009-workspaces]]' service, which refuses to
+build without the authorizer its handlers decide through, and `arcad
+reap` registers no handler and starts no verifier; so the process runs
+nine of the ten passes and says which one it does not run on its start-up
+line. An installation that moves the reconciler off the API replicas
+therefore leaves `ARCA_REAP_INTERVAL` non-zero on one replica, or the
+service grows a constructor for the pass alone.
 
 Concurrency needs no lease. Two replicas running pass 5 at the same
 moment both issue a conditional delete and the second matches no rows.

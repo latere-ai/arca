@@ -207,8 +207,15 @@ type Metrics interface {
 // given does not run and reports nothing.
 type Pass interface {
 	// Sweep runs the pass once and answers how many rows it found, which is
-	// how many it changed unless dry is true. A dry sweep reports the same
-	// number and changes nothing in either store.
+	// how many it changed unless dry is true. A dry sweep changes nothing in
+	// either store, and that half of the contract is absolute.
+	//
+	// It reports the same number where the pass can count what it would
+	// change without changing it. A pass whose every statement is a write
+	// has no counting half to run, and such a pass reports nothing on a dry
+	// run rather than a number it did not measure: under-reporting is a
+	// finding an operator does not see, and mutating in a dry run is a
+	// promise broken. The lease pass of spec 009 is the one such pass today.
 	Sweep(ctx context.Context, q store.Querier, now time.Time, dry bool) (int, error)
 }
 

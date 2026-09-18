@@ -672,6 +672,12 @@ func TestReapAsALoopRunsUntilItIsStopped(t *testing.T) {
 	if !strings.Contains(out.String(), "the reconciler runs every 1h0m0s") {
 		t.Fatalf("stdout = %q", out.String())
 	}
+	// A pass that does not run reports nothing, and a findings table with no
+	// row for it reads like a pass that found nothing. This process runs no
+	// lease expiry, and it says so where an operator reads the rest.
+	if !strings.Contains(out.String(), "nine of the ten passes") {
+		t.Errorf("stdout is %q and does not say which pass this process leaves to a replica", out.String())
+	}
 }
 
 func TestTheReconcilerIsNotStartedOnAConfigurationItCannotRun(t *testing.T) {

@@ -105,13 +105,16 @@ func reap(ctx context.Context, args []string, getenv config.Getenv, stdout, stde
 	// Pass 3 is not given here. Its sweep is a method of the workspace
 	// service of spec 009, which refuses to build without the authorizer
 	// every one of its handlers decides through, and this process registers
-	// no handler and starts no verifier. A replica running the in-process
-	// loop expires leases; an installation that moves the reconciler off the
-	// API replicas keeps that one pass on them.
+	// no handler and starts no verifier. A pass that does not run reports
+	// nothing, and a table with no row for it reads exactly like a pass that
+	// found nothing, so the line below is what says which it is: an
+	// installation that moved the reconciler here would otherwise expire no
+	// lease and read a healthy log.
 	reconciler, err := reaper.New(reaperOptions(cfg, db, bucket, *dryRun, nil))
 	if err != nil {
 		return fail(stderr, err)
 	}
+	_, _ = fmt.Fprintln(stdout, "arcad: this process runs nine of the ten passes; the lease expiry of spec 009 runs on a replica with ARCA_REAP_INTERVAL set")
 
 	if !*once {
 		_, _ = fmt.Fprintf(stdout, "arcad: the reconciler runs every %s\n", cfg.ReapInterval)
