@@ -1,6 +1,6 @@
 ---
 title: "Observability: the metric table, traces across the two stores, logs with trace ids, the alert rules"
-status: drafted
+status: testing
 track: core
 depends_on:
   - specs/001-architecture.md
@@ -39,8 +39,122 @@ leaves the process until an operator sets an endpoint.
 
 ## Current state
 
-Not built. `cmd/arcad` serves the probes and `/metrics` is the empty
-registry of [[002-repository-scaffold]].
+Built and in the tree on 2026-09-18, for everything the packages of phases 1
+to 5 can record. `internal/metrics` holds the table and the one registry;
+`cmd/arcad` bootstraps the exporter and serves `GET /metrics` on the internal
+listener; `internal/api` counts, times and logs every request;
+`internal/auth`, `internal/workspaces` and `internal/reaper` record through
+seams; `tools/rules` holds the alert table and renders
+`deploy/base/prometheusrule.yaml`. The commits are `f502744` (the table and
+the registry), `e884c2f` (the exporter and the listener), `0b0e9e5` (the
+instrumentation), `2c8e9f3` (the alerts and the tool) and `91542ac` (the
+documentation). The gate passes at each of them.
+
+### What records, and what waits
+
+Every name of the table is registered and every closed vocabulary carries a
+zero series from the first scrape, so nothing below is a missing metric. What
+differs is whether a package writes to it yet.
+
+| Metric | State |
+|---|---|
+| `arca_requests_total`, `arca_request_duration_seconds`, `arca_requests_in_flight` | recorded, by the frame's middleware |
+| `arca_tokens_rejected_total` | recorded, at the verifier's refusal |
+| `arca_decisions_total`, `arca_authorizer_seconds` | recorded, at the one seam every handler decides through |
+| `arca_bucket_ops_total`, `arca_bucket_op_seconds`, `arca_presigned_urls_total` | recorded, by the decorator over `blob.Store` |
+| `arca_reaper_runs_total`, `arca_reaper_duration_seconds`, `arca_reaper_findings_total`, `arca_space_usage_bytes`, `arca_spaces_by_usage` | recorded, by the reconciler of [[010-events-and-reaper]] |
+| `arca_lease_expiries_total` | recorded, at pass 3's binding |
+| `arca_events_appended_total` | recorded, where a workspace's mutation becomes a row of the log |
+| `arca_bytes_in_total{kind="sync"}`, `arca_bytes_out_total{kind="materialize"}` | recorded, at the boundary of [[009-workspaces]] |
+| `arca_bytes_in_total{kind="inline"}`, `arca_bytes_out_total{kind="inline"}` | waits on [[005-files]] |
+| `arca_bytes_in_total{kind="part"}`, `arca_upload_sessions_total`, `arca_upload_sessions_open`, `arca_upload_parts_total` | waits on [[007-uploads]] |
+| `arca_limit_rejections_total` | waits on the first write path that charges the ledger, [[005-files]] |
+| `arca_leases_held` | waits on a count of live leases; the sweep of [[009-workspaces]] reports what it ended and not what is held |
+| `arca_stored_bytes` | waits on a per-plane ledger read; see the divergence below |
+| `arca_db_query_seconds`, `arca_db_conns` | waits on [[004-metadata-store]] exposing the pool's statistics and a timed querier |
+
+Share and link counters have no row in the table and need none: what
+[[008-shares-and-links]] does is already counted as requests by route, as
+decisions by outcome, and as `arca_reaper_findings_total{kind="share_expired"}`.
+
+### Divergences
+
+- **`lease_expired` joined the `kind` vocabulary**, at
+  [[010-events-and-reaper]]'s request, and the Design above records why. The
+  vocabulary is thirteen members and a test holds it equal to that package's
+  own.
+- **The endpoint reaches `pkg/otel` through the process environment.** That
+  package reads `OTEL_EXPORTER_OTLP_ENDPOINT` as it builds its exporters and
+  takes no endpoint field, so `cmd/arcad` sets that variable from
+  `ARCA_OTEL_EXPORTER_OTLP_ENDPOINT` before the bootstrap. The table of
+  [[002-repository-scaffold]] still owns one prefix and one lookup, and a
+  collector's operator injecting the standard name still works. The write is
+  a function variable, so a test drives the translation without touching the
+  environment of the test binary.
+- **`arcad reap`'s counters do not leave over OTLP**, which is half of
+  criterion 4. The scrape endpoint is `latere.ai/x/pkg/metrics`, a registry
+  that writes the Prometheus text format and reaches no exporter, and the
+  meter provider `pkg/otel` installs is a second pipeline with no bridge
+  between them. Duplicating the table onto OTel instruments would be a second
+  registry in this repository, which is exactly what this spec exists to
+  prevent, so what the reap process publishes is its spans and its log
+  records, both carrying the trace id, and its per-run findings table on
+  standard output. An installation that wants the series runs the reconciler
+  on the replicas, which is the default. A bridge belongs in the shared
+  package, not here.
+- **`arca_stored_bytes` has no source.** The Design says it is the reaper's
+  sample summed over the installation and split by plane, and the ledger row
+  the reaper reads (`events.Space`) carries one total per space with no plane
+  in it. Splitting it is a change to [[010-events-and-reaper]]'s ledger read
+  rather than to this spec, so the gauge stays registered at zero and no
+  alert reads it.
+- **Two alerts read what Arca publishes rather than what the table's words
+  say.** `ArcaReaperFailing` fires at fifteen minutes, three times the
+  default `ARCA_REAP_INTERVAL`, spelled in the annotation, because a rules
+  file cannot read a deployment's variable. `ArcaDatabaseSaturated` fires on
+  a pool holding no idle connection, because the pool's size is not a series.
+- **The redaction handler is not built.** `otel.Config` exposes the local
+  handler alone, so a handler wrapping both paths of the tee is not
+  reachable from outside the shared package. The structural rule holds and is
+  what a test asserts: no attribute of the request line is a token, a
+  credential, a presigned URL or a path, and the line names the caller by the
+  rendered subject the authorizer was already told. A handler around both
+  paths belongs in `pkg/otel` and is a change there.
+- **The span table is one row deep.** `bucket.<op>` is opened by the
+  decorator. `auth.verify` and `auth.ask` wait on spans inside
+  [[006-identity]]'s two, `db.<op>` on [[004-metadata-store]]'s querier, and
+  the order assertions of criterion 5 on a write route, which is
+  [[005-files]]'s.
+- **The request middleware sits inside the request id and not outside it.**
+  It is still outside the verifier and both rate limits, which is what the
+  Design asks for, and inside the id because the line it writes carries that
+  id. The route, the error code and the subject reach it from further in
+  through one observation the request's context carries.
+- **The route label of an unmatched path is `unmatched`.** The Design says
+  the label is the mux pattern, and a path no row registers has none; the
+  alternative is the path itself, which is the one thing the label exists to
+  keep out.
+- **`tools/rules` renders the manifest rather than reading it.** The Design
+  says the tool prints the rules document out of the object. It holds the
+  alert table as Go values instead and answers both shapes from it, so the
+  committed manifest is a rendering a test compares byte for byte and an
+  alert cannot be edited in the YAML and left out of the deck. The document
+  it prints for `promtool` is the same one either way.
+
+### The criteria
+
+| # | State |
+|---|---|
+| 1 | Holds. `TestMetricsTable` reads this file through `runtime.Caller` and holds the registry to the table above, kind, labels, vocabularies and histogram bounds; `TestEveryClosedVocabularyHasAZeroSeries` reads the exposition of a fresh registry |
+| 2 | Holds at the frame, which is where a label could carry one: `TestARequestIsCountedByItsRouteAndItsStatus` and `TestTheRequestLineCarriesTheIdsAndNothingSecret`. Over a whole conformance run it waits on [[017-conformance-suite]] |
+| 3 | Holds. `TestUsageSamplingIsAggregate` runs two fixtures of different sizes through the seam and holds the bands cumulative, replaced rather than added to, and three series after six spaces |
+| 4 | Holds for the listener: `TestMetricsListenerOnly`. The OTLP half is the divergence above |
+| 5 | Waits on [[005-files]]. `bucket.<op>` exists and is tested at the decorator |
+| 6 | Holds for the line: `TestTheRequestLineCarriesTheIdsAndNothingSecret`. Holding the same ids to the spans waits on the span order of criterion 5 |
+| 7 | Holds at the call site and not at a handler; see the divergence above |
+| 8 | Holds for the request: `TestOneLineAndOneObservationPerRequest`. The stream halves wait on [[005-files]] |
+| 9 | Holds. `TestAlertsNameKnownMetrics`, `TestEveryRowOfTheSpecTableIsAnAlert` and `TestTheCommittedManifestIsCurrent`; the `rules` job runs `promtool check rules` over what the tool prints |
+| 10 | Holds. `TestNoExporterStillServes` |
 
 ## Design
 
