@@ -82,25 +82,16 @@ func TestEveryRowOfThisPackageIsOneOfSpec013sTable(t *testing.T) {
 	}
 }
 
-func TestEveryWorkspaceRowOfSpec013IsRegisteredOrNamedAsALaterOne(t *testing.T) {
+func TestEveryWorkspaceRowOfSpec013IsRegistered(t *testing.T) {
 	registered := map[string]bool{}
 	for _, r := range Table() {
 		registered[r.Method+" "+r.Path] = true
 	}
-	// Materialize and sync arrive with the manifest half of this spec. Every
-	// other workspace row is here.
-	later := map[string]bool{
-		"GET /v1/workspaces/{id}/materialize": true,
-		"POST /v1/workspaces/{id}/sync":       true,
-	}
+	// Every workspace row of spec 013 is registered, which is that spec's
+	// first criterion for this prefix.
 	for key := range specRoutes(t) {
-		if !registered[key] && !later[key] {
+		if !registered[key] {
 			t.Errorf("spec 013 names %s and nothing registers it", key)
-		}
-	}
-	for key := range later {
-		if registered[key] {
-			t.Errorf("%s is registered; drop it from the list of rows still to come", key)
 		}
 	}
 }

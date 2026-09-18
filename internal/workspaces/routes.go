@@ -95,6 +95,18 @@ var rows = []row{
 		summary: "Release an attachment and the lease it held.",
 		answer:  (*Service).release,
 	},
+	{
+		method: http.MethodGet, path: "/v1/workspaces/{id}/materialize",
+		action: authorizer.ActionWorkspaceRead, status: http.StatusOK,
+		summary: "The attachment's pinned manifest with a presigned read per file.",
+		answer:  (*Service).materialize,
+	},
+	{
+		method: http.MethodPost, path: "/v1/workspaces/{id}/sync",
+		action: authorizer.ActionWorkspaceSync, status: http.StatusOK,
+		summary: "Declare the post-state manifest of the subtree; the server reconciles.",
+		answer:  (*Service).sync,
+	},
 }
 
 // Routes is the rows with their handlers bound, for the node.

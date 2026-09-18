@@ -371,11 +371,81 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /v1/workspaces/{id}/materialize:
+    get:
+      operationId: getV1WorkspacesByIdMaterialize
+      summary: The attachment's pinned manifest with a presigned read per file.
+      description: Asks the authorizer for workspace.read before it acts.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      security:
+      - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {}
+        "401":
+          $ref: "#/components/responses/unauthenticated"
+        "403":
+          $ref: "#/components/responses/forbidden"
+        "404":
+          $ref: "#/components/responses/not_found"
+        "429":
+          $ref: "#/components/responses/rate_limited"
+        "500":
+          $ref: "#/components/responses/internal"
+        "503":
+          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /v1/workspaces/{id}/restore:
     post:
       operationId: postV1WorkspacesByIdRestore
       summary: Undo a soft delete.
       description: Asks the authorizer for workspace.restore before it acts.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      security:
+      - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {}
+        "401":
+          $ref: "#/components/responses/unauthenticated"
+        "403":
+          $ref: "#/components/responses/forbidden"
+        "404":
+          $ref: "#/components/responses/not_found"
+        "429":
+          $ref: "#/components/responses/rate_limited"
+        "500":
+          $ref: "#/components/responses/internal"
+        "503":
+          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v1/workspaces/{id}/sync:
+    post:
+      operationId: postV1WorkspacesByIdSync
+      summary: Declare the post-state manifest of the subtree; the server reconciles.
+      description: Asks the authorizer for workspace.sync before it acts.
       parameters:
       - name: id
         in: path
