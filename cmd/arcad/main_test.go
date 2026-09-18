@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"maps"
 	"net"
@@ -16,6 +17,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"latere.ai/x/arca/internal/store"
 )
 
 func env(m map[string]string) func(string) string {
@@ -33,6 +36,7 @@ func stores(t *testing.T, overrides map[string]string) func(string) string {
 	}))
 	t.Cleanup(endpoint.Close)
 	m := map[string]string{
+		"ARCA_DATABASE_URL":      "postgres://arca:arca@127.0.0.1:1/arca?sslmode=disable",
 		"ARCA_BUCKET":            "arca",
 		"ARCA_BUCKET_REGION":     "us-east-1",
 		"ARCA_BUCKET_ENDPOINT":   endpoint.URL,
@@ -194,10 +198,16 @@ func TestServeAnswersTheProbesOnBothListenersAndStopsCleanly(t *testing.T) {
 	publicURL, internalURL, stop := startServe(t, nil)
 
 	for _, base := range []string{publicURL, internalURL} {
-		for _, p := range []string{"/livez", "/readyz"} {
-			if code, body := get(t, base+p); code != 200 || body != "ok\n" {
-				t.Errorf("GET %s%s = %d %q", base, p, code, body)
-			}
+		if code, body := get(t, base+"/livez"); code != 200 || body != "ok\n" {
+			t.Errorf("GET %s/livez = %d %q", base, code, body)
+		}
+		// Readiness reaches the two stores, and the unit tier has neither
+		// beside it, so what it proves here is that the checks are
+		// registered and that a failure names the one that failed. The e2e
+		// tier of spec 014 proves the 200 against a real bucket and a real
+		// database.
+		if code, body := get(t, base+"/readyz"); code != 503 || !strings.HasPrefix(body, "not ready: database: ") {
+			t.Errorf("GET %s/readyz = %d %q", base, code, body)
 		}
 		if code, body := get(t, base+"/version"); code != 200 || !strings.Contains(body, `"version":"dev"`) {
 			t.Errorf("GET %s/version = %d %q", base, code, body)
@@ -237,8 +247,112 @@ func TestReadinessNamesTheStoreItCannotReach(t *testing.T) {
 		t.Errorf("GET /livez = %d %q; liveness touches no dependency", code, body)
 	}
 	code, body := get(t, publicURL+"/readyz")
-	if code != 503 || !strings.HasPrefix(body, "not ready: bucket: ") {
+	if code != 503 || !strings.Contains(body, "bucket: ") {
 		t.Fatalf("GET /readyz = %d %q", code, body)
+	}
+}
+
+// TestTheServerRefusesToStartAgainstADatabaseBehindIt is criterion 2 of spec
+// 004: a deploy whose migration job did not run fails at once rather than
+// serving against a schema it does not have.
+func TestTheServerRefusesToStartAgainstADatabaseBehindIt(t *testing.T) {
+	behind := pendingMigrations
+	t.Cleanup(func() { pendingMigrations = behind })
+	pendingMigrations = func(context.Context, store.Querier) ([]string, error) {
+		return []string{"0002_uploads.up.sql", "0003_shares.up.sql"}, nil
+	}
+	var errOut bytes.Buffer
+	code := run(t.Context(), nil, stores(t, map[string]string{
+		"ARCA_PUBLIC_ADDR":   "127.0.0.1:0",
+		"ARCA_INTERNAL_ADDR": "127.0.0.1:0",
+	}), io.Discard, &errOut)
+	if code != 1 {
+		t.Fatalf("exit %d", code)
+	}
+	if got := errOut.String(); !strings.Contains(got, "0002_uploads.up.sql is not applied") || !strings.Contains(got, "arcad migrate") {
+		t.Fatalf("stderr = %q", got)
+	}
+}
+
+// TestReadinessCarriesTheSchemaCheckWhenTheDatabaseArrivesLate is the other
+// half: a database that was unreachable at start-up is compared against the
+// embedded set by the readiness check instead.
+func TestReadinessCarriesTheSchemaCheckWhenTheDatabaseArrivesLate(t *testing.T) {
+	behind := pendingMigrations
+	t.Cleanup(func() { pendingMigrations = behind })
+	unreachable := true
+	pendingMigrations = func(context.Context, store.Querier) ([]string, error) {
+		if unreachable {
+			return nil, errors.New("the database is away")
+		}
+		return []string{"0002_uploads.up.sql"}, nil
+	}
+	db, err := store.Open(t.Context(), "postgres://arca@127.0.0.1:1/arca?sslmode=disable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := databaseReady(db)(t.Context()); err == nil || !strings.Contains(err.Error(), "ping") {
+		t.Fatalf("a database that does not answer = %v", err)
+	}
+	// Once the database answers, the ping passes and the comparison is what
+	// is left, so the schema half is exercised on its own.
+	if err := schemaReady(t.Context(), nil); err == nil || !strings.Contains(err.Error(), "the database is away") {
+		t.Fatalf("a database that does not answer the version = %v", err)
+	}
+	unreachable = false
+	err = schemaReady(t.Context(), nil)
+	if err == nil || !strings.Contains(err.Error(), "0002_uploads.up.sql is not applied") {
+		t.Fatalf("a database behind the binary = %v", err)
+	}
+	pendingMigrations = func(context.Context, store.Querier) ([]string, error) { return nil, nil }
+	if err := schemaReady(t.Context(), nil); err != nil {
+		t.Fatalf("a database that holds every migration = %v", err)
+	}
+}
+
+func TestMigrateAppliesWhatIsPendingAndSaysSo(t *testing.T) {
+	applied := applyMigrations
+	t.Cleanup(func() { applyMigrations = applied })
+
+	var url string
+	applyMigrations = func(databaseURL string) error { url = databaseURL; return nil }
+	var out bytes.Buffer
+	code := run(t.Context(), []string{"migrate"}, env(map[string]string{
+		"ARCA_DATABASE_URL": "postgres://arca@db/arca",
+	}), &out, io.Discard)
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if url != "postgres://arca@db/arca" {
+		t.Errorf("the migrator was given %q", url)
+	}
+	if !strings.Contains(out.String(), "every migration this binary carries") {
+		t.Errorf("stdout = %q", out.String())
+	}
+
+	applyMigrations = func(string) error { return errors.New("the database is away") }
+	var errOut bytes.Buffer
+	if code := run(t.Context(), []string{"migrate"}, env(map[string]string{
+		"ARCA_DATABASE_URL": "postgres://arca@db/arca",
+	}), io.Discard, &errOut); code != 1 {
+		t.Fatalf("exit %d", code)
+	}
+	if !strings.HasPrefix(errOut.String(), "arcad: ") {
+		t.Errorf("stderr = %q", errOut.String())
+	}
+}
+
+func TestMigrateReadsTheDatabaseVariableAndNothingElse(t *testing.T) {
+	var errOut bytes.Buffer
+	if code := run(t.Context(), []string{"migrate"}, env(nil), io.Discard, &errOut); code != 1 {
+		t.Fatalf("exit %d", code)
+	}
+	if got := errOut.String(); !strings.Contains(got, "ARCA_DATABASE_URL is unset") || strings.Contains(got, "ARCA_BUCKET") {
+		t.Fatalf("stderr = %q; migrate reads the database variable and nothing else", got)
+	}
+	if code := run(t.Context(), []string{"migrate", "-no-such-flag"}, env(nil), io.Discard, io.Discard); code != 2 {
+		t.Fatalf("a bad flag exited %d", code)
 	}
 }
 

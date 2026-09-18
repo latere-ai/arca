@@ -19,6 +19,7 @@ func with(overrides map[string]string) Getenv {
 	m := map[string]string{
 		"ARCA_BUCKET":        "arca",
 		"ARCA_BUCKET_REGION": "us-east-1",
+		"ARCA_DATABASE_URL":  "postgres://arca:arca@db:5432/arca?sslmode=disable",
 	}
 	maps.Copy(m, overrides)
 	return env(m)
@@ -35,6 +36,7 @@ func TestLoadAppliesEveryDefault(t *testing.T) {
 		Bucket:       "arca",
 		BucketRegion: "us-east-1",
 		BucketPrefix: "arca/",
+		DatabaseURL:  "postgres://arca:arca@db:5432/arca?sslmode=disable",
 	}
 	if c != want {
 		t.Fatalf("Load() = %+v, want %+v", c, want)
@@ -53,6 +55,7 @@ func TestLoadReadsEveryVariable(t *testing.T) {
 		"ARCA_BUCKET_ACCESS_KEY": "key",
 		"ARCA_BUCKET_SECRET_KEY": "secret",
 		"ARCA_PUBLIC_CDN_URL":    "https://cdn.example/",
+		"ARCA_DATABASE_URL":      "postgresql://arca@db/arca",
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -68,6 +71,7 @@ func TestLoadReadsEveryVariable(t *testing.T) {
 		BucketAccessKey: "key",
 		BucketSecretKey: "secret",
 		PublicCDNURL:    "https://cdn.example",
+		DatabaseURL:     "postgresql://arca@db/arca",
 	}
 	if c != want {
 		t.Fatalf("Load() = %+v, want %+v", c, want)
@@ -89,6 +93,7 @@ func TestLoadReportsEveryProblemInOneSortedMessage(t *testing.T) {
 		`ARCA_PUBLIC_ADDR is "nope", not a host:port address`,
 		"ARCA_BUCKET is unset",
 		"ARCA_BUCKET_REGION is unset",
+		"ARCA_DATABASE_URL is unset",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("message lacks %q:\n%s", want, got)
@@ -171,6 +176,22 @@ func TestTheBucketVariablesAreCheckedForShape(t *testing.T) {
 	}
 	if _, err := Load(with(map[string]string{"ARCA_BUCKET_PATH_STYLE": "1"})); err != nil {
 		t.Errorf("a path style of 1: %v", err)
+	}
+}
+
+func TestTheDatabaseURLIsOneTheMigratorCanReadToo(t *testing.T) {
+	for _, raw := range []string{"host=db user=arca dbname=arca", "mysql://db/arca", "db:5432/arca"} {
+		_, err := Database(env(map[string]string{"ARCA_DATABASE_URL": raw}))
+		if err == nil || !strings.Contains(err.Error(), "ARCA_DATABASE_URL") {
+			t.Errorf("a connection string of %q loaded with %v", raw, err)
+		}
+	}
+	url, err := Database(env(map[string]string{"ARCA_DATABASE_URL": " postgres://arca@db/arca "}))
+	if err != nil || url != "postgres://arca@db/arca" {
+		t.Errorf("Database() = %q, %v", url, err)
+	}
+	if _, err := Database(env(nil)); err == nil {
+		t.Error("a migration job with no database was accepted")
 	}
 }
 

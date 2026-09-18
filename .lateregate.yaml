@@ -47,13 +47,13 @@ depcheck:
   packages:
     latere.ai/x/arca/cmd/arcad:
       decision: >-
-        the server reaches latere.ai/x/pkg, the standard library, and the
+        the server reaches latere.ai/x/pkg, the standard library, the
         S3 client of spec 003 with the modules the SDK splits itself
-        into; the Postgres driver joins the list with spec 004, the
-        OpenTelemetry SDK with spec 006, and nothing else does without a
-        row here (spec 001). The SDK is the one cloud dependency
-        invariant 9 admits, because it speaks the S3 API and nothing
-        else: no cloud control plane, no Kubernetes client.
+        into, and the Postgres driver and migrator of spec 004; the
+        OpenTelemetry SDK joins the list with spec 006, and nothing else
+        does without a row here (spec 001). The SDK is the one cloud
+        dependency invariant 9 admits, because it speaks the S3 API and
+        nothing else: no cloud control plane, no Kubernetes client.
       allow:
         latere.ai/x/pkg: the shared library every Latere service is built on (spec 002)
         github.com/aws/aws-sdk-go-v2: the SDK's core, its signer, and its retry, under the S3 client of spec 003
@@ -75,6 +75,15 @@ depcheck:
         github.com/aws/aws-sdk-go-v2/service/sso: reached by the credential chain
         github.com/aws/aws-sdk-go-v2/service/ssooidc: reached by the credential chain
         github.com/aws/aws-sdk-go-v2/service/sts: reached by the credential chain
+        github.com/jackc/pgx/v5: the Postgres driver and its pool, which spec 004 names; no ORM and no query generator
+        github.com/jackc/puddle/v2: the pool pgx builds its own on
+        github.com/jackc/pgpassfile: a credential file pgx reads when the connection string names no password
+        github.com/jackc/pgservicefile: a connection service file pgx reads
+        github.com/jackc/pgerrcode: the SQLSTATE names the migrate driver branches on
+        github.com/golang-migrate/migrate/v4: the migrator of spec 004, with its iofs source and its pgx/v5 driver, run through latere.ai/x/pkg/pgxmigrate
+        github.com/google/uuid: the object id of spec 003, a UUIDv7 per write of content; reached through latere.ai/x/pkg besides, and not a cloud SDK
+        golang.org/x/sync: the singleflight and errgroup pgx and the migrator reach
+        golang.org/x/text: the encodings pgx reads a server message in
 
 license:
   spdx: MIT

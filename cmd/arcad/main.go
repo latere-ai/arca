@@ -26,6 +26,7 @@ import (
 
 	"latere.ai/x/arca/internal/blob"
 	"latere.ai/x/arca/internal/config"
+	"latere.ai/x/arca/internal/store"
 	"latere.ai/x/arca/internal/version"
 )
 
@@ -52,11 +53,42 @@ func run(ctx context.Context, args []string, getenv config.Getenv, stdout, stder
 	switch name {
 	case "", "serve":
 		return serve(ctx, rest, getenv, stdout, stderr)
+	case "migrate":
+		return migrate(rest, getenv, stdout, stderr)
 	default:
-		_, _ = fmt.Fprintf(stderr, "arcad: unknown subcommand %q; serve is the default and the only one\n", name)
+		_, _ = fmt.Fprintf(stderr, "arcad: unknown subcommand %q; serve and migrate are the ones this binary has\n", name)
 		return 2
 	}
 }
+
+// migrate applies the pending migrations and exits. It reads the database
+// variable and nothing else, so a migration job runs with the database alone
+// configured (spec 002's subcommand table).
+func migrate(args []string, getenv config.Getenv, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("arcad migrate", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	databaseURL, err := config.Database(getenv)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	if err := applyMigrations(databaseURL); err != nil {
+		return fail(stderr, err)
+	}
+	_, _ = fmt.Fprintln(stdout, "arcad: the database holds every migration this binary carries")
+	return 0
+}
+
+// The two seams of spec 004's schema handling. Both reach a database, so a
+// test drives them with a stub and the store tier runs the real ones.
+var (
+	// pendingMigrations reads what the database has not applied.
+	pendingMigrations = store.Pending
+	// applyMigrations is what the migrate subcommand runs.
+	applyMigrations = store.Migrate
+)
 
 // subcommand is spec 002's rule: the first argument that does not start
 // with a dash names the subcommand, and the arguments around it are the
@@ -107,11 +139,26 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		return fail(stderr, err)
 	}
 
+	db, err := store.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	defer db.Close()
+	// A database that answers and is behind this binary is a deploy whose
+	// migration job did not run, and serving against a schema the binary
+	// does not have is how a write is lost. A database that does not answer
+	// is not a verdict: the readiness check below carries it, and makes the
+	// same comparison once the database is there.
+	if pending, err := pendingMigrations(ctx, db.Querier()); err == nil && len(pending) > 0 {
+		return fail(stderr, fmt.Errorf("the database is behind this binary: %s is not applied; run arcad migrate", pending[0]))
+	}
+
 	draining := make(chan struct{})
 	probes := health.Handler(health.Options{
 		Ready: health.Checks(
 			health.Check{Name: "draining", Run: notDraining(draining)},
 			health.Check{Name: "bucket", Run: bucket.HeadBucket},
+			health.Check{Name: "database", Run: databaseReady(db)},
 		),
 		Timeout:   2 * time.Second,
 		Version:   version.Version,
@@ -177,6 +224,31 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 func fail(stderr io.Writer, err error) int {
 	_, _ = fmt.Fprintf(stderr, "arcad: %v\n", err)
 	return 1
+}
+
+// databaseReady is the readiness check of spec 002 and the other half of
+// the schema check above: the database answers, and it holds every migration
+// this binary carries.
+func databaseReady(db *store.DB) func(context.Context) error {
+	return func(ctx context.Context) error {
+		if err := db.Ping(ctx); err != nil {
+			return err
+		}
+		return schemaReady(ctx, db.Querier())
+	}
+}
+
+// schemaReady answers whether the database holds every migration this binary
+// carries.
+func schemaReady(ctx context.Context, q store.Querier) error {
+	pending, err := pendingMigrations(ctx, q)
+	if err != nil {
+		return err
+	}
+	if len(pending) > 0 {
+		return fmt.Errorf("%s is not applied; run arcad migrate", pending[0])
+	}
+	return nil
 }
 
 // notDraining fails readiness once shutdown has begun, so a load balancer

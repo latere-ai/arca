@@ -62,6 +62,33 @@ type Config struct {
 	// PublicCDNURL is the base a public object's redirect points at, with
 	// no trailing slash. Empty answers the ordinary presigned redirect.
 	PublicCDNURL string
+	// DatabaseURL is the Postgres connection string.
+	DatabaseURL string
+}
+
+// Database reads the one variable the migrate subcommand needs, so a
+// migration job runs with the database and nothing else configured.
+func Database(getenv Getenv) (string, error) {
+	url := value(getenv("ARCA_DATABASE_URL"))
+	if problem := checkDatabaseURL(url); problem != "" {
+		return "", errors.New("configuration: " + problem)
+	}
+	return url, nil
+}
+
+// checkDatabaseURL answers the problem with the connection string, or the
+// empty string. The migrator selects its driver from the scheme, so a
+// keyword and value connection string, which the pool would accept, is
+// refused here rather than at the first migration.
+func checkDatabaseURL(url string) string {
+	switch {
+	case url == "":
+		return "ARCA_DATABASE_URL is unset, and the database is what decides whether an object exists"
+	case !strings.HasPrefix(url, "postgres://") && !strings.HasPrefix(url, "postgresql://"):
+		return fmt.Sprintf("ARCA_DATABASE_URL is %q, and a connection string begins with postgres:// or postgresql://", url)
+	default:
+		return ""
+	}
 }
 
 // Load reads every variable through getenv and returns the configuration,
@@ -77,6 +104,7 @@ func Load(getenv Getenv) (Config, error) {
 		BucketAccessKey: value(getenv("ARCA_BUCKET_ACCESS_KEY")),
 		BucketSecretKey: value(getenv("ARCA_BUCKET_SECRET_KEY")),
 		PublicCDNURL:    strings.TrimRight(value(getenv("ARCA_PUBLIC_CDN_URL")), "/"),
+		DatabaseURL:     value(getenv("ARCA_DATABASE_URL")),
 	}
 	var problems []string
 	if err := checkAddr(c.PublicAddr); err != nil {
@@ -118,6 +146,9 @@ func Load(getenv Getenv) (Config, error) {
 		if err := checkURL(c.PublicCDNURL); err != nil {
 			problems = append(problems, "ARCA_PUBLIC_CDN_URL "+err.Error())
 		}
+	}
+	if problem := checkDatabaseURL(c.DatabaseURL); problem != "" {
+		problems = append(problems, problem)
 	}
 	if len(problems) > 0 {
 		sort.Strings(problems)
