@@ -411,6 +411,32 @@ fails without the fix.
   [[010-events-and-reaper]] owns the loop, the interval and the schedule; what
   a lapsed lease means is this spec's.
 
+### Known, left for the specs that own the other half
+
+- **A sync's reference check reads a committed snapshot.** `Unreferenced`
+  runs inside the sync transaction under read committed, so a row another
+  transaction inserted naming one of the dropped object ids is invisible to
+  it and those bytes are swept. Nothing in this build makes a second row
+  point at an object id that already exists: a copy, a trash restore and a
+  version restore are [[005-files]]'. This is the opposite direction from the
+  orphan that invariant 1 of [[001-architecture]] accepts, so it is loss and
+  not garbage, and it is the one reconciliation point [[005-files]] and
+  [[010-events-and-reaper]] must close: either the check takes a row lock on
+  the object rows it reads, or the sweep is deferred to the reaper, which
+  reads a later snapshot and can see the reference.
+- **The frame's route tests read the frame's own rows.** `internal/api`'s
+  three route tests, the one action per route, the one row per line of
+  [[013-api]]'s table and the one operation per route in the document,
+  iterate the frame's table and cannot see a row a spec contributes through
+  `api.Options.Routes`. This package carries its own equivalents over
+  `Table()`, and every spec that contributes rows must carry its own, or
+  criterion 1 of [[013-api]] stops being measured for them.
+- **Two worktrees of this repository collide on the compose ports.**
+  `DEV_PORT_BASE` derives from the checkout directory name, so two tiers run
+  side by side take the same ports and the second stack fails to start. One
+  checkout, which is what CI has, is unaffected. The Makefile is
+  [[014-test-stubs-and-tiers]]'s.
+
 ### Seams the tree binds after the merges
 
 Three interfaces, each with a working default, so this package builds and
