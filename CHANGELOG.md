@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.1.0 - 2026-09-19
+
 Arca's first release is the storage service Drive was, moved into an
 open core and simplified on the way: files, uploads, shares and links,
 workspaces, an event log, a reaper, and the identity, API, tiers, threat
