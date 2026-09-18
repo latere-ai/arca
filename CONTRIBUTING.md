@@ -6,15 +6,32 @@ design and the reasoning behind it live in [`specs/`](specs/README.md).
 
 ## Getting set up
 
-You need Go 1.27 or newer and `git`. Then:
+You need Go 1.27 or newer and `git`. Docker or Podman gets you the two
+stores; without one, the gate and the unit suite still run.
 
 ```sh
-make run   # arcad on loopback, serving its probes
-make       # the quality gate
+make       # the quality gate: formatting, linting, the suite, coverage, the specs
+make run   # Postgres, MinIO, the stubs, the migrations, and arcad, in that order
 ```
 
 `make` needs only the Go toolchain and git. Everything it pins comes from
 public modules, so it runs the same on your machine as in CI.
+
+The suite is three tiers. The unit tier is what `make` runs and needs
+nothing beside the toolchain. The store tier runs `internal/blob` and
+`internal/store` against the real MinIO and the real Postgres of
+`compose.yaml`, because a bucket's conditional create and a database's
+transaction semantics are the two things a fake gets wrong. The e2e tier
+runs `arcad` as a process against both.
+
+```sh
+make test-store   # the store tier, starting the stack first
+make test-e2e     # arcad as a process against the stack
+make check-all    # the gate and both tiers, before pushing something that touches a store
+```
+
+A tier without the stack skips itself and says what to run, so
+`go test ./...` on a clean clone is green with no services.
 
 Install the hooks once with `make hooks`. They run formatting and licence
 checks before a commit and the linter before a push, so you see a finding
