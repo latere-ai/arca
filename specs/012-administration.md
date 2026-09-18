@@ -1,6 +1,6 @@
 ---
 title: "Administration: the overview across spaces, moderation, restore, the record of what was done, the check command"
-status: drafted
+status: in-progress
 track: core
 depends_on:
   - specs/001-architecture.md
