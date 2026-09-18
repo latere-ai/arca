@@ -144,12 +144,18 @@ const (
 const caseTimeout = 2 * time.Minute
 
 // testCase is one row: its name under the spec, the group whose input admits
-// it, the routes of spec 013 it drives, and the assertion.
+// it, the routes of spec 013 it drives, the codes of that spec's error table
+// it provokes, and the assertion.
 type testCase struct {
 	name   string
 	group  string
 	routes []string
-	run    func(t *testing.T, s *session)
+	// codes are the rows of spec 013's error table this case makes the
+	// target answer. They are declared rather than counted from the
+	// assertions, so criterion 2's code half is one list a reader checks
+	// and TestEveryCodeIsProvokedOrNamed holds the table to it.
+	codes []string
+	run   func(t *testing.T, s *session)
 }
 
 // specCases is one spec's rows.

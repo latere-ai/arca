@@ -23,7 +23,8 @@ func cases010() []testCase {
 		{name: "Cursor", group: GroupEvents, routes: writes, run: case010Cursor},
 		{name: "OneSpace", group: GroupEvents, routes: writes, run: case010OneSpace},
 		{name: "NoSecretInAName", group: GroupEvents, routes: writes, run: case010NoSecretInAName},
-		{name: "QuotaExceeded", group: GroupUsage, routes: events, run: case010QuotaExceeded},
+		{name: "QuotaExceeded", group: GroupUsage, routes: events,
+			codes: []string{CodeQuotaExceeded}, run: case010QuotaExceeded},
 		{name: "NoLimitNoRefusal", group: GroupUsage, routes: writes, run: case010NoLimitNoRefusal},
 	}
 }

@@ -26,13 +26,20 @@ func cases006() []testCase {
 	// name a second space drive those rows too.
 	named := []string{"GET /v1/events", "POST /v1/workspaces", "DELETE /v1/workspaces/{id}"}
 	return []testCase{
-		{name: "NoBearer", group: GroupIdentity, routes: events, run: case006NoBearer},
-		{name: "UnlistedIssuer", group: GroupIdentity, routes: events, run: case006UnlistedIssuer},
-		{name: "AnotherSpace", group: GroupIdentity, routes: named, run: case006AnotherSpace},
-		{name: "PublicRoutesTakeNoBearer", group: GroupIdentity, run: case006PublicRoutesTakeNoBearer},
-		{name: "Deny", group: GroupAuthorizer, routes: named, run: case006Deny},
-		{name: "Outage", group: GroupAuthorizer, routes: named, run: case006Outage},
-		{name: "PersonalKey", group: GroupAuthorizer, routes: named, run: case006PersonalKey},
+		{name: "NoBearer", group: GroupIdentity, routes: events,
+			codes: []string{CodeUnauthenticated}, run: case006NoBearer},
+		{name: "UnlistedIssuer", group: GroupIdentity, routes: events,
+			codes: []string{CodeUnauthenticated}, run: case006UnlistedIssuer},
+		{name: "AnotherSpace", group: GroupIdentity, routes: named,
+			codes: []string{CodeNotFound}, run: case006AnotherSpace},
+		{name: "PublicRoutesTakeNoBearer", group: GroupIdentity,
+			codes: []string{CodeNotFound}, run: case006PublicRoutesTakeNoBearer},
+		{name: "Deny", group: GroupAuthorizer, routes: named,
+			codes: []string{CodeForbidden}, run: case006Deny},
+		{name: "Outage", group: GroupAuthorizer, routes: named,
+			codes: []string{CodeAuthorizerUnavailable}, run: case006Outage},
+		{name: "PersonalKey", group: GroupAuthorizer, routes: named,
+			codes: []string{CodeForbidden}, run: case006PersonalKey},
 	}
 }
 

@@ -23,14 +23,17 @@ func cases009() []testCase {
 	return []testCase{
 		{name: "Lifecycle", group: GroupWorkspaces, routes: append(append([]string{}, create...),
 			"GET /v1/workspaces/{id}", "PATCH /v1/workspaces/{id}", "GET /v1/workspaces"), run: case009Lifecycle},
-		{name: "SlugTaken", group: GroupWorkspaces, routes: create, run: case009SlugTaken},
+		{name: "SlugTaken", group: GroupWorkspaces, routes: create,
+			codes: []string{CodeSlugTaken}, run: case009SlugTaken},
 		{name: "Deleted", group: GroupWorkspaces, routes: append(append([]string{}, create...),
 			"GET /v1/workspaces/deleted", "POST /v1/workspaces/{id}/restore"), run: case009Deleted},
-		{name: "OneWriter", group: GroupWorkspaces, routes: attach, run: case009OneWriter},
+		{name: "OneWriter", group: GroupWorkspaces, routes: attach,
+			codes: []string{CodeWriterHeld}, run: case009OneWriter},
 		{name: "Lease", group: GroupWorkspaces, routes: append(append([]string{}, attach...),
-			"GET /v1/workspaces/{id}"), run: case009Lease},
+			"GET /v1/workspaces/{id}"), codes: []string{CodeAttachmentGone}, run: case009Lease},
 		{name: "Materialize", group: GroupWorkspaces, routes: append(append([]string{}, attach...),
-			"GET /v1/workspaces/{id}/materialize", "POST /v1/workspaces/{id}/sync"), run: case009Materialize},
+			"GET /v1/workspaces/{id}/materialize", "POST /v1/workspaces/{id}/sync"),
+			codes: []string{CodeManifestIncomplete, CodeLeaseNotHeld, CodeNotFound}, run: case009Materialize},
 	}
 }
 
@@ -177,14 +180,12 @@ func case009Lease(t *testing.T, s *session) {
 	released := expectStatus(t, s.call(t, Alice, http.MethodGet, "/v1/workspaces/"+id, ""), http.StatusOK)
 	failIf(t, released.json["lease"] != nil, "the lease survived its release: %v", released.json["lease"])
 
-	// A released attachment is gone, and a renew of it says so rather than
-	// answering as though it still held the lease.
+	// A released attachment has ended, and a renew of it says so and tells
+	// the caller what to do about it, rather than answering as though it
+	// still held the lease or as though it had never existed.
 	expired := s.call(t, Alice, http.MethodPost, "/v1/workspaces/"+id+"/attach/"+aid+"/renew", body(fields{"ttl_seconds": 60}))
 	failIf(t, expired.status == http.StatusOK, "a released attachment was renewed")
-	code := expired.code()
-	failIf(t, code != CodeAttachmentGone && code != CodeNotFound && code != CodeLeaseNotHeld,
-		"a renew of a released attachment answered %d %s; spec 013 names attachment_gone, lease_not_held and not_found", expired.status, code)
-	expectError(t, expired, code)
+	expectError(t, expired, CodeAttachmentGone)
 }
 
 // case009Materialize: an attachment's manifest is the pinned view of the
@@ -221,10 +222,32 @@ func case009Materialize(t *testing.T, s *session) {
 		body(fields{"attachment_id": aid, "files": []any{}})), http.StatusOK)
 	failIf(t, str(synced.json, "last_sync") == "", "the sync answers no last_sync: %s", synced.body)
 
-	// A sync that names no attachment does not hold the lease, whatever it
-	// declares.
+	// A manifest that names an object nobody uploaded is refused whole. The
+	// post-state a sandbox declares is what the server reconciles against,
+	// so a sync that half applied would leave a subtree neither side
+	// believes in.
+	incomplete := s.call(t, Alice, http.MethodPost, "/v1/workspaces/"+id+"/sync",
+		body(fields{"attachment_id": aid, "files": []any{
+			map[string]any{"path": "never-uploaded.txt", "checksum": sha256Of("bytes nobody sent\n"), "size": 18},
+		}}))
+	failIf(t, incomplete.status == http.StatusOK, "a sync naming an object nobody uploaded was applied")
+	expectError(t, incomplete, CodeManifestIncomplete)
+
+	// A sync from an attachment that does not hold the writer lease does not
+	// write, whatever it declares. A reader is such an attachment.
+	reader := expectStatus(t, s.call(t, Alice, http.MethodPost, "/v1/workspaces/"+id+"/attach",
+		body(fields{"sandbox_id": s.name("sandbox-ro"), "mode": "ro", "ttl_seconds": 300})), http.StatusCreated)
+	rid := str(reader.json, "id")
+	defer s.call(t, Alice, http.MethodDelete, "/v1/workspaces/"+id+"/attach/"+rid, "")
+	readOnly := s.call(t, Alice, http.MethodPost, "/v1/workspaces/"+id+"/sync",
+		body(fields{"attachment_id": rid, "files": []any{}}))
+	failIf(t, readOnly.status == http.StatusOK, "a sync from a read attachment was applied")
+	expectError(t, readOnly, CodeLeaseNotHeld)
+
+	// And a sync naming an attachment that does not exist is a missing
+	// object, which is what invariant 6 makes every unresolvable reference.
 	orphan := s.call(t, Alice, http.MethodPost, "/v1/workspaces/"+id+"/sync",
 		body(fields{"attachment_id": s.name("no-such-attachment"), "files": []any{}}))
 	failIf(t, orphan.status == http.StatusOK, "a sync from an attachment that does not exist was applied")
-	expectError(t, orphan, orphan.code())
+	expectError(t, orphan, CodeNotFound)
 }

@@ -19,14 +19,24 @@ func cases013() []testCase {
 	create := []string{"POST /v1/workspaces", "DELETE /v1/workspaces/{id}"}
 	pages := []string{"GET /v1/workspaces", "GET /v1/shares", "GET /v1/events"}
 	return []testCase{
-		{name: "Envelope", group: GroupErrors, routes: create, run: case013Envelope},
-		{name: "ErrorTable", group: GroupErrors, routes: create, run: case013ErrorTable},
+		{name: "Envelope", group: GroupErrors, routes: create,
+			codes: []string{CodeMissingField}, run: case013Envelope},
+		{name: "ErrorTable", group: GroupErrors, routes: create, codes: []string{
+			CodeUnauthenticated, CodeMissingField, CodeUnknownField, CodeInvalidField,
+			CodeBadRequest, CodeUnsupportedMediaType, CodeNotAcceptable, CodeNotFound,
+			CodeSlugTaken, CodeUnknownPlane, CodeInvalidPath, CodeWriterHeld,
+		}, run: case013ErrorTable},
 		{name: "Documents", group: GroupErrors, run: case013Documents},
-		{name: "RequestID", group: GroupErrors, routes: create, run: case013RequestID},
+		{name: "RequestID", group: GroupErrors, routes: create,
+			codes: []string{CodeInvalidField}, run: case013RequestID},
 		{name: "ListEnvelope", group: GroupErrors, routes: pages, run: case013ListEnvelope},
-		{name: "Limit", group: GroupErrors, routes: pages, run: case013Limit},
-		{name: "BodiesAndTypes", group: GroupErrors, routes: create, run: case013BodiesAndTypes},
-		{name: "Planes", group: GroupPaths, routes: []string{"POST /v1/shares"}, run: case013Planes},
+		{name: "Limit", group: GroupErrors, routes: pages,
+			codes: []string{CodeInvalidField}, run: case013Limit},
+		{name: "BodiesAndTypes", group: GroupErrors, routes: create, codes: []string{
+			CodeUnknownField, CodeUnsupportedMediaType, CodeNotAcceptable, CodeBodyTooLarge,
+		}, run: case013BodiesAndTypes},
+		{name: "Planes", group: GroupPaths, routes: []string{"POST /v1/shares"},
+			codes: []string{CodeUnknownPlane, CodeInvalidPath}, run: case013Planes},
 	}
 }
 
@@ -117,7 +127,6 @@ func case013ErrorTable(t *testing.T, s *session) {
 				body(fields{"sandbox_id": s.name("codes-b"), "mode": "rw", "ttl_seconds": 120}))
 		}},
 	}
-	seen := map[string]bool{}
 	for _, p := range provoke {
 		t.Run(p.code, func(t *testing.T) {
 			if waiting := s.pendingRoutes(routesOfCode(p.code)); len(waiting) > 0 {
@@ -125,21 +134,14 @@ func case013ErrorTable(t *testing.T, s *session) {
 			}
 			expectError(t, p.drive(), p.code)
 		})
-		seen[p.code] = true
 	}
 
-	// The codes this suite reaches no route for are the ones the pending
-	// group names and the ones unprovoked records, and no others: a code
-	// that is neither is a hole in this case.
-	for code := range codeTable {
-		if seen[code] {
-			continue
-		}
-		if _, named := unprovoked[code]; named {
-			continue
-		}
-		t.Logf("%s is not provoked by this case; it is reached by the group its row belongs to", code)
-	}
+	// The rows this case does not reach are reached by the group each one
+	// belongs to, or are recorded in unprovoked with the reason no caller
+	// outside the installation can make one. That the two together are the
+	// whole table is held by TestEveryCodeIsProvokedOrNamed, which reads the
+	// codes every case declares rather than counting what a run happened to
+	// see.
 }
 
 // routesOfCode names the rows a code's provocation drives, so a code that

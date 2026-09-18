@@ -25,8 +25,14 @@ func cases007() []testCase {
 		{name: "Session", group: GroupUploads, routes: uploads, run: case007Session},
 		{name: "Complete", group: GroupUploads, routes: append(append([]string{}, uploads...),
 			"GET /v1/files/{owner}/{path...}"), run: case007Complete},
-		{name: "Abort", group: GroupUploads, routes: uploads, run: case007Abort},
-		{name: "TooLarge", group: GroupUploads, routes: uploads, run: case007TooLarge},
+		{name: "Abort", group: GroupUploads, routes: uploads,
+			codes: []string{CodeNotFound}, run: case007Abort},
+		// The first two are a set: what an installation answers a
+		// declaration it cannot take depends on which bound it crosses
+		// first, and spec 013 names both rows.
+		{name: "TooLarge", group: GroupUploads, routes: uploads, codes: []string{
+			CodeObjectTooLarge, CodeTooManyParts, CodeInvalidField,
+		}, run: case007TooLarge},
 	}
 }
 

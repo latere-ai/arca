@@ -5,6 +5,7 @@ package conformance
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -23,9 +24,14 @@ func cases008() []testCase {
 			"POST /v1/workspaces", "DELETE /v1/workspaces/{id}"), run: case008Grant},
 		{name: "WithMe", group: GroupShares, routes: append(append([]string{}, shares...),
 			"GET /v1/shares/with-me", "POST /v1/workspaces", "DELETE /v1/workspaces/{id}"), run: case008WithMe},
-		{name: "Ladder", group: GroupShares, routes: shares, run: case008Ladder},
-		{name: "Link", group: GroupLinks, routes: append(append([]string{}, links...), redeem...), run: case008Link},
-		{name: "LinkRevoked", group: GroupLinks, routes: append(append([]string{}, links...), redeem...), run: case008LinkRevoked},
+		{name: "Ladder", group: GroupShares, routes: shares,
+			codes: []string{CodeInvalidField, CodeUnknownPlane}, run: case008Ladder},
+		{name: "Link", group: GroupLinks, routes: append(append([]string{}, links...), redeem...),
+			run: case008Link},
+		{name: "LinkReadOnly", group: GroupLinks, routes: []string{"POST /v1/shares/links"},
+			codes: []string{CodeLinkReadOnly}, run: case008LinkReadOnly},
+		{name: "LinkRevoked", group: GroupLinks, routes: append(append([]string{}, links...), redeem...),
+			codes: []string{CodeNotFound}, run: case008LinkRevoked},
 		{name: "LinkFile", group: GroupLinks, routes: append(append([]string{}, links...),
 			"GET /v1/shares/links/{token}/files/{path...}",
 			"PUT /v1/files/{owner}/{path...}"), run: case008LinkFile},
@@ -173,6 +179,29 @@ func case008Link(t *testing.T, s *session) {
 	// write through a redemption route being refused rather than ignored.
 	write := s.do(t, request{method: http.MethodDelete, path: "/v1/shares/links/" + token})
 	failIf(t, write.status < 400, "a write through a redemption route answered %d", write.status)
+}
+
+// case008LinkReadOnly: a token grant carries reading and nothing more, so a
+// mint that asks for a rung above it is refused at creation rather than
+// quietly narrowed. A link that granted a write would be a credential
+// anybody who saw the URL could write with, which is why spec 013 has a code
+// written for this rule alone.
+func case008LinkReadOnly(t *testing.T, s *session) {
+	for _, rung := range []string{"write", "manage"} {
+		r := s.call(t, Alice, http.MethodPost, "/v1/shares/links",
+			body(fields{"owner": "me", "path_prefix": s.grantPrefix("link-" + rung), "permission": rung}))
+		if r.status == http.StatusCreated {
+			s.record("link "+str(r.json, "id"), func(t testing.TB) error {
+				s.call(t, Alice, http.MethodDelete, "/v1/shares/links/"+str(r.json, "id"), "")
+				return nil
+			})
+			t.Fatalf("a link was minted carrying %q, and a token grant carries reading", rung)
+		}
+		details := expectError(t, r, CodeLinkReadOnly)
+		fields := expectFields(t, details)
+		failIf(t, !strings.Contains(strings.Join(fields, ","), "permission"),
+			"the refusal names the fields %v and not permission", fields)
+	}
 }
 
 // case008LinkRevoked: a revoked token is a missing object on the next

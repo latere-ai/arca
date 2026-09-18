@@ -34,14 +34,21 @@ func cases005() []testCase {
 	trash := []string{"GET /v1/trash", "POST /v1/trash/restore", "DELETE /v1/trash"}
 	stars := []string{"PUT /v1/stars", "DELETE /v1/stars", "GET /v1/stars"}
 	return []testCase{
-		{name: "PutGetHeadDelete", group: GroupFiles, routes: object, run: case005PutGetHeadDelete},
+		{name: "PutGetHeadDelete", group: GroupFiles, routes: object,
+			codes: []string{CodeNotFound}, run: case005PutGetHeadDelete},
 		{name: "List", group: GroupFiles, routes: object, run: case005List},
-		{name: "MoveKeepsTheETag", group: GroupFiles, routes: move, run: case005MoveKeepsTheETag},
-		{name: "Conditional", group: GroupConditional, routes: object, run: case005Conditional},
+		{name: "MoveKeepsTheETag", group: GroupFiles, routes: move,
+			codes: []string{CodeNotFound, CodePathTaken}, run: case005MoveKeepsTheETag},
+		{name: "Conditional", group: GroupConditional, routes: object, codes: []string{
+			CodePreconditionFailed, CodeInvalidField, CodeLengthRequired,
+		}, run: case005Conditional},
 		{name: "Bytes", group: GroupBytes, routes: object, run: case005Bytes},
-		{name: "Versions", group: GroupVersions, routes: move, run: case005Versions},
-		{name: "Trash", group: GroupTrash, routes: append(append([]string{}, object...), trash...), run: case005Trash},
-		{name: "Stars", group: GroupStars, routes: append(append([]string{}, object...), stars...), run: case005Stars},
+		{name: "Versions", group: GroupVersions, routes: move,
+			codes: []string{CodeExclusiveFields}, run: case005Versions},
+		{name: "Trash", group: GroupTrash, routes: append(append([]string{}, object...), trash...),
+			codes: []string{CodeNotFound}, run: case005Trash},
+		{name: "Stars", group: GroupStars, routes: append(append([]string{}, object...), stars...),
+			codes: []string{CodeNotFound}, run: case005Stars},
 		{name: "Materialize", group: GroupFiles, routes: append(append([]string{}, object...),
 			"GET /v1/files/materialize"), run: case005Materialize},
 	}

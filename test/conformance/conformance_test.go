@@ -122,6 +122,48 @@ func TestEveryRouteHasACase(t *testing.T) {
 	}
 }
 
+// TestEveryCodeIsProvokedOrNamed is criterion 2's code half: every row of
+// spec 013's error table is either provoked by a case, which declares it, or
+// recorded in unprovoked with the reason no caller outside the installation
+// can make one. A code that is neither is a row the suite claims to cover
+// and does not.
+//
+// The codes are read off the case list rather than off a run, so the rule
+// holds against a build that serves none of the routes, and a reader checks
+// one list rather than a log.
+func TestEveryCodeIsProvokedOrNamed(t *testing.T) {
+	provoked := map[string][]string{}
+	for _, sp := range cases() {
+		for _, c := range sp.cases {
+			for _, code := range c.codes {
+				if _, known := codeTable[code]; !known {
+					t.Errorf("%s/%s claims %q, which is not a row of spec 013's table", sp.number, c.name, code)
+				}
+				provoked[code] = append(provoked[code], sp.number+"/"+c.name)
+			}
+		}
+	}
+	var missing []string
+	for code := range codeTable {
+		if len(provoked[code]) > 0 {
+			if reason, named := unprovoked[code]; named {
+				t.Errorf("%s is provoked by %v and is also recorded as unprovoked: %s", code, provoked[code], reason)
+			}
+			continue
+		}
+		if _, named := unprovoked[code]; !named {
+			missing = append(missing, code)
+		}
+	}
+	sort.Strings(missing)
+	if len(missing) > 0 {
+		t.Errorf("no case provokes these rows of spec 013's error table, and none is recorded as unprovoked with a reason:\n\t%s",
+			strings.Join(missing, "\n\t"))
+	}
+	t.Logf("%d of the %d rows are provoked by a case, %d are recorded as unprovoked",
+		len(provoked), len(codeTable), len(unprovoked))
+}
+
 // TestEveryGroupHasACase: every group of spec 017's table is reached by at
 // least one case, and every group a case names is one of the table's. A
 // group in the table with no case is a promise the suite does not keep.

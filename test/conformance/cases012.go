@@ -24,8 +24,10 @@ import (
 func cases012() []testCase {
 	admin := []string{"GET /v1/admin/overview", "POST /v1/admin/spaces/{owner}/restore"}
 	return []testCase{
-		{name: "Overview", group: GroupAdministraton, routes: admin[:1], run: case012Overview},
-		{name: "NotAnAdministrator", group: GroupAdministraton, routes: admin, run: case012NotAnAdministrator},
+		{name: "Overview", group: GroupAdministraton, routes: admin[:1],
+			codes: []string{CodeInvalidField}, run: case012Overview},
+		{name: "NotAnAdministrator", group: GroupAdministraton, routes: admin,
+			codes: []string{CodeNotFound}, run: case012NotAnAdministrator},
 		{name: "AcrossSpaces", group: GroupAdministraton, routes: append(append([]string{}, admin...),
 			"GET /v1/events", "POST /v1/workspaces", "DELETE /v1/workspaces/{id}"), run: case012AcrossSpaces},
 	}
