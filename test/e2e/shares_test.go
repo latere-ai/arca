@@ -125,6 +125,67 @@ func TestE2EAPublicLinkIsReadWithNoBearer(t *testing.T) {
 	}
 }
 
+// TestE2EAPublicLinkServesTheObjectsBytes is the binding of [[005-files]]'s
+// read path to the third link route, against the running binary: an object
+// written through the API is fetched back through a token with no bearer at
+// all, byte for byte, and a path the grant does not cover is a missing
+// object.
+//
+// The route answered not_implemented until that spec landed, so this case is
+// what says the seam is bound rather than declared.
+func TestE2EAPublicLinkServesTheObjectsBytes(t *testing.T) {
+	i := filesInstallation(t)
+	const content = "the quarterly numbers, in plain text"
+	if resp := i.filesPut(t, "files/reports/q3.txt", content); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("the put = %d: %s", resp.StatusCode, filesRead(t, resp))
+	}
+	if resp := i.filesPut(t, "files/private/salaries.txt", "not for the link"); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("the second put = %d: %s", resp.StatusCode, filesRead(t, resp))
+	}
+
+	code, body, _ := i.sharesCall(t, http.MethodPost, "/v1/shares/links", filesCaller, map[string]any{
+		"owner": "me", "path_prefix": "files/reports",
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("POST /v1/shares/links = %d: %s", code, body)
+	}
+	var minted sharesLink
+	sharesDecodeJSON(t, body, &minted)
+
+	// The bytes, with no bearer: the object is at or below ARCA_INLINE_BYTES,
+	// so the read streams rather than redirecting.
+	code, body, header := i.sharesCall(t, http.MethodGet, minted.URL+"/files/files/reports/q3.txt", "", nil)
+	if code != http.StatusOK {
+		t.Fatalf("the object route = %d: %s", code, body)
+	}
+	if body != content {
+		t.Errorf("the link answered %q", body)
+	}
+	if got := header.Get("Content-Type"); got != "text/plain" {
+		t.Errorf("the object came back as %q", got)
+	}
+	// The read path's ETag is the object's checksum, which is what makes a
+	// second fetch conditional.
+	if got, want := header.Get("ETag"), `"`+filesDigest(content)+`"`; got != want {
+		t.Errorf("the ETag is %s, want %s", got, want)
+	}
+	if got := header.Get("Referrer-Policy"); got != "no-referrer" {
+		t.Errorf("a link response carries Referrer-Policy %q", got)
+	}
+
+	// The grant confines what may be read, and a path outside it is the
+	// answer a token that names nothing gives.
+	for _, path := range []string{
+		minted.URL + "/files/files/private/salaries.txt",
+		minted.URL + "/files/files/reports/nothing-here.txt",
+	} {
+		code, body, _ = i.sharesCall(t, http.MethodGet, path, "", nil)
+		if code != http.StatusNotFound {
+			t.Errorf("GET %s = %d: %s", path, code, body)
+		}
+	}
+}
+
 // TestE2EAGrantIsCreatedReadAndRevoked is criteria 8 and 9 against the
 // running binary: two subjects of one issuer, the grantee reads what it
 // holds, and an organization is a subject like any other.

@@ -34,6 +34,7 @@ import (
 	"latere.ai/x/arca/internal/auth"
 	"latere.ai/x/arca/internal/blob"
 	"latere.ai/x/arca/internal/config"
+	"latere.ai/x/arca/internal/events"
 	"latere.ai/x/arca/internal/store"
 )
 
@@ -88,6 +89,11 @@ func tier(t *testing.T) (*harness, *tierStores) {
 	surface, err := api.New(api.Options{
 		Verifier: id.Verifier, Authorizer: id.Authorizer,
 		PublicURL: "https://storage.example", Routes: Routes(o),
+		// The frame registers the event tail of spec 010 and refuses to
+		// build without its log. No test here drives that route, so the
+		// node's own log is wired with no database behind it: what the tail
+		// reads is that package's business and its own tests'.
+		Events: events.NewLog(),
 	})
 	if err != nil {
 		t.Fatalf("the surface would not build: %v", err)
