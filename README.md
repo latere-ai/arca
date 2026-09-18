@@ -2,8 +2,8 @@
 
 **Durable storage for people, agents, and sandboxes.** Files with versions
 and trash, shares with a permission ladder, workspaces a sandbox mounts and
-syncs back, quotas, and an event log, over any S3 compatible bucket and a
-Postgres database. Bytes go to the bucket and metadata to the database;
+syncs back, usage per space, and an event log, over any S3 compatible
+bucket and a Postgres database. Bytes go to the bucket and metadata to the database;
 the server is stateless and any replica serves any request.
 
 Latere runs Arca as the storage section of its platform console, behind
@@ -25,9 +25,10 @@ A sandbox's volume dies with the sandbox. An object store holds bytes
 but knows nothing about who owns them, who may read them, how much a
 space may hold, or what happened to them last week.
 
-Arca is that place. It gives every principal a space, every space a
-quota, every object a version history and a trash, every share a
-permission, and every change an event a consumer can tail.
+Arca is that place. It gives every principal a space, every object a
+version history and a trash, every share a permission, every space a
+usage count the platform decides a limit over, and every change an
+event a consumer can tail.
 
 ## How it works
 
@@ -40,9 +41,9 @@ permission, and every change an event a consumer can tail.
   a short-lived presigned URL; a large upload goes to the bucket in
   parts the client sends directly. The server sees metadata,
   authorization, and small streams.
-- **One space per principal, one prefix per plane.** A person or a
-  service owns a space; inside it, files, workspaces, and memory are
-  prefixes with their own rules, not separate systems.
+- **One space per principal, two planes.** A person or a service owns
+  a space; inside it, files and workspaces are two prefixes with their
+  own rules, not separate systems.
 - **A workspace is a lease.** A sandbox attaches to a workspace and
   holds the writer lock while it materializes the tree and syncs it
   back; a lease that is not renewed expires, so a crashed sandbox does
@@ -65,11 +66,13 @@ for all four.
 
 ## Status
 
-The repository scaffold is in the tree: `arcad` serves its probes on two
-listeners from typed configuration, and the quality gate passes. The
-storage, the API, and the rest are specified and not built; the specs
-say what will exist and in what order, and the migration spec says how
-the code arrives from the service it replaces.
+The stores are in the tree: `arcad` reaches an S3 compatible bucket and
+a Postgres database, migrates its schema, answers its probes from both,
+and passes its quality gate and its store and end-to-end tiers against
+MinIO and Postgres. The release pipeline and the deploy manifests are
+written. The API, identity, files, shares, workspaces, events and the
+rest are specified and arrive in the order the specs number them; the
+migration spec says how the code arrives from the service it replaces.
 
 ## Documentation
 

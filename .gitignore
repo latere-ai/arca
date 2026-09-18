@@ -20,3 +20,6 @@ coverage.out
 # binary at the repository root is always a stray from a bare `go build`.
 /arca
 /arcad
+
+# Claude Code worktrees and session files; local only.
+/.claude/
