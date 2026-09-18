@@ -165,6 +165,26 @@ func TestTheCheckDeletesTheObjectItWrote(t *testing.T) {
 	}
 }
 
+// TestASecondRunPassesWhateverThePreviousOneLeftBehind: every put of spec 003
+// carries If-None-Match, so a probe key of a fixed name would make the second
+// of two overlapping runs fail on a healthy installation, and a run killed
+// before its delete would break every run after it. The key carries a fresh
+// id per run, and the line does not name it, so the report stays identical.
+func TestASecondRunPassesWhateverThePreviousOneLeftBehind(t *testing.T) {
+	w := healthy(t)
+	// A run that died before its delete, which is the state a killed check
+	// or a crashed pod leaves the bucket in.
+	w.bucket.del = errRefused
+	w.fails(t, NameBucket)
+	w.bucket.del = nil
+
+	first := w.passes(t, NameBucket)
+	second := w.passes(t, NameBucket)
+	if first.Line() != second.Line() {
+		t.Errorf("two runs printed\n%s\nand\n%s", first.Line(), second.Line())
+	}
+}
+
 // TestTheCheckDeletesTheObjectItWroteEvenWhenTheRunFailed: the delete runs on
 // every path out, so a run that died at the read leaves nothing behind.
 func TestTheCheckDeletesTheObjectItWroteEvenWhenTheRunFailed(t *testing.T) {

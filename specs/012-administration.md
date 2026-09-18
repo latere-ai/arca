@@ -110,10 +110,13 @@ tree made another reading better:
   failure; one that cannot be reached at all is not, because an ingress
   often does not answer from inside its own cluster and the check runs
   beside the server as often as in front of it.
-- **The probe key is a fixed name and not a ulid.** Criterion 12 asks for
-  two identical runs, and a key naming a fresh id would put a value on
-  the line that differs every time. One key per installation is enough,
-  because the check deletes it on every path out of the bucket line.
+- **The probe key carries a fresh id per run and the line never names
+  it.** Criterion 12 asks for two identical runs, which a key in the
+  output would break; a key of a fixed name would break something worse,
+  because every put of [[003-object-store]] carries `If-None-Match`, so
+  two overlapping runs would fail the second on a healthy installation
+  and a run killed before its delete would fail every run after it. The
+  two properties do not fight: the id is in the key and not in the line.
 - **The check builds the authorizer client directly** rather than through
   `auth.Start`, which warms the verifier against every issuer: an issuer
   that does not answer would otherwise fail the authorizer line too, and
@@ -317,7 +320,7 @@ not delete.
 
 | Requirement | Passes when | Line names |
 |---|---|---|
-| bucket | `HeadBucket` answers, and a put of a small object under `<ARCA_BUCKET_PREFIX>_check/probe` with `If-None-Match: *`, a get of it, and a delete of it all succeed | the bucket, the endpoint, the prefix |
+| bucket | `HeadBucket` answers, and a put of a small object under `<ARCA_BUCKET_PREFIX>_check/<ulid>` with `If-None-Match: *`, a get of it, and a delete of it all succeed | the bucket, the endpoint, the prefix |
 | database | the connection opens, the server answers, and the schema version equals the highest embedded migration with no dirty flag | the server version and the migration the schema is at |
 | issuer | for each entry of `ARCA_OIDC_ISSUERS`: discovery answers, the key set parses, and it holds at least one key of an accepted algorithm | the issuer, the key count, the algorithms |
 | authorizer | `ARCA_AUTHORIZER_URL` answers the probe question of [[006-identity]], the resource id `probe` of kind `Space`, with a well-formed `200` carrying `allow: false` | the endpoint and the decision |
@@ -393,4 +396,4 @@ does not emit ([[018-observability]]).
 | 11 | No event `detail` carries object content or a link token | `TestEventDetailIsMetadataOnly` over the shapes the writers pass |
 | 12 | `arcad check` prints one line per requirement in table order, exits 0 when all pass and 1 when any fails, and two runs against a healthy installation print identical output | `internal/check` test against the stubs of [[014-test-stubs-and-tiers]] |
 | 13 | `check` fails on an unreachable bucket, a bucket it cannot write under the prefix, an unreachable database, a schema behind the embedded migrations, an issuer whose discovery does not answer, and an authorizer that allows the probe | `internal/check` table test, one case per failure |
-| 14 | `check` deletes the object it wrote, and a bucket listing after a run holds nothing under `_check/` | the store tier of [[014-test-stubs-and-tiers]] |
+| 14 | `check` deletes the object it wrote, and a bucket listing after a run holds nothing under `_check/` | `internal/check` over the in-process store, and the e2e tier of [[014-test-stubs-and-tiers]] against MinIO |

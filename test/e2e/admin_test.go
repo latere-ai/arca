@@ -41,7 +41,13 @@ type overviewRow struct {
 // one line each, exit 0.
 func TestE2ECheckPassesAgainstTheStack(t *testing.T) {
 	i := start(t)
-	out, err := i.command(t, "check")
+	// The public URL is pinned at an address nothing listens on, which is
+	// the case this tier can hold: the harness serves on an ephemeral port
+	// and the installation's own ARCA_PUBLIC_URL names port 80, where the
+	// machine running the tier may have anything at all. What the line does
+	// with a URL that answers is internal/check's own test.
+	unreachable := []string{"ARCA_PUBLIC_URL=http://127.0.0.1:1"}
+	out, err := i.commandWith(t, unreachable, "check")
 	if err != nil {
 		t.Fatalf("arcad check against a healthy installation: %v\n%s", err, out)
 	}
@@ -57,13 +63,24 @@ func TestE2ECheckPassesAgainstTheStack(t *testing.T) {
 		t.Errorf("the summary is missing:\n%s", out)
 	}
 	// Two runs of a healthy installation print identical output, which is
-	// what lets an operator diff one against the next.
-	again, err := i.command(t, "check")
+	// what lets an operator diff one against the next. The second run also
+	// proves the probe key of the first was given back: every put carries
+	// If-None-Match, so a key left behind would fail this line.
+	again, err := i.commandWith(t, unreachable, "check")
 	if err != nil {
 		t.Fatalf("the second run: %v\n%s", err, again)
 	}
 	if again != out {
 		t.Errorf("two runs printed\n%s\nand\n%s", out, again)
+	}
+	// Criterion 14 against a real bucket: the check writes nothing it does
+	// not delete, so the prefix holds nothing once two runs have ended.
+	page, err := i.bucket(t).List(t.Context(), i.prefix+"_check/", "", 10)
+	if err != nil {
+		t.Fatalf("list the probe prefix: %v", err)
+	}
+	if len(page.Keys) != 0 {
+		t.Errorf("the bucket holds %v under the probe prefix after two runs", page.Keys)
 	}
 }
 
@@ -93,7 +110,10 @@ func TestE2ECheckFailsOnABrokenVariable(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			i := start(t)
-			out, err := i.commandWith(t, []string{tc.variable + "=" + tc.value}, "check")
+			// The public URL is pinned with the broken variable, so the
+			// case's own fault is the only one the report holds.
+			out, err := i.commandWith(t,
+				[]string{"ARCA_PUBLIC_URL=http://127.0.0.1:1", tc.variable + "=" + tc.value}, "check")
 			var exit *exec.ExitError
 			if !errors.As(err, &exit) || exit.ExitCode() != 1 {
 				t.Fatalf("a broken %s exited %v, want 1\n%s", tc.variable, err, out)
@@ -101,8 +121,8 @@ func TestE2ECheckFailsOnABrokenVariable(t *testing.T) {
 			if !strings.Contains(out, "fail  "+tc.requirement) {
 				t.Errorf("the report does not fail the %s line:\n%s", tc.requirement, out)
 			}
-			if !strings.Contains(out, "of 5 checks failed") {
-				t.Errorf("the summary is missing:\n%s", out)
+			if !strings.Contains(out, "1 of 5 checks failed") {
+				t.Errorf("the broken %s failed more than its own requirement:\n%s", tc.variable, out)
 			}
 		})
 	}

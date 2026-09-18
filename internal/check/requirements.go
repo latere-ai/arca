@@ -18,6 +18,7 @@ import (
 	"latere.ai/x/arca/internal/auth"
 	"latere.ai/x/arca/internal/blob"
 	"latere.ai/x/arca/internal/store"
+	"latere.ai/x/arca/object"
 )
 
 // The five requirements of spec 012's table, one function each. Each answers
@@ -48,7 +49,7 @@ func checkBucket(ctx context.Context, o Options) Requirement {
 	if err := o.Bucket.HeadBucket(ctx); err != nil {
 		return failed(NameBucket, "%s: %v", where, err)
 	}
-	key := cfg.BucketPrefix + ProbePrefix + probeName
+	key := cfg.BucketPrefix + ProbePrefix + string(object.NewID())
 	// The delete runs on every path out, so a run that failed at the read
 	// still leaves the bucket holding nothing of its own.
 	defer func() { _ = o.Bucket.Delete(context.WithoutCancel(ctx), key) }()
@@ -75,16 +76,17 @@ func checkBucket(ctx context.Context, o Options) Requirement {
 	return passed(NameBucket, "%s: wrote, read, deleted", where)
 }
 
-// The bytes the probe key holds and the name it is written under. Both are
-// fixed: an id in the key would be a value that differs between two runs of a
-// healthy installation, and the line would stop being identical run to run.
-// One key per installation is enough, because the check deletes it and a
-// second run that found one left behind is a run whose predecessor died
-// mid-check, which the write itself reports.
-const (
-	probeName = "probe"
-	probeBody = "arcad check\n"
-)
+// probeBody is what the probe key holds, which is enough bytes to prove a
+// write and few enough to cost nothing.
+//
+// The key carries a fresh id per run and the line never names it, so the two
+// properties this check needs do not fight: every put of spec 003 carries
+// If-None-Match, so a fixed name would make a second concurrent run fail on a
+// healthy installation and a run killed before its delete would break every
+// run after it, while the output stays identical because the id is not
+// printed. A key a run left behind is swept by the reconciliation of spec
+// 010 like any other key no row names.
+const probeBody = "arcad check\n"
 
 // endpointOf names where the bucket was reached: the endpoint the operator
 // set, or the region the SDK derives one from.
