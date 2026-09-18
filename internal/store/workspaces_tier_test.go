@@ -23,15 +23,16 @@ import (
 	"latere.ai/x/arca/object"
 )
 
-// space is a subject of this run's own, so two tiers sharing a database do
-// not share a space.
-func space(t *testing.T) string {
+// wsSpace is a subject of this run's own, so two tiers sharing a database do
+// not share a space. The prefix is deliberate: this package's tier files are
+// written by several specs and share one namespace.
+func wsSpace(t *testing.T) string {
 	t.Helper()
 	return fmt.Sprintf("https://issuer.example|%s-%d", t.Name(), time.Now().UnixNano())
 }
 
-// workspace creates one workspace of a space and answers it.
-func workspace(t *testing.T, db *DB, owner, slug string) Workspace {
+// wsRow creates one workspace of a space and answers it.
+func wsRow(t *testing.T, db *DB, owner, slug string) Workspace {
 	t.Helper()
 	w, err := NewWorkspaces().Create(t.Context(), db.Querier(), Workspace{
 		Owner: owner, Slug: slug, CreatedBy: owner,
@@ -50,8 +51,8 @@ func workspace(t *testing.T, db *DB, owner, slug string) Workspace {
 // the statement, so the losers match no row; nothing in Go serialises them.
 func TestStoreTwoConcurrentWritersLeaveOneLease(t *testing.T) {
 	db := tier(t)
-	owner := space(t)
-	ws := workspace(t, db, owner, "build")
+	owner := wsSpace(t)
+	ws := wsRow(t, db, owner, "build")
 
 	const writers = 8
 	now := time.Now()
@@ -126,8 +127,8 @@ func TestStoreTwoConcurrentWritersLeaveOneLease(t *testing.T) {
 // exist at once.
 func TestStoreManyReadersAttachAtOnceAndNoneTouchesTheLease(t *testing.T) {
 	db := tier(t)
-	owner := space(t)
-	ws := workspace(t, db, owner, "build")
+	owner := wsSpace(t)
+	ws := wsRow(t, db, owner, "build")
 
 	const readers = 12
 	until := time.Now().Add(time.Hour)
@@ -173,8 +174,8 @@ func TestStoreManyReadersAttachAtOnceAndNoneTouchesTheLease(t *testing.T) {
 // guard-free.
 func TestStoreASlugCollidesAcrossLiveAndDeletedRowsAlike(t *testing.T) {
 	db := tier(t)
-	owner := space(t)
-	ws := workspace(t, db, owner, "build")
+	owner := wsSpace(t)
+	ws := wsRow(t, db, owner, "build")
 
 	if _, err := NewWorkspaces().Create(t.Context(), db.Querier(), Workspace{
 		Owner: owner, Slug: "build", CreatedBy: owner,
@@ -200,7 +201,7 @@ func TestStoreASlugCollidesAcrossLiveAndDeletedRowsAlike(t *testing.T) {
 	}
 	// Another space takes the same name: the uniqueness is per space.
 	if _, err := NewWorkspaces().Create(t.Context(), db.Querier(), Workspace{
-		Owner: space(t) + "-other", Slug: "build", CreatedBy: owner,
+		Owner: wsSpace(t) + "-other", Slug: "build", CreatedBy: owner,
 	}); err != nil {
 		t.Fatalf("the same slug in another space = %v", err)
 	}
@@ -211,8 +212,8 @@ func TestStoreASlugCollidesAcrossLiveAndDeletedRowsAlike(t *testing.T) {
 // column that does not exist and a scan in the wrong order are found.
 func TestStoreTheWorkspaceQueriesRoundTripAgainstTheSchema(t *testing.T) {
 	db := tier(t)
-	owner := space(t)
-	ws := workspace(t, db, owner, "build")
+	owner := wsSpace(t)
+	ws := wsRow(t, db, owner, "build")
 	q := db.Querier()
 
 	if ws.WriterHolder != nil || ws.LastSync != nil || ws.DeletedAt != nil {
@@ -229,7 +230,7 @@ func TestStoreTheWorkspaceQueriesRoundTripAgainstTheSchema(t *testing.T) {
 	// The listing is keyset paginated on the id and pages without repeating
 	// or skipping a row.
 	for _, slug := range []string{"alpha", "beta", "gamma"} {
-		workspace(t, db, owner, slug)
+		wsRow(t, db, owner, slug)
 	}
 	seen := map[string]bool{}
 	cursor := ""
@@ -301,8 +302,8 @@ func TestStoreTheWorkspaceQueriesRoundTripAgainstTheSchema(t *testing.T) {
 // against the real JSONB column and the real foreign key.
 func TestStoreAnAttachmentRoundTripsWithItsManifest(t *testing.T) {
 	db := tier(t)
-	owner := space(t)
-	ws := workspace(t, db, owner, "build")
+	owner := wsSpace(t)
+	ws := wsRow(t, db, owner, "build")
 	q := db.Querier()
 	manifest := []byte(`[{"path":"src/main.go","checksum":"4f9a","size":2814}]`)
 
@@ -322,7 +323,7 @@ func TestStoreAnAttachmentRoundTripsWithItsManifest(t *testing.T) {
 	}
 	// An attachment is read through its workspace, so an id from another
 	// workspace names no row.
-	elsewhere := workspace(t, db, owner, "release")
+	elsewhere := wsRow(t, db, owner, "release")
 	if _, err := NewAttachments().Get(t.Context(), q, elsewhere.ID, a.ID); !errors.Is(err, pgx.ErrNoRows) {
 		t.Errorf("an attachment read across workspaces = %v", err)
 	}
@@ -371,8 +372,8 @@ func TestStoreAnAttachmentRoundTripsWithItsManifest(t *testing.T) {
 // sweep of spec 010 calls, against rows whose deadlines have passed.
 func TestStoreTheReaperReadsWhatOutlivedItsDeadline(t *testing.T) {
 	db := tier(t)
-	owner := space(t)
-	ws := workspace(t, db, owner, "build")
+	owner := wsSpace(t)
+	ws := wsRow(t, db, owner, "build")
 	q := db.Querier()
 	past := time.Now().Add(-time.Hour)
 	future := time.Now().Add(time.Hour)
@@ -437,13 +438,13 @@ func TestStoreTheReaperReadsWhatOutlivedItsDeadline(t *testing.T) {
 // names no key.
 func TestStoreASubtreeMovesItsRowsAndItsBookmarks(t *testing.T) {
 	db := tier(t)
-	owner := space(t)
+	owner := wsSpace(t)
 	q := db.Querier()
 	objects := NewWorkspaceObjects()
 
-	held := seedFile(t, db, owner, "workspaces/build/src/main.go", 2814)
-	seedFile(t, db, owner, "workspaces/build/bin/app", 5120000)
-	seedFile(t, db, owner, "files/elsewhere.md", 10)
+	held := wsSeedFile(t, db, owner, "workspaces/build/src/main.go", 2814)
+	wsSeedFile(t, db, owner, "workspaces/build/bin/app", 5120000)
+	wsSeedFile(t, db, owner, "files/elsewhere.md", 10)
 	if _, err := q.Exec(t.Context(),
 		`INSERT INTO stars (subject, owner, path) VALUES ($1, $1, $2)`,
 		owner, "workspaces/build/src/main.go"); err != nil {
@@ -483,7 +484,7 @@ func TestStoreASubtreeMovesItsRowsAndItsBookmarks(t *testing.T) {
 		t.Fatalf("the other plane holds %+v, %v", outside, err)
 	}
 	// A prefix holding a percent matches itself and not everything.
-	seedFile(t, db, owner, "workspaces/100%/a", 1)
+	wsSeedFile(t, db, owner, "workspaces/100%/a", 1)
 	odd, err := objects.Manifest(t.Context(), q, owner, "workspaces/100%/")
 	if err != nil || len(odd) != 1 {
 		t.Fatalf("a prefix with a percent matched %+v, %v", odd, err)
@@ -495,14 +496,14 @@ func TestStoreASubtreeMovesItsRowsAndItsBookmarks(t *testing.T) {
 // deciding which bytes may follow the rows.
 func TestStoreASyncDropsTheRowsAndAnswersWhatMayGo(t *testing.T) {
 	db := tier(t)
-	owner := space(t)
+	owner := wsSpace(t)
 	q := db.Querier()
 	objects := NewWorkspaceObjects()
 
-	dropped := seedFile(t, db, owner, "workspaces/build/bin/app", 8)
-	kept := seedFile(t, db, owner, "workspaces/build/src/main.go", 12)
+	dropped := wsSeedFile(t, db, owner, "workspaces/build/bin/app", 8)
+	kept := wsSeedFile(t, db, owner, "workspaces/build/src/main.go", 12)
 	// A second row names one of the objects, which is what a copy leaves.
-	shared := seedFile(t, db, owner, "workspaces/build/bin/copy", 8)
+	shared := wsSeedFile(t, db, owner, "workspaces/build/bin/copy", 8)
 	if _, err := q.Exec(t.Context(),
 		`UPDATE files SET object_id = $3 WHERE owner = $1 AND path = $2`,
 		owner, "workspaces/build/bin/copy", dropped); err != nil {
@@ -550,10 +551,10 @@ func TestStoreASyncDropsTheRowsAndAnswersWhatMayGo(t *testing.T) {
 	_ = shared
 }
 
-// seedFile writes one row of the file plane, which is what a put of spec 005
+// wsSeedFile writes one row of the file plane, which is what a put of spec 005
 // leaves behind. The tiers of spec 009 stand in for that spec until it
 // lands.
-func seedFile(t *testing.T, db *DB, owner, path string, size int64) object.ID {
+func wsSeedFile(t *testing.T, db *DB, owner, path string, size int64) object.ID {
 	t.Helper()
 	id := object.NewID()
 	created, err := NewFiles().Insert(t.Context(), db.Querier(), File{
