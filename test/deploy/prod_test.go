@@ -62,6 +62,64 @@ func TestProdPinsAReleasedImage(t *testing.T) {
 	}
 }
 
+// TestProdRoutesWhatTheSmokeReads holds the Ingress to the two paths the
+// release pipeline depends on. The deploy job smokes the origin the
+// production environment names, so a rule dropped here leaves a green tree
+// and a release that fails after the rollout, which is the worst moment to
+// find it.
+//
+// The catch-all is asserted absent for the opposite reason: the host is
+// shared with several services, and a `/` rule would take the whole origin
+// and answer 404 for every route another service adds.
+func TestProdRoutesWhatTheSmokeReads(t *testing.T) {
+	routed := map[string]string{}
+	found := false
+	for _, d := range read(t, "deploy/prod") {
+		if d.kind() != "Ingress" {
+			continue
+		}
+		found = true
+		for _, rule := range d.items("spec", "rules") {
+			for _, p := range rule.items("http", "paths") {
+				routed[p.text("path")] = p.text("pathType")
+				if backend := p.at("backend", "service").text("name"); backend != "arcad" {
+					t.Errorf("deploy/prod routes %s to %q, want arcad", p.text("path"), backend)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("deploy/prod holds no Ingress")
+	}
+	// tools/smoke/release.sh reads these two through the origin.
+	for _, path := range []string{"/readyz", "/version"} {
+		got, ok := routed[path]
+		switch {
+		case !ok:
+			t.Errorf("deploy/prod routes no %s, which the release smoke reads through the origin", path)
+		case got != "Exact":
+			t.Errorf("deploy/prod routes %s as %q, want Exact so it claims nothing beyond itself", path, got)
+		}
+	}
+	if _, ok := routed["/"]; ok {
+		t.Error("deploy/prod claims / at a shared origin; a catch-all takes the whole host")
+	}
+	// The storage prefixes of spec 013. One dropped here is a route that
+	// answers 404 at the origin while the server still serves it.
+	for _, prefix := range []string{
+		"/v1/files", "/v1/uploads", "/v1/shares",
+		"/v1/workspaces", "/v1/trash", "/v1/stars", "/v1/events",
+	} {
+		got, ok := routed[prefix]
+		switch {
+		case !ok:
+			t.Errorf("deploy/prod routes no %s", prefix)
+		case got != "Prefix":
+			t.Errorf("deploy/prod routes %s as %q, want Prefix", prefix, got)
+		}
+	}
+}
+
 // TestProdKeepsCredentialsInSecrets is the gate's bearer rule over the
 // overlay the gate itself does not read. deploy/prod is declared under
 // identity.skip so the addresses it sets are allowed, and skipping it takes
