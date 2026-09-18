@@ -58,7 +58,7 @@ validated spec is dispatched when every spec in its `depends_on` is at
 | [009](009-workspaces.md) | Workspaces: durable subtrees, the writer lease, materialize and sync | testing |
 | [010](010-events-and-reaper.md) | Events and the reaper: the ledger, the log, the reconciliation of the two stores | testing |
 | 011 | Webhooks | retired 2026-09-18 before drafting closed; the number is not reused. Events are tailed by cursor, spec 010 |
-| [012](012-administration.md) | Administration: the overview across spaces, the cross-space restore, the record of what was done, the `check` command | in-progress |
+| [012](012-administration.md) | Administration: the overview across spaces, the cross-space restore, the record of what was done, the `check` command | testing |
 | [013](013-api.md) | API: routes, the error table, OpenAPI, the document served | testing |
 | [014](014-test-stubs-and-tiers.md) | Test stubs and tiers: the unit tier, the store tier on MinIO and Postgres, the e2e tier | testing |
 | [015](015-security-and-threat-model.md) | Security and threat model | drafted |
