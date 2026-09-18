@@ -87,17 +87,23 @@ func TestTheGuardReadsALiteralOutOfBothShapes(t *testing.T) {
 		source string
 		want   []Action
 	}{
-		{"an event built with a literal", `package p
+		{"an event built inside this package", `package events
 			var e = Event{Owner: "o", Action: "share_resolved"}`, []Action{"share_resolved"}},
 		{"an event built through the package", `package p
 			import "latere.ai/x/arca/internal/events"
 			var e = events.Event{Action: "quota_exceeded"}`, []Action{"quota_exceeded"}},
-		{"a conversion", `package p
+		{"a conversion inside this package", `package events
 			var a = Action("share_resolved")`, []Action{"share_resolved"}},
-		{"a constant of the table", `package p
+		{"a conversion through the package", `package p
+			var a = events.Action("share_resolved")`, []Action{"share_resolved"}},
+		{"a constant of the table", `package events
 			var e = Event{Action: ActionPut}`, nil},
 		{"another type with an action field", `package p
 			var r = Rule{Action: "*", Allow: true}`, nil},
+		{"another package's event type", `package p
+			var e = somewhere.Event{Action: "anything"}`, nil},
+		{"a bare Event outside this package", `package p
+			var e = Event{Action: "anything"}`, nil},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			file, err := parser.ParseFile(token.NewFileSet(), "p.go", c.source, 0)
@@ -114,18 +120,35 @@ func TestTheGuardReadsALiteralOutOfBothShapes(t *testing.T) {
 // appendedActions answers every action a file names as a literal: the Action
 // field of an Event it builds, and every conversion of a literal to the
 // type.
+//
+// Only this package's types count. Another package's Event with an action
+// field of its own answers to its own vocabulary and not to this one, which
+// is why the name has to carry the qualifier or the file has to be here.
 func appendedActions(file *ast.File) []Action {
 	var named []Action
 	ast.Inspect(file, func(n ast.Node) bool {
-		if lit, ok := n.(*ast.CompositeLit); ok && typeName(lit.Type) == "Event" {
+		if lit, ok := n.(*ast.CompositeLit); ok && ours(file, lit.Type, "Event") {
 			named = append(named, actionFields(lit)...)
 		}
-		if call, ok := n.(*ast.CallExpr); ok && typeName(call.Fun) == "Action" && len(call.Args) == 1 {
+		if call, ok := n.(*ast.CallExpr); ok && ours(file, call.Fun, "Action") && len(call.Args) == 1 {
 			named = append(named, literal(call.Args[0])...)
 		}
 		return true
 	})
 	return named
+}
+
+// ours reports whether a type expression names this package's type: written
+// bare inside the package, or qualified with events anywhere else.
+func ours(file *ast.File, expr ast.Expr, name string) bool {
+	switch t := expr.(type) {
+	case *ast.Ident:
+		return file.Name.Name == "events" && t.Name == name
+	case *ast.SelectorExpr:
+		pkg, ok := t.X.(*ast.Ident)
+		return ok && pkg.Name == "events" && t.Sel.Name == name
+	}
+	return false
 }
 
 // actionFields answers the literals an event's Action field is built from.
@@ -141,18 +164,6 @@ func actionFields(lit *ast.CompositeLit) []Action {
 		}
 	}
 	return named
-}
-
-// typeName answers the bare name of a type expression, so events.Event and
-// Event read the same.
-func typeName(expr ast.Expr) string {
-	switch t := expr.(type) {
-	case *ast.Ident:
-		return t.Name
-	case *ast.SelectorExpr:
-		return t.Sel.Name
-	}
-	return ""
 }
 
 // literal answers the string a node spells out, or nothing when the node is

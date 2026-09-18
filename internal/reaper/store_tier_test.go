@@ -17,6 +17,7 @@ package reaper
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -155,14 +156,16 @@ func (r *tierRun) put(t *testing.T, id object.ID) string {
 	return key
 }
 
-// held reports whether the bucket still holds the key.
+// held reports whether the bucket still holds the key. A key that is gone is
+// blob.ErrNotFound and nothing else: a throttle or an outage must never read
+// as an object that is not there (spec 001, invariant 2).
 func (r *tierRun) held(t *testing.T, key string) bool {
 	t.Helper()
 	_, err := r.bucket.Head(t.Context(), key)
 	switch {
 	case err == nil:
 		return true
-	case strings.Contains(err.Error(), "not found"):
+	case errors.Is(err, blob.ErrNotFound):
 		return false
 	default:
 		t.Fatalf("head %s: %v", key, err)
