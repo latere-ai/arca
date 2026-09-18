@@ -67,6 +67,11 @@ type Options struct {
 	// and a log that reaches no database takes none.
 	Events  events.Log
 	Querier store.Querier
+	// Routes are the rows of spec 013's table the packages that own their
+	// behaviour contribute. See register.go: a contributed row is behind
+	// the verifier, asks one action of spec 006's vocabulary, and joins the
+	// one list the mux and the document are both built from.
+	Routes []Route
 	// Now is the clock request ids are minted on. time.Now when nil.
 	Now func() time.Time
 }
@@ -80,6 +85,7 @@ type API struct {
 	perSubject *ratelimit.Buckets
 	perAddress *ratelimit.Buckets
 	clock      func() time.Time
+	rows       []route
 	document   []byte
 	// eventTail is the handler of spec 010, built once over the log and the
 	// database of this build.
@@ -99,14 +105,19 @@ func New(o Options) (*API, error) {
 	if o.Events == nil {
 		return nil, errors.New("api: no event log, and GET /v1/events is a route of this surface")
 	}
+	rows, err := merge(routeTable, o.Routes)
+	if err != nil {
+		return nil, err
+	}
 	a := &API{
 		verifier: o.Verifier, authorizer: o.Authorizer,
 		publicURL: o.PublicURL, clock: o.Now,
 		perSubject: buckets(o.RequestsPerMinute),
 		perAddress: buckets(o.UnauthenticatedRequestsPerMinute),
+		rows:       rows,
 	}
 	a.eventTail = events.Handler(o.Events, o.Querier, eventGuard{api: a}, refuseEvent)
-	a.document = a.build(routeTable)
+	a.document = a.build(rows)
 	return a, nil
 }
 
@@ -125,7 +136,7 @@ func (a *API) Authorizer() *auth.Authorizer { return a.authorizer }
 // which is the right order: whether a route exists is not something an
 // unauthenticated caller learns.
 func (a *API) Mount(mux *http.ServeMux) {
-	a.mount(mux, routeTable)
+	a.mount(mux, a.rows)
 }
 
 func (a *API) mount(mux *http.ServeMux, rows []route) {

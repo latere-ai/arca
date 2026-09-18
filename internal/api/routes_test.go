@@ -231,6 +231,11 @@ func newHarness(t *testing.T, rows []route, opts ...func(*Options)) *harness {
 		t.Fatalf("the surface would not build: %v", err)
 	}
 	mux := http.NewServeMux()
+	if rows == nil {
+		// Nil is the surface's own list: the frame's table plus whatever the
+		// options contributed, which is what Mount registers.
+		rows = a.rows
+	}
 	a.mount(mux, rows)
 	return &harness{mux: mux, api: a, issuer: iss, endpoint: endpoint}
 }
