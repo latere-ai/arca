@@ -1,0 +1,41 @@
+# The production target, and the one directory of this tree that may name
+# the installation it serves. It is declared in .lateregate.yaml under both
+# identity.skip and identity.overlays, so the gate's no-latere-value rule
+# reads the addresses set here rather than refusing them, and a document
+# elsewhere may name an address this overlay carries.
+#
+# Everything here is safe to re-apply, because the release pipeline applies
+# it on every release with `kubectl apply -k deploy/prod/` and then sets the
+# image to the tag it built. A resource that cannot be re-applied belongs in
+# deploy/bootstrap/, which the pipeline never reads.
+#
+# Latere runs Arca beside its other services in the namespace `latere`,
+# not in one of its own, so this overlay names that namespace and reads the
+# Secrets and the registry pull secret that already live there. An operator
+# with a dedicated namespace changes the one line below and drops
+# pull-secret.yaml.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: latere
+
+resources:
+  - ../base
+  # The Ingress is a resource and not a patch: the base holds none, because
+  # an ingress class is an installation's choice (spec 016).
+  - ingress.yaml
+
+# The release this target runs. The base carries the placeholder tag
+# `unreleased`, which never resolves, so a target that pins nothing fails to
+# pull rather than running an unknown build. `lateregate release` rewrites
+# the version below in the same commit as the changelog section, under the
+# release.stamp entry in .lateregate.yaml, so this line never lags a tag.
+images:
+  - name: ghcr.io/latere-ai/arcad
+    newTag: v0.1.0
+
+patches:
+  - path: public-url.yaml
+  - path: authorizer.yaml
+  - path: pull-secret.yaml
+  - path: replicas.yaml

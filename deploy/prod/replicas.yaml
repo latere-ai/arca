@@ -1,0 +1,11 @@
+# Replica bounds for the installation as it stands: two replicas always, up
+# to eight under load. The base allows 32, which is more than this cluster
+# has room for. The autoscaler scales on CPU alone; raise maxReplicas when
+# the replicas sit at their CPU request under ordinary traffic.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: arcad
+spec:
+  minReplicas: 2
+  maxReplicas: 8

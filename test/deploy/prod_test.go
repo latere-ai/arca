@@ -1,0 +1,185 @@
+// SPDX-FileCopyrightText: 2026 Latere AI
+// SPDX-License-Identifier: MIT
+
+package deploy
+
+import (
+	"os"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"strings"
+	"testing"
+)
+
+// releaseTag is the version deploy/prod pins, which `lateregate release`
+// rewrites through the release.stamp entry in .lateregate.yaml.
+var releaseTag = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
+
+// TestTheTreeHoldsEveryOverlay names what spec 016's deploy tree is, so a
+// directory that is deleted or renamed fails here rather than at the moment
+// an operator follows the install document into a path that is gone.
+func TestTheTreeHoldsEveryOverlay(t *testing.T) {
+	for _, dir := range []string{
+		"deploy/base",
+		"deploy/bootstrap",
+		"deploy/examples/kind",
+		"deploy/examples/aws",
+		"deploy/examples/digitalocean",
+		"deploy/prod",
+	} {
+		if _, err := os.Stat(filepath.Join(root(t), filepath.FromSlash(dir))); err != nil {
+			t.Errorf("%s is missing: %v", dir, err)
+		}
+	}
+}
+
+// TestProdPinsAReleasedImage keeps the operator's overlay pinned to a
+// version rather than to a moving tag, and keeps the marker
+// `lateregate release` rewrites in the shape its pattern matches. A cut
+// that could not find the marker would refuse the release, which is the
+// right failure but a late one.
+func TestProdPinsAReleasedImage(t *testing.T) {
+	k, ok := kustomizations(t)["deploy/prod"]
+	if !ok {
+		t.Fatal("no deploy/prod/kustomization.yaml")
+	}
+	if got := k.text("namespace"); got == "" {
+		t.Error("deploy/prod declares no namespace")
+	}
+	if res := k.strings("resources"); !slices.Contains(res, "../base") {
+		t.Errorf("deploy/prod resources = %v, want ../base among them", res)
+	}
+	images := k.items("images")
+	if len(images) != 1 {
+		t.Fatalf("deploy/prod pins %d images, want one: arcad and nothing beside it", len(images))
+	}
+	if got := imageName(images[0].text("name")); got != "arcad" {
+		t.Errorf("deploy/prod pins the image %q, want arcad", images[0].text("name"))
+	}
+	if got := images[0].text("newTag"); !releaseTag.MatchString(got) {
+		t.Errorf("deploy/prod newTag = %q, want a vX.Y.Z the release stamp rewrites", got)
+	}
+}
+
+// TestProdKeepsCredentialsInSecrets is the gate's bearer rule over the
+// overlay the gate itself does not read. deploy/prod is declared under
+// identity.skip so the addresses it sets are allowed, and skipping it takes
+// every other identity rule with it, so what the gate stops asserting is
+// asserted here instead.
+func TestProdKeepsCredentialsInSecrets(t *testing.T) {
+	assertCredentialsAreReferences(t, "deploy/prod")
+	for _, d := range read(t, "deploy/prod") {
+		for _, c := range d.containers() {
+			for _, e := range c.items("env") {
+				if e.text("name") != "ARCA_AUTHORIZER_URL" {
+					continue
+				}
+				// An endpoint is not a credential: it belongs in the
+				// manifest a reviewer reads, not in a Secret.
+				if e.text("value") == "" {
+					t.Errorf("%s: ARCA_AUTHORIZER_URL is read from a Secret; only the bearer is one", d.rel)
+				}
+			}
+		}
+	}
+}
+
+// TestProdIsDeclaredToTheGate proves the two entries that make the overlay
+// legal are both present. Either one alone is wrong: skip without overlays
+// stops the gate reading the addresses, so a document naming one is
+// refused; overlays without skip leaves every other identity rule running
+// over a directory written for one installation.
+func TestProdIsDeclaredToTheGate(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(root(t), ".lateregate.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The gate's own configuration is read as text rather than with the
+	// manifest reader above: it carries folded scalars, which that reader
+	// refuses on purpose. Two keys of one block is all this needs.
+	listed := map[string][]string{}
+	block, key := "", ""
+	for line := range strings.SplitSeq(string(raw), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		switch indent := len(line) - len(strings.TrimLeft(line, " ")); {
+		case indent == 0:
+			block, key = strings.TrimSuffix(trimmed, ":"), ""
+		case indent == 2 && block == "identity":
+			key = strings.TrimSuffix(trimmed, ":")
+		case indent >= 4 && block == "identity" && strings.HasPrefix(trimmed, "- "):
+			listed[key] = append(listed[key], strings.TrimSpace(trimmed[2:]))
+		}
+	}
+	for _, want := range []string{"skip", "overlays"} {
+		if got := listed[want]; !slices.Contains(got, "deploy/prod") {
+			t.Errorf("identity.%s = %v, want deploy/prod among them (spec 016)", want, got)
+		}
+	}
+}
+
+// TestProdNamesOnlyAddressesTheFamilyAlreadyUses holds the one directory
+// that may name an installation to the addresses the family's other
+// manifests already carry. A hostname invented here would be one nobody
+// serves, found at the first release rather than at review.
+func TestProdNamesOnlyAddressesTheFamilyAlreadyUses(t *testing.T) {
+	known := []string{
+		// The platform origin, in front of several services.
+		"api.latere.ai",
+		// platformd's internal Service, which no ingress names.
+		"platformd-internal.latere.svc.cluster.local",
+	}
+	seen := map[string]bool{}
+	err := filepath.WalkDir(filepath.Join(root(t), "deploy/prod"), func(p string, e os.DirEntry, err error) error {
+		if err != nil || e.IsDir() {
+			return err
+		}
+		raw, readErr := os.ReadFile(p)
+		if readErr != nil {
+			return readErr
+		}
+		rel := filepath.Base(p)
+		for i, line := range strings.Split(string(raw), "\n") {
+			for _, host := range hostsIn(line) {
+				seen[host] = true
+				if !slices.Contains(known, host) {
+					t.Errorf("deploy/prod/%s:%d: names %s, which no manifest of the family serves; "+
+						"an address here must be one that already exists", rel, i+1, host)
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk deploy/prod: %v", err)
+	}
+	// Without this the test would pass on a reader that found no address at
+	// all, which is the way a rule like this stops working.
+	for _, want := range known {
+		if !seen[want] {
+			t.Errorf("deploy/prod names no %s; the overlay is the one place that must", want)
+		}
+	}
+}
+
+// host matches a name under the company's own domains, in either spelling:
+// the public one and the cluster-internal one.
+var host = regexp.MustCompile(`[A-Za-z0-9.-]*latere\.(ai|svc[A-Za-z0-9.-]*)`)
+
+// hostsIn returns the company addresses one line names, dropping the
+// registry namespace, which is written with a hyphen and is where images
+// are published rather than an address anything is served at.
+func hostsIn(line string) []string {
+	var out []string
+	for _, got := range host.FindAllString(line, -1) {
+		got = strings.TrimSuffix(got, ".")
+		if strings.HasSuffix(got, "-tls") || got == "latere.ai" || got == "latere.svc" {
+			continue
+		}
+		out = append(out, got)
+	}
+	return out
+}

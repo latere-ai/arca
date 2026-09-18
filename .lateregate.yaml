@@ -69,6 +69,15 @@ identity:
   # The default audience of the open core, verified only where the core is
   # self-hosted; Latere reaches it through the origin, spec 006.
   reached_by: self-hosted
+  # deploy/prod is Latere's own overlay inside the core's tree (spec 016).
+  skip:
+    - deploy/prod
+  # The same overlay, declared: the no-latere-value rule reads the
+  # addresses deploy/prod sets rather than refusing them, so the one
+  # directory that names the installation it serves is the one directory
+  # the rule does not hold, and a document may name an address it carries.
+  overlays:
+    - deploy/prod
   # Access is by role: the roles rule runs, and it is one way once set.
   roles_only: true
   # The two rules that read an import the scaffold does not make yet.

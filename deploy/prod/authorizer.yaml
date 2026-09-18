@@ -1,0 +1,43 @@
+# The authorization endpoint. A URL and not a credential: it names an
+# in-cluster Service, so it belongs in the manifest where a reviewer reads
+# it. Only the bearer is a secret, and it stays in the arcad-auth Secret as
+# ARCA_AUTHORIZER_TOKEN.
+#
+# Latere points Arca at platformd, which holds the owners, the grants and
+# the visibility for every core of the family and answers each one on its
+# own internal path. It listens on the ClusterIP Service
+# platformd-internal, which no ingress names, in the same namespace.
+#
+# The path follows the family's shape, which is one segment per core under
+# /internal: platformd answers Origo at /internal/origo/authorize, so it
+# answers Arca at /internal/arca/authorize. The endpoint is platformd's to
+# build; spec 019's cutover does not route a request to Arca until it
+# answers.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: arcad
+spec:
+  template:
+    spec:
+      containers:
+        - name: arcad
+          env:
+            - name: ARCA_AUTHORIZER_URL
+              value: http://platformd-internal.latere.svc.cluster.local/internal/arca/authorize
+---
+# The reconciler asks the same endpoint when it is turned on, for the same
+# reason the prefix moves with it: a process that decided differently from
+# the server would reconcile against a different installation.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: arcad-reaper
+spec:
+  template:
+    spec:
+      containers:
+        - name: arcad
+          env:
+            - name: ARCA_AUTHORIZER_URL
+              value: http://platformd-internal.latere.svc.cluster.local/internal/arca/authorize
