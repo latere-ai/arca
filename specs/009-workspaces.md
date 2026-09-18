@@ -1,6 +1,6 @@
 ---
 title: "Workspaces: durable subtrees, the writer lease, materialize and sync"
-status: drafted
+status: testing
 track: core
 depends_on:
   - specs/004-metadata-store.md
@@ -309,6 +309,135 @@ Left behind for [[019-migration-from-drive]]: `GET /v1/userspace/materialize`,
 which snapshotted a whole `files/` plane into a sandbox. It is a
 convenience over listing and presigning, it is not a workspace, and a
 client that wants it builds it from [[005-files]].
+
+## Current state
+
+Built and in the tree on 2026-09-18, phase 5 of [[019-migration-from-drive]].
+`internal/workspaces` holds the record, the writer lease, materialize and
+sync; `internal/store/workspaces.go` and `internal/store/workspaces_objects.go`
+hold the queries; migration `0004_workspaces.up.sql` is the number
+[[004-metadata-store]]'s ownership table gives this spec; and `arcad` mounts
+the twelve routes of [[013-api]]'s workspace table. The commits are `b92e9e0`
+(the schema and the queries), `1926696` (the record, the lease, and the seam
+the API frame registers a spec's own rows through), `a8ae9c9` (materialize
+and sync) and `8bf5797` (the store and e2e tiers). The gate passes at each of
+them.
+
+Criteria 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16 and 17 have passing
+tests. Criterion 4 is half here: the pass the reaper calls is
+`Service.ExpireLeases`, tested in this package, and the loop that runs it is
+[[010-events-and-reaper]]'s. Criterion 14 is proved in the unit tier against
+the shared stub authorizer and closes fully with [[017-conformance-suite]]'s
+rows. Criterion 15's purge half is [[010-events-and-reaper]]'s. The spec
+stays at `testing` until those close.
+
+### What arrived from Drive
+
+| From | What it became |
+|---|---|
+| `drive/internal/handler/workspaces.go` | the record, the derived root prefix, the CRUD, the lock-guarded rename and delete, and the deleted listing with self-restore, in `internal/workspaces/lifecycle.go` |
+| `drive/internal/handler/attach.go` | attach, renew, release, the CAS lease and the TTL, in `internal/workspaces/lease.go`; its `ReapExpired` became `Service.ExpireLeases`, the pass [[010-events-and-reaper]] runs |
+| `drive/internal/handler/sync.go` | materialize and sync in `internal/workspaces/mount.go`, unchanged in shape including `manifest_incomplete` |
+| `migrations/000003_workspaces`, `000004_attachments` | `0004_workspaces.up.sql`, without `kind`, without `agent_access`, with `writer_holder` and `holder` for the sandbox columns and `subject` for `principal_id` |
+
+Three bugs came with that code and are fixed here, each with a test that
+fails without the fix.
+
+1. `drive/internal/handler/sync.go:150-175` ran the delete before the
+   completeness check, so a manifest naming one object that was never
+   uploaded deleted every row the manifest dropped and *then* answered
+   `manifest_incomplete`. The client's retry found the subtree already gone.
+   Here the check comes first and the whole reconciliation is one
+   transaction, so a refused sync is proved to leave the rows, the boundary
+   and the bytes as they were.
+2. `drive/internal/handler/sync.go:170` derived the key to delete from the
+   path, `ws.Space.storageKey(full)`, while `handleMaterialize` in the same
+   file reads the stored key because "multipart writes suffix the key". The
+   delete therefore missed the bytes of every object assembled from parts and
+   named a key that was never written. Here both read the object id the row
+   carries, which is invariant 8 of [[001-architecture]].
+3. `drive/internal/handler/sync.go:170` deleted the bytes of every dropped
+   row without asking whether another row still named them, so a path
+   holding the same content as a second path took both copies with it. Here
+   the freed ids go through one batched reference check first, the union
+   [[004-metadata-store]]'s `ObjectReferenced` reads.
+
+### Divergences, each a decision rather than a gap
+
+- **The lease CAS also matches a lapsed lease.** The design above gives the
+  condition as `writer_sandbox_id IS NULL`. The statement here is
+  `writer_holder IS NULL OR writer_expires_at <= $n`, and the rename and the
+  delete read the same clause. A lease is time bounded, so a holder past its
+  deadline does not hold the workspace; without the clause a crashed sandbox
+  wedges a workspace until the sweep of [[010-events-and-reaper]] runs, and
+  that spec is not in this build. The reaper still marks the attachment
+  `reaped` and appends the `reap` row, which is what makes the loss visible.
+  Criterion 1 is unaffected: two attaches inside one lease's life still leave
+  one lease.
+- **An attach answers `id`.** The sequence diagram above writes
+  `attachment_id`; the record's own field is `id`, every other resource of
+  [[013-api]] answers `id`, and it is what the client of the sandbox plane
+  reads. [[019-migration-from-drive]] says the mount contract is Cella's as
+  it stands, so the field keeps that name.
+- **`pinned_at` is derived, not stored.** [[004-metadata-store]]'s
+  `workspace_attachments` holds no pin column, so the answer is the
+  attachment's `created_at`, or the workspace's `last_sync` where this
+  attachment is a writer that still holds the lease: only the lease holder
+  syncs, so a boundary recorded since it attached, while it still holds the
+  lease, is its own.
+- **A restore of a live workspace answers `slug_taken`.** Criterion 16 asks
+  for a conflict and [[013-api]]'s error table holds no 409 for "not
+  deleted"; the nearest true row is the one saying the space already holds a
+  workspace with that name, and the developer detail says which case it is.
+  A `not_deleted` row in that table would be the better answer and is
+  [[013-api]]'s to add.
+- **`manifest_incomplete` lists the missing paths in `details.fields`.** That
+  is the one list [[013-api]]'s envelope carries, so a client reads the
+  paths rather than parsing a sentence.
+- **The workspace view carries `created_by`.** The example in [[013-api]]
+  does not show it; the record's field table above does, and a caller that
+  cannot see who made a workspace has to ask the log for it.
+- **Two indexes per table beyond [[004-metadata-store]]'s block**: the
+  listing's `(owner, id)`, the attachments' `(workspace_id, id)`, and the two
+  partial indexes the reaper's deadline queries read.
+- **The rename does not move the grants.** A grant keys on a path prefix and
+  has to follow the subtree, and the `shares` table arrives with
+  [[008-shares-and-links]]. The statement is one line beside the two that
+  move the objects and the bookmarks, and `MoveSubtree` says so where it is
+  written.
+- **The reaper's pass lives here.** `Service.ExpireLeases(ctx, now)` marks
+  every lapsed attachment reaped, clears the lease each reaped writer held,
+  frees a lease no attachment holds, and appends the `reap` rows.
+  [[010-events-and-reaper]] owns the loop, the interval and the schedule; what
+  a lapsed lease means is this spec's.
+
+### Seams the tree binds after the merges
+
+Three interfaces, each with a working default, so this package builds and
+runs before the specs that own them land.
+
+| Seam | What it is | Bound by |
+|---|---|---|
+| `workspaces.Objects` | the subtree half of the file plane: the manifest with object ids, the counters, the rename, the drop, the batched reference check | `store.NewWorkspaceObjects()` today, [[005-files]]' own implementation after the merge |
+| `workspaces.Ledger` | `Append` for the `attach`, `release`, `sync`, `reap` and `restore` rows, and `Release` for the bytes a sync gave back, both inside the caller's transaction | a silent default today, [[010-events-and-reaper]]'s log after the merge |
+| `workspaces.Database` | `Querier` and `Tx`, so the unit tier drives every handler with no Postgres | `*store.DB` |
+
+### What the sandbox runtime sends, and where it no longer fits
+
+The mount contract Cella speaks is `latere.ai/x/pkg/drive`, read by the
+sandbox plane's explicit pull and push. The paths, the attach body
+(`sandbox_id`, `mode`, `ttl_seconds`), the materialize query (`?attachment=`),
+the sync body (`attachment_id`, `files`) and the release are served here
+unchanged. Five things do not fit, and each is a line of
+[[019-migration-from-drive]]'s consumer change rather than a shape to keep:
+
+| What the client does | What Arca answers |
+|---|---|
+| reads a 409 as `{"error": "writer_held", "holder_sandbox_id": …}` and as `{"error": "manifest_incomplete", "missing": […]}` | the family envelope of [[013-api]], so `WriterHeldError.HolderSandboxID` comes back empty and `ManifestIncompleteError` is never recognised. Both 409 branches are rewritten against `error.code`, and the missing paths move to `error.details.fields` |
+| sends `kind` on a create | `unknown_field`, 400. There is no kind |
+| sends `?kind=` and `?scope=all` on a list | both are ignored. A shared workspace reaches a caller through the grant and the narrowing of a list is the authorizer's `filter` |
+| reads `kind`, `locked` and `agent_access` off a workspace | `lease`, an object that is null when no writer holds one, and neither of the other two |
+| addresses a file put as `u-{id}` | a space is a subject ([[006-identity]]) |
 
 ## Not in this spec
 
