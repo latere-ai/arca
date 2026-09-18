@@ -180,9 +180,12 @@ func case013RequestID(t *testing.T, s *session) {
 	failIf(t, kept.header.Get(HeaderRequestID) != mine,
 		"a client id within the rule came back as %q, want %q", kept.header.Get(HeaderRequestID), mine)
 
-	// Over 128 characters, and not printable ASCII: both are outside the
-	// rule, and both are replaced by one the server minted.
-	for _, outside := range []string{strings.Repeat("a", 200), "a\nb"} {
+	// Over 128 characters, and outside printable ASCII: both are outside the
+	// rule, and both are replaced by one the server minted. A control
+	// character is not among them: net/http refuses to put one in a header
+	// at all, so no target ever sees one and a case sending one would be
+	// asserting against its own client.
+	for _, outside := range []string{strings.Repeat("a", 200), "aéb"} {
 		r := s.with(t, Alice, http.MethodGet, "/v1/workspaces?limit=1", "", map[string]string{HeaderRequestID: outside})
 		got := r.header.Get(HeaderRequestID)
 		failIf(t, got == outside, "a client id outside the rule was echoed: %q", got)
@@ -296,7 +299,11 @@ func case013Planes(t *testing.T, s *session) {
 		expectError(t, s.call(t, Alice, http.MethodPost, "/v1/shares",
 			body(fields{"owner": "me", "path_prefix": third, "grantee": bob, "permission": "read"})), CodeUnknownPlane)
 	}
-	for _, escaping := range []string{"files/../etc/passwd", "/files/x", "files//x", "files/x/"} {
+	// A path that leaves its space, begins outside a plane, or holds a
+	// segment no path of this server may hold. A trailing slash is not one
+	// of them: spec 008 reads a prefix with no trailing slash, so a caller
+	// that wrote one named the subtree it meant.
+	for _, escaping := range []string{"files/../etc/passwd", "/files/x", "files//x", "files/./x"} {
 		r := s.call(t, Alice, http.MethodPost, "/v1/shares",
 			body(fields{"owner": "me", "path_prefix": escaping, "grantee": bob, "permission": "read"}))
 		failIf(t, r.status == http.StatusCreated, "a path that escapes its plane was accepted: %q", escaping)

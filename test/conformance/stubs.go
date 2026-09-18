@@ -39,7 +39,9 @@ func (s *session) setRules(t testing.TB, rules ...stubRule) {
 	if rules == nil {
 		rules = []stubRule{}
 	}
-	raw, err := json.Marshal(rules)
+	// The control API takes {"rules": [...]}, which is the shared package's
+	// shape and not a bare array.
+	raw, err := json.Marshal(map[string]any{"rules": rules})
 	failIf(t, err != nil, "render the stub's rules: %v", err)
 	s.control(t, http.MethodPut, "/rules", string(raw))
 }

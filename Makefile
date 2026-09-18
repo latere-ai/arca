@@ -3,7 +3,7 @@
 
 GO ?= go
 
-.PHONY: build build-stubs check check-all clean down fmt hooks openapi run run-down test-e2e test-store up
+.PHONY: build build-stubs check check-all clean down fmt hooks openapi run run-down test-conformance test-e2e test-store up
 
 # The whole bar. Every gate lives in latere.ai/x/ci-gate, pinned as a tool
 # in go.mod and configured in .lateregate.yaml, so this target is a name for
@@ -123,6 +123,21 @@ test-store: up
 test-e2e: up build build-stubs
 	$(TIER_ENV) ARCA_BINARY="$(CURDIR)/$(OUT_DIR)/$(SERVICE)" \
 		$(GO) test -tags=tiers -race -count=1 -run '^TestE2E' ./test/e2e/...
+
+# The conformance tier of spec 017: the suite of test/conformance against an
+# arcad the tier starts on the stack, with the two stubs, so the deny, the
+# outage and the byte limit cases run rather than skip. The same command runs
+# against any other installation with -url and either -issuer or -token.
+#
+# It is not part of check-all. Seventeen of spec 013's forty-one routes are
+# not answered by this build, so the suite's pending group fails until they
+# land; that is what the group is for, and a target that turns the default
+# bar red on work another spec owns is not.
+test-conformance: up build build-stubs
+	$(TIER_ENV) ARCA_BINARY="$(CURDIR)/$(OUT_DIR)/$(SERVICE)" \
+		$(GO) test -tags=tiers -count=1 -timeout 30m -v \
+		-run '^(TestContract|TestSuiteCatchesADrift|TestTheSuiteReachesNoHelperOfThisTree)$$' \
+		./test/conformance/...
 
 # The whole bar plus both service tiers, which is what to run before
 # pushing something that touches a store.

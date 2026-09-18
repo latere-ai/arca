@@ -223,6 +223,7 @@ func Run(t *testing.T, opts Options) (report Report) {
 
 	s.served = s.readSurface(t)
 	report.Pending = s.served.pending()
+	s.warm(t)
 
 	for _, sp := range cases() {
 		t.Run(sp.number, func(t *testing.T) {

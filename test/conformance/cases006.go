@@ -178,10 +178,19 @@ func case006PersonalKey(t *testing.T, s *session) {
 	}, func(r response) bool { return r.status != http.StatusOK })
 
 	failIf(t, byGrant.status != byPolicy.status || byGrant.code() != byPolicy.code() || byGrant.message() != byPolicy.message(),
-		"a deny with reason grant answers %d %s and one with another reason %d %s; a refusal names no reason on the wire",
+		"a deny with reason grant answers %d %s and one with another reason %d %s; the code, the status and the sentence are what a caller branches on, and they do not vary with the reason",
 		byGrant.status, byGrant.code(), byPolicy.status, byPolicy.code())
-	failIf(t, strings.Contains(string(byGrant.body), "grant") && byGrant.status < 500,
-		"the refusal carries the authorizer's reason into a body a caller reads: %s", byGrant.body)
+
+	// The reason is in the developer detail and nowhere else, which is where
+	// spec 006 puts it: a caller reads one fixed sentence and an operator
+	// reading a log reads why. It is the one field that names a reason, so a
+	// refusal that carried it anywhere else would be a refusal a client
+	// could branch on.
+	detail, _ := byGrant.details()["detail"].(string)
+	failIf(t, !strings.Contains(detail, "grant"),
+		"the refusal does not carry the reason grant in details.detail: %s", byGrant.body)
+	failIf(t, strings.Contains(byGrant.message(), "grant"),
+		"the fixed sentence carries the authorizer's reason: %q", byGrant.message())
 }
 
 // strangerToken is a bearer shaped like a JWT from an issuer no target
@@ -250,6 +259,30 @@ func (s *session) subject(t testing.TB, principal string) string {
 	s.subjects[principal] = owner
 	s.mu.Unlock()
 	return owner
+}
+
+// warm reads what the target calls each principal before any case runs, so
+// that a case which puts the authorizer in an outage is not also the case
+// that first had to ask. A target that cannot answer leaves the subjects
+// unread, and the cases that need one fail on their own rather than on this.
+func (s *session) warm(t *testing.T) {
+	t.Helper()
+	if !s.served.serves("POST /v1/workspaces") {
+		return
+	}
+	for _, principal := range []string{Alice, Bob} {
+		r := s.call(t, principal, http.MethodPost, "/v1/workspaces",
+			body(fields{"owner": "me", "slug": s.name("who-" + principal)}))
+		if r.status != http.StatusCreated {
+			continue
+		}
+		if owner := str(r.json, "owner"); owner != "" {
+			s.mu.Lock()
+			s.subjects[principal] = owner
+			s.mu.Unlock()
+		}
+		s.call(t, principal, http.MethodDelete, "/v1/workspaces/"+str(r.json, "id"), "")
+	}
 }
 
 // absentSubject is a subject no principal has: a space that does not exist,
