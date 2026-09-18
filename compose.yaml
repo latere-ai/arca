@@ -1,0 +1,77 @@
+# The stack the tiers and `make run` need beside them: Postgres for the
+# metadata store of spec 004, MinIO for the object store of spec 003, and a
+# one-shot client that creates the bucket.
+#
+# It is the only definition of the stack. `make up` starts it, `make down`
+# stops it, `make clean` removes it with its volumes, and CI starts it with
+# this same file, so a tier reads the endpoints of the stack a contributor
+# runs.
+#
+# Every image is pinned by digest as well as by tag. The tag says which
+# version a reader is running; the digest says which bytes, so a rebuild
+# months from now is the same stack. The project name namespaces the
+# containers, the network, and the volumes, and the Makefile sets it and the
+# ports from the checkout's directory name, so two clones run side by side.
+#
+# Nothing here is a credential of anything: the values are the defaults of a
+# local stack, published on the loopback interface only.
+
+name: ${DEV_PROJECT:-arca}
+
+services:
+  postgres:
+    image: postgres:18-alpine@sha256:6c538e7206ea40ff740ef27883529390a690b6ead6ba96b44c67a9f7c638e8fd
+    environment:
+      POSTGRES_DB: ${DEV_DB_NAME:-arca}
+      POSTGRES_USER: ${DEV_DB_USER:-arca}
+      POSTGRES_PASSWORD: ${DEV_DB_PASSWORD:-arca}
+    ports:
+      - "127.0.0.1:${DEV_DB_PORT:-5432}:5432"
+    volumes:
+      # Postgres 18 places its data in a subdirectory of this path and
+      # refuses to start against a volume mounted one level deeper, which
+      # is where the images before it kept it.
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DEV_DB_USER:-arca} -d ${DEV_DB_NAME:-arca}"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${DEV_S3_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${DEV_S3_SECRET:-minioadmin}
+    ports:
+      - "127.0.0.1:${DEV_S3_PORT:-9000}:9000"
+      - "127.0.0.1:${DEV_S3_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+
+  # Creates the bucket and exits, so no tier and no harness creates one of
+  # its own. `make up` waits for it to have run.
+  minio-init:
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" &&
+        mc mb --ignore-existing "local/$$BUCKET"
+    environment:
+      MINIO_ROOT_USER: ${DEV_S3_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${DEV_S3_SECRET:-minioadmin}
+      BUCKET: ${DEV_S3_BUCKET:-arca-test}
+
+volumes:
+  postgres-data:
+  minio-data:
