@@ -127,7 +127,7 @@ writes the status, the one user sentence and the request id.
 | 16b | Holds at the statement: `TestPassEightDropsAStarWhoseTargetIsGoneAndKeepsOneOnATrashedTarget`. The star routes are [[005-files]]'s |
 | 17 | Holds. `TestStoreLedgerReconciles` against Postgres, with the healthy run correcting nothing |
 | 18 | Holds. `TestARunTwiceLeavesWhatOneRunLeft` and the settled sweep of the store tier. Two reapers at once are two conditional statements, which is what the second run is |
-| 19 | Holds for the nothing-changes half, absolutely, and for the same-findings half over every pass whose statements this package owns: `TestDryRunReportsWhatARunWouldChange` runs one fixture dry and live and holds the found counts equal. Pass 3 is the exception and is under-reported: its sweep is [[009-workspaces]]' and every statement it issues is a write, so a dry run does not call it and reports nothing for it. Closing it is a counting half in that package |
+| 19 | Holds for the nothing-changes half, absolutely, and for the same-findings half over every pass whose statements this package owns: `TestDryRunReportsWhatARunWouldChange` runs one fixture dry and live and holds the found counts equal. Pass 3 is the one exception and is under-reported: its sweep is [[009-workspaces]]' and every statement it issues is a write, so a dry run does not call it and reports nothing for it. Closing it is a counting half in that package. Pass 4's sweep is [[007-uploads]]' and is not an exception: what it would change is a query, so a dry run counts and changes nothing, which `TestAnExpiredSessionIsSweptWithItsPartsAndItsCharge` holds |
 | 20 | Holds. `TestServeSaysWhetherThisReplicaReconciles` and `TestE2EReapRunsOneSequenceAndExits` |
 
 ### Divergences
