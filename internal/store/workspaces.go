@@ -137,6 +137,11 @@ type Workspaces interface {
 	// Restore clears deleted_at. It answers false for a workspace that is
 	// not deleted, which the caller has already told from one that is gone.
 	Restore(ctx context.Context, q Querier, id string) (bool, error)
+	// Live reports whether the space holds a live workspace with that slug.
+	// It is what the file plane of spec 005 asks before it touches a path
+	// under workspaces/<slug>/, so this query set answers both specs and
+	// neither has to reach the other's package.
+	Live(ctx context.Context, q Querier, owner, slug string) (bool, error)
 	// TakeLease is the conditional update the writer lease rests on: it
 	// matches a row whose lease is free or lapsed at now, so a second
 	// attach arriving at once matches nothing and is a conflict.
@@ -320,6 +325,24 @@ func (workspaces) Restore(ctx context.Context, q Querier, id string) (bool, erro
 		UPDATE workspaces SET deleted_at = NULL, updated_at = now()
 		 WHERE id = $1 AND deleted_at IS NOT NULL`, id)
 	return changed(fmt.Sprintf("restore the workspace %q", id), tag, err)
+}
+
+// Live reports whether the space holds a live workspace with that slug.
+//
+// A soft deleted workspace answers false, which is the rule spec 009 states
+// and spec 005 applies: a tombstone is a missing workspace to everyone, and
+// bytes under one are a missing object. The lookup is by slug rather than by
+// id, because a path names the slug and never the id.
+func (workspaces) Live(ctx context.Context, q Querier, owner, slug string) (bool, error) {
+	var live bool
+	err := q.QueryRow(ctx, `
+		SELECT EXISTS (
+		    SELECT 1 FROM workspaces
+		     WHERE owner = $1 AND slug = $2 AND deleted_at IS NULL)`, owner, slug).Scan(&live)
+	if err != nil {
+		return false, classify(fmt.Sprintf("read the workspace %q of %q", slug, owner), err)
+	}
+	return live, nil
 }
 
 // TakeLease is the whole of the one-writer invariant.

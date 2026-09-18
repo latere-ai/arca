@@ -31,6 +31,7 @@ import (
 	"latere.ai/x/arca/internal/blob"
 	"latere.ai/x/arca/internal/config"
 	"latere.ai/x/arca/internal/events"
+	"latere.ai/x/arca/internal/files"
 	"latere.ai/x/arca/internal/reaper"
 	"latere.ai/x/arca/internal/shares"
 	"latere.ai/x/arca/internal/store"
@@ -686,7 +687,7 @@ func TestReapAsALoopRunsUntilItIsStopped(t *testing.T) {
 
 func TestTheReconcilerIsNotStartedOnAConfigurationItCannotRun(t *testing.T) {
 	var out bytes.Buffer
-	if err := startReaper(t.Context(), config.Config{ReapInterval: time.Minute}, nil, nil, nil, &out); err == nil {
+	if err := startReaper(t.Context(), config.Config{ReapInterval: time.Minute}, nil, nil, nil, nil, &out); err == nil {
 		t.Fatal("a reconciler with no stores was started anyway")
 	}
 }
@@ -740,10 +741,16 @@ func (*recordingLog) Prune(context.Context, store.Querier, time.Time) (int64, er
 
 func (*recordingLog) Older(context.Context, store.Querier, time.Time) (int64, error) { return 0, nil }
 
-// recordingLedger is the usage counter of spec 010 with the releases kept.
+// recordingLedger is the usage counter of spec 010 with the charges, the
+// limits they were held to and the releases kept.
 type recordingLedger struct {
 	released map[string]int64
+	charged  map[string]int64
+	limits   map[string]events.Limit
 	err      error
+	// over is the refusal a charge answers, for the case that proves the
+	// node renders it as the seam's own.
+	over *events.OverLimitError
 }
 
 func (l *recordingLedger) Release(_ context.Context, _ store.Querier, owner string, bytes int64) (int64, error) {
@@ -757,8 +764,20 @@ func (l *recordingLedger) Release(_ context.Context, _ store.Querier, owner stri
 	return l.released[owner], nil
 }
 
-func (*recordingLedger) Charge(context.Context, store.Querier, string, int64, events.Limit) (int64, error) {
-	return 0, nil
+func (l *recordingLedger) Charge(_ context.Context, _ store.Querier, owner string, delta int64, limit events.Limit) (int64, error) {
+	if l.err != nil {
+		return 0, l.err
+	}
+	if l.charged == nil {
+		l.charged = map[string]int64{}
+		l.limits = map[string]events.Limit{}
+	}
+	l.charged[owner] += delta
+	l.limits[owner] = limit
+	if l.over != nil {
+		return l.charged[owner], l.over
+	}
+	return l.charged[owner], nil
 }
 
 func (*recordingLedger) Read(context.Context, store.Querier, string) (int64, error) { return 0, nil }
@@ -831,6 +850,102 @@ func TestTheWorkspaceLedgerWritesThroughTheLogAndTheCounter(t *testing.T) {
 		t.Errorf("a failed append = %v", err)
 	}
 	if err := broken.Release(t.Context(), nil, event.Owner, 1); !errors.Is(err, failure) {
+		t.Errorf("a failed release = %v", err)
+	}
+}
+
+// TestEveryActionTheFilePlaneAppendsIsOneOfSpec010sVocabulary: the same rule
+// for the four words specs 005 and 007 append. The column carries no
+// constraint, so a word spelled one way in the file plane and another in the
+// log would be a row no consumer can filter for rather than a compile
+// failure here.
+func TestEveryActionTheFilePlaneAppendsIsOneOfSpec010sVocabulary(t *testing.T) {
+	for _, action := range []string{
+		files.EventPut, files.EventMove, files.EventDelete, files.EventRestore,
+	} {
+		if !events.Action(action).Valid() {
+			t.Errorf("the file plane appends %q, which spec 010's vocabulary does not name", action)
+		}
+	}
+}
+
+// TestTheFileLedgerChargesThroughTheCounterAndRecordsThroughTheLog is the
+// binding of spec 005's seam: a write's delta reaches the space's counter
+// held to the limit the authorizer's answer carried, the bytes a delete
+// dropped go back, and what happened to the object reaches the log.
+func TestTheFileLedgerChargesThroughTheCounterAndRecordsThroughTheLog(t *testing.T) {
+	const owner = "https://issuer.example|9ab3"
+	log, usage := &recordingLog{}, &recordingLedger{}
+	bound := fileLedger{log: log, usage: usage}
+
+	total, err := bound.Charge(t.Context(), nil, owner, 2048, files.Limit{Bytes: 4096, Set: true})
+	if err != nil || total != 2048 {
+		t.Fatalf("the charge = %d, %v", total, err)
+	}
+	if got := usage.limits[owner]; !got.Set() || got.Bytes() != 4096 {
+		t.Errorf("the counter was handed the limit %+v", got)
+	}
+	// An answer that named no limit leaves the space unlimited, which is
+	// what an installation running the owner policy gets.
+	if _, err := bound.Charge(t.Context(), nil, owner, 1, files.Limit{}); err != nil {
+		t.Fatalf("an unlimited charge = %v", err)
+	}
+	if got := usage.limits[owner]; got.Set() {
+		t.Errorf("an answer with no limit was handed %+v", got)
+	}
+
+	if _, err := bound.Release(t.Context(), nil, owner, 512); err != nil {
+		t.Fatalf("the release = %v", err)
+	}
+	if usage.released[owner] != 512 {
+		t.Errorf("the counter gave back %d bytes", usage.released[owner])
+	}
+
+	event := files.Event{
+		Owner: owner, Path: "files/plan.md", Action: files.EventPut,
+		Actor: owner, Detail: map[string]any{"size": 2048},
+	}
+	bound.Append(t.Context(), nil, event)
+	if len(log.appended) != 1 {
+		t.Fatalf("the log holds %d rows", len(log.appended))
+	}
+	got := log.appended[0]
+	if got.Owner != event.Owner || got.Path != event.Path || got.Actor != event.Actor ||
+		got.Action != events.ActionPut || !reflect.DeepEqual(got.Detail, event.Detail) {
+		t.Errorf("the row is %+v", got)
+	}
+	// The append is the log's best-effort one: the object is already written
+	// when the row is, so a failure is a warning and never the caller's.
+	fileLedger{log: &recordingLog{err: errors.New("the store said no")}}.
+		Append(t.Context(), nil, event)
+}
+
+// TestAChargeTheAnswersLimitDoesNotAdmitIsTheSeamsOwnRefusal: the handler
+// answers 413 quota_exceeded off spec 005's error type, and the counter
+// refuses with spec 010's. The node is where the two meet, so a space with
+// no room left must not arrive at a handler as a fault of the counter.
+func TestAChargeTheAnswersLimitDoesNotAdmitIsTheSeamsOwnRefusal(t *testing.T) {
+	const owner = "https://issuer.example|9ab3"
+	refusal := &events.OverLimitError{Owner: owner, Used: 4096, Limit: 4096, Delta: 2048}
+	bound := fileLedger{log: &recordingLog{}, usage: &recordingLedger{over: refusal}}
+
+	_, err := bound.Charge(t.Context(), nil, owner, 2048, files.Limit{Bytes: 4096, Set: true})
+	var over *files.OverLimit
+	if !errors.As(err, &over) {
+		t.Fatalf("the charge = %v", err)
+	}
+	if over.Owner != owner || over.Used != 4096 || over.Limit != 4096 || over.Delta != 2048 {
+		t.Errorf("the refusal is %+v", over)
+	}
+
+	// Anything else the counter says is a failure of the store and reaches
+	// the caller as one.
+	failure := errors.New("the store said no")
+	broken := fileLedger{log: &recordingLog{}, usage: &recordingLedger{err: failure}}
+	if _, err := broken.Charge(t.Context(), nil, owner, 1, files.Limit{}); !errors.Is(err, failure) {
+		t.Errorf("a failed charge = %v", err)
+	}
+	if _, err := broken.Release(t.Context(), nil, owner, 1); !errors.Is(err, failure) {
 		t.Errorf("a failed release = %v", err)
 	}
 }

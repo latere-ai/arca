@@ -56,6 +56,17 @@ action `CHECK` dropped in favour of the table in `internal/events`. What
 changed on the way is the table in "What arrives from Drive" below, as
 written.
 
+The merge with [[005-files]] and [[007-uploads]] bound the last two seams
+this spec offers. `cmd/arcad`'s `fileLedger` is the usage counter and the
+log behind those specs' `Ledger`: a write's delta is charged inside the
+write's own transaction against the limit the authorizer's answer carried, a
+delete and an abandoned session give the bytes back, and a put, a move, a
+delete and a restore are rows of the closed vocabulary. A charge the limit
+does not admit is rendered as the file plane's own refusal, so a space with
+no room left reaches the handler as `quota_exceeded` and not as a fault of
+the counter. Pass 4 is [[007-uploads]]' `Service.Sweep`, so an expired
+session's parts and row leave and its declared bytes go back.
+
 ### The route
 
 `GET /v1/events` is a handler function, `events.Handler(log, querier, guard,
@@ -109,9 +120,9 @@ writes the status, the one user sentence and the request id.
 | 10 | Holds. `TestEventFilter`, and `TestTheEventTailAnswersThroughTheFrame` over the registered route. The conformance row is [[017-conformance-suite]]'s |
 | 11 | Holds. `TestStoreAPutThatFailedAfterTheBucketWriteIsReapedAfterTheWindow` against MinIO |
 | 12 | Holds. `TestStoreADeleteThatFailedAfterTheRowIsReaped` |
-| 13 | Deferred to [[007-uploads]]. The union `store.ObjectReferenced` asks is held to the schema by a test, so the table joins it with the migration that creates it |
+| 13 | Holds. `upload_sessions` joined the union with the migration that creates it ([[007-uploads]]), and `TestObjectReferencedNamesEveryTableThatHoldsAnObjectID` reads the embedded schema for every table carrying an `object_id` and holds the statement to that list |
 | 14 | Holds. `TestPassTwoReportsARowWithoutItsBytesAndDeletesNothing` and `TestStoreARowWithoutItsBytesIsReportedAndKept` |
-| 15 | Holds. Pass 3 is a `Pass` the reconciler is given, bound in `cmd/arcad` to [[009-workspaces]]' `Service.ExpireLeases`, with a unit test on a fake here and the expiry itself tested in that package |
+| 15 | Holds. Pass 3 is a `Pass` the reconciler is given, bound in `cmd/arcad` to [[009-workspaces]]' `Service.ExpireLeases`, with a unit test on a fake here and the expiry itself tested in that package. Pass 4 is bound the same way to [[007-uploads]]' `Service.Sweep`, which counts on a dry run and aborts the parts before it drops the row |
 | 16 | The trash half holds: `TestStoreTrashPastItsRetentionLeavesBothStores`. The tombstone half is deferred to [[009-workspaces]] |
 | 16b | Holds at the statement: `TestPassEightDropsAStarWhoseTargetIsGoneAndKeepsOneOnATrashedTarget`. The star routes are [[005-files]]'s |
 | 17 | Holds. `TestStoreLedgerReconciles` against Postgres, with the healthy run correcting nothing |
@@ -417,7 +428,10 @@ Its sweep is a method of [[009-workspaces]]' service, which refuses to
 build without the authorizer its handlers decide through, and `arcad
 reap` registers no handler and starts no verifier; so the process runs
 nine of the ten passes and says which one it does not run on its start-up
-line. An installation that moves the reconciler off the API replicas
+line. Pass 4 is not an exception, although its sweep is [[007-uploads]]'
+in the same way: that sweep puts no question of the authorizer, so the
+service it is a method of builds wherever the two stores are reachable
+and `arcad reap` carries it. An installation that moves the reconciler off the API replicas
 therefore leaves `ARCA_REAP_INTERVAL` non-zero on one replica, or the
 service grows a constructor for the pass alone.
 

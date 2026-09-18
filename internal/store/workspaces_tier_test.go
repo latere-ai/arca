@@ -169,6 +169,50 @@ func TestStoreManyReadersAttachAtOnceAndNoneTouchesTheLease(t *testing.T) {
 	}
 }
 
+// TestStoreTheLivenessLookupTheFilePlaneAsksIsBySlugAndSkipsTombstones is
+// the query spec 005 asks before it touches a path under workspaces/<slug>/.
+// A workspace that was never created and one behind a tombstone answer the
+// same thing, which is what makes bytes under either a missing object to
+// everyone; a restore brings the answer back.
+func TestStoreTheLivenessLookupTheFilePlaneAsksIsBySlugAndSkipsTombstones(t *testing.T) {
+	db := tier(t)
+	owner := wsSpace(t)
+	ws := wsRow(t, db, owner, "build")
+	q := db.Querier()
+
+	live := func(t *testing.T, owner, slug string) bool {
+		t.Helper()
+		ok, err := NewWorkspaces().Live(t.Context(), q, owner, slug)
+		if err != nil {
+			t.Fatalf("the liveness lookup of %q of %q = %v", slug, owner, err)
+		}
+		return ok
+	}
+	if !live(t, owner, "build") {
+		t.Fatal("a live workspace read as gone")
+	}
+	if live(t, owner, "release") {
+		t.Error("a slug the space never held read as live")
+	}
+	// The lookup is per space, so another space's workspace of the same name
+	// is not this one's.
+	if live(t, owner+"-other", "build") {
+		t.Error("another space's slug read as this one's")
+	}
+	if ok, err := NewWorkspaces().SoftDelete(t.Context(), q, ws.ID, time.Now()); err != nil || !ok {
+		t.Fatalf("the delete = %v, %v", ok, err)
+	}
+	if live(t, owner, "build") {
+		t.Error("a tombstone read as live")
+	}
+	if ok, err := NewWorkspaces().Restore(t.Context(), q, ws.ID); err != nil || !ok {
+		t.Fatalf("the restore = %v, %v", ok, err)
+	}
+	if !live(t, owner, "build") {
+		t.Error("a restored workspace read as gone")
+	}
+}
+
 // TestStoreASlugCollidesAcrossLiveAndDeletedRowsAlike is criterion 5: the
 // uniqueness is not conditional on deleted_at, which is what makes restore
 // guard-free.

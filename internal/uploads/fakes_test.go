@@ -42,7 +42,10 @@ type memory struct {
 	// read of the path behind it meets. Neither may reach a caller as a
 	// missing row.
 	failGet, failPath error
-	minted            int
+	// failExpired is the fault the reaper's own query meets, which is a pass
+	// that has found nothing rather than a run with nothing to find.
+	failExpired error
+	minted      int
 }
 
 func newMemory() *memory {
@@ -284,6 +287,9 @@ func (m *memory) DeleteSession(_ context.Context, _ store.Querier, id string) (b
 func (m *memory) Expired(_ context.Context, _ store.Querier, at time.Time, limit int) ([]store.Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.failExpired != nil {
+		return nil, m.failExpired
+	}
 	var out []store.Session
 	for _, s := range m.sessions {
 		if !s.ExpiresAt.After(at) && len(out) < limit {

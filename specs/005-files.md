@@ -44,6 +44,23 @@ store and e2e tiers) and `eee80ec` (the detail a refusal carries). The gate
 passes at each of them, with `internal/files` at 91% and every other package
 above 90%.
 
+The merge to `main` bound the three seams this package declares.
+`files.Ledger` is [[010-events-and-reaper]]'s usage counter and log: a
+write's delta is charged inside the write's own transaction against the
+limit the authorizer's answer carried, a delete gives the bytes back, and a
+put, a move, a delete and a restore are rows of that spec's closed
+vocabulary. `files.Workspaces` is `store.Workspaces.Live`, the lookup
+[[009-workspaces]]' query set answers, so a path under `workspaces/<slug>/`
+whose workspace is gone or behind a tombstone is a missing object to
+everyone rather than always live. `files.References` was already the
+statement over the schema. The read path is bound the other way round too:
+`Service.ServeObject` is what `GET /v1/shares/links/{token}/files/{path...}`
+of [[008-shares-and-links]] answers with. It puts no question of its own,
+because the link route resolved the token, confined the path to the grant's
+prefix and asked `link.read` with an anonymous subject, and it runs the same
+half of a read an owner's own `GET` runs, so one object cannot be answered
+two ways.
+
 This spec writes no migration. `0001_files.up.sql` already creates
 `subjects`, `files`, `file_versions` and `stars`, which is every table this
 spec owns, and [[004-metadata-store]]'s ownership table says so.

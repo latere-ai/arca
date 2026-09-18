@@ -72,21 +72,57 @@ func (s *Service) read(w http.ResponseWriter, r *http.Request, headOnly bool) {
 		return
 	}
 
+	if err := s.serve(w, r, t, row, headOnly); err != nil {
+		api.WriteError(w, r, err)
+	}
+}
+
+// ServeObject answers one object of a space to a caller a link token has
+// already authorized, which is the seam spec 008's third link route reaches
+// (shares.ObjectReader).
+//
+// No question is put here. The link route resolved the token, confined the
+// path to the grant's prefix and asked link.read with an anonymous subject,
+// and asking file.read after it would ask a second question about a caller
+// that carries no claim at all: every answer would be a deny and the route
+// would serve nothing. What follows the question is this spec's, and it is
+// the same half an owner's own read runs, so the two cannot answer one
+// object differently.
+//
+// A path that is not one, and a path that names nothing live, are refused as
+// a missing object, which is byte for byte what the route answers for a
+// token that names nothing.
+func (s *Service) ServeObject(w http.ResponseWriter, r *http.Request, owner, path string) error {
+	ctx := r.Context()
+	t, err := s.Target(ctx, owner, path)
+	if err != nil {
+		return err
+	}
+	row, err := s.live(ctx, t)
+	if err != nil {
+		return err
+	}
+	return s.serve(w, r, t, row, false)
+}
+
+// serve is the half of a read that follows the question: the conditional
+// headers of spec 013 and the size rule of spec 005. It writes its own
+// refusals through the handlers it calls and answers an error only where the
+// caller has not been written to yet.
+func (s *Service) serve(w http.ResponseWriter, r *http.Request, t Target, row store.File, headOnly bool) error {
 	pre, err := api.Conditions(r)
 	if err != nil {
-		api.WriteError(w, r, err)
-		return
-	}
-	if pre.Fresh(row.Checksum) {
-		api.SetETag(w, row.Checksum)
-		w.WriteHeader(http.StatusNotModified)
-		return
+		return err
 	}
 	api.SetETag(w, row.Checksum)
+	if pre.Fresh(row.Checksum) {
+		w.WriteHeader(http.StatusNotModified)
+		return nil
+	}
 	if headOnly {
 		s.headers(w, row.ContentType, row.SizeBytes, row.UpdatedAt)
 		w.WriteHeader(http.StatusOK)
-		return
+		return nil
 	}
 	// A public object is readable without this server in the path, so a read
 	// of one is a redirect whatever its size: the URL is the point of making
@@ -97,12 +133,13 @@ func (s *Service) read(w http.ResponseWriter, r *http.Request, headOnly bool) {
 	if row.IsPublic {
 		if s.cfg.PublicCDNURL != "" {
 			http.Redirect(w, r, s.cfg.PublicCDNURL+"/"+row.ObjectID.Key(s.cfg.BucketPrefix), http.StatusFound)
-			return
+			return nil
 		}
 		s.presign(w, r, row.ObjectID, t.Path, false)
-		return
+		return nil
 	}
 	s.answer(w, r, row.ObjectID, row.SizeBytes, row.ContentType, t.Path)
+	return nil
 }
 
 // readVersion answers one version of a path, by the same size rule as a

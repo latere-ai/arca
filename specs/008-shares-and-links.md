@@ -88,7 +88,13 @@ spec merged with [[010-events-and-reaper]]: `cmd/arcad` binds `Ledger` to
 that spec's log through `shareLedger`, so a grant made and a grant revoked
 are rows of the closed vocabulary written inside the mutation's own
 transaction, and `GET /v1/events` is the tail that reads them back. The
-spec stays at `testing` until criterion 2 closes.
+merge with [[005-files]] bound the other seam: `Reader` is that package's
+`ServeObject`, so `GET /v1/shares/links/{token}/files/{path...}` serves the
+bytes at or below `ARCA_INLINE_BYTES`, a presigned redirect above it and
+`ARCA_PUBLIC_CDN_URL` for an object a public grant marked, rather than
+`not_implemented`. The token still decides who may read and the prefix still
+confines what may be read; what a read looks like once allowed is that
+spec's. The spec stays at `testing` until criterion 2 closes.
 
 Of the two seams declared here, one is bound and one is not. `Ledger` is
 bound, above. `ObjectReader` is the read path of [[005-files]], which the

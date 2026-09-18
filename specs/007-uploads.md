@@ -50,6 +50,17 @@ a session that opened and completed is charged once, and a hook that runs in
 the same transaction, so the session row leaves in the commit the object
 arrives in.
 
+The merge to `main` bound the expiry sweep. `Service.Sweep` is pass 4 of
+[[010-events-and-reaper]]'s table over the query criterion 9 exposes: an
+expired session's parts are aborted, its row leaves in the transaction that
+gives its declared bytes back, and a store that will not discard keeps the
+row for the next run, because the row is the only durable pointer to parts
+object listing cannot see. A dry run counts and changes nothing, which this
+pass can say honestly: what it would change is a query and not a write. It
+runs on every replica with `ARCA_REAP_INTERVAL` set and in `arcad reap` as a
+process of its own, which can carry it where pass 3 cannot: the sweep puts
+no question, so it needs no authorizer.
+
 One bug of the service Arca replaces is fixed here rather than carried.
 `StorageKeyReferenced` in `drive/internal/store/refs.go` line 19 reads
 `files` and `file_versions` while calling itself "the single invariant
@@ -66,8 +77,8 @@ Criteria 1, 2, 3, 5, 7, 8 and 11 have passing tests. Criterion 4's refusal
 and its deletion are proved at the unit tier against the answer's limit, and
 the reaper's half of it is [[010-events-and-reaper]]'s. Criterion 6 is
 proved at the unit tier with the row write failed once, and the retry
-resumes from the row write. Criterion 9's expiry query is exposed and proved
-against Postgres; the sweep that runs it is the reaper's. Criterion 10 waits
+resumes from the row write. Criterion 9 is closed: the expiry query is proved
+against Postgres and the sweep that runs it is bound as pass 4 above. Criterion 10 waits
 for the conformance rows of [[017-conformance-suite]]. Criterion 12 is open:
 see the divergence below.
 

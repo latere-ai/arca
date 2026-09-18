@@ -42,6 +42,9 @@ type harness struct {
 	endpoint *stub.Server
 	owner    string
 	clock    time.Time
+	// service is the one this surface is mounted on, which is also what the
+	// reconciler of spec 010 sweeps through.
+	service *Service
 	// sessions answers one session by its id, from whichever metadata store
 	// the harness was built on.
 	sessions func(t *testing.T, id string) store.Session
@@ -83,9 +86,10 @@ func newHarness(t *testing.T, opts ...func(*Options)) *harness {
 	for _, opt := range opts {
 		opt(&o)
 	}
+	h.service = New(o)
 	surface, err := api.New(api.Options{
 		Verifier: id.Verifier, Authorizer: id.Authorizer,
-		PublicURL: "https://storage.example", Routes: Routes(o),
+		PublicURL: "https://storage.example", Routes: Bind(h.service),
 		// The frame registers the event tail of spec 010 and refuses to
 		// build without its log. No test here drives that route, so the
 		// node's own log is wired with no database behind it: what the tail

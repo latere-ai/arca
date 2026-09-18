@@ -99,8 +99,12 @@ func Table() []api.Route {
 }
 
 // Routes are the same rows with this package's handlers bound.
-func Routes(o Options) []api.Route {
-	s := New(o)
+func Routes(o Options) []api.Route { return Bind(New(o)) }
+
+// Bind attaches one service's handlers to the declared rows, for a node that
+// has already built the service because the reconciler of spec 010 reaches
+// the same one.
+func Bind(s *Service) []api.Route {
 	handlers := []http.Handler{
 		http.HandlerFunc(s.create), http.HandlerFunc(s.complete), http.HandlerFunc(s.abort),
 	}

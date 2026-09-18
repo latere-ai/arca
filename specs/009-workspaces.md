@@ -333,8 +333,16 @@ one; the pass writes on every statement it issues and has no counting half,
 so a dry run runs it not at all, and `arcad reap` as a process of its own
 does not carry it, because the service the sweep is a method of refuses to
 build without the authorizer its handlers decide through and that process
-starts no verifier. `workspaces.Objects` is still `store.NewWorkspaceObjects()`:
-[[005-files]] has not landed.
+starts no verifier. `workspaces.Objects` stays `store.NewWorkspaceObjects()` now that
+[[005-files]] has landed. That spec holds handlers over one path and this
+seam is five statements over a subtree; both read the `files` table of
+[[004-metadata-store]], and the query set is where a statement over that
+table belongs, so binding one package to the other would put a second
+reading of one table between them. The traffic goes the other way instead:
+`store.Workspaces.Live` answers the liveness lookup [[005-files]] asks
+before it touches a path under `workspaces/<slug>/`, so a workspace that was
+never created and one behind a tombstone are the same missing object to
+everyone.
 
 Every deadline the service stores is taken at the precision the database
 keeps. `writer_expires_at` and `expires_at` are TIMESTAMPTZ, which Postgres
@@ -351,7 +359,7 @@ iterate the list `api.New` merges, so a contributed row is held to the same
 rules a frame row is, and the union of every declaration this build
 registers is read in `tools/apidoc`, which is the one place both halves are
 visible and which logs how far the build is from [[013-api]]'s forty-one.
-Sixteen are registered today.
+Thirty-nine are registered today.
 
 Criteria 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16 and 17 have passing
 tests. Criterion 4 is here: `Service.ExpireLeases` is tested in this package

@@ -215,6 +215,22 @@ func (m *memory) listing(owner, cursor string, limit int, wantDeleted bool) ([]s
 	return page, nil
 }
 
+// Live is the liveness lookup the file plane of spec 005 asks, over the map.
+func (m *memory) Live(_ context.Context, q store.Querier, owner, slug string) (bool, error) {
+	m.use(q)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.refuse("Live"); err != nil {
+		return false, err
+	}
+	for _, w := range m.workspaces {
+		if w.Owner == owner && w.Slug == slug && w.DeletedAt == nil {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (m *memory) Rename(_ context.Context, q store.Querier, id, slug string, now time.Time) (bool, error) {
 	m.use(q)
 	m.mu.Lock()
