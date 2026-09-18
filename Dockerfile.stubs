@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: 2026 Latere AI
+# SPDX-License-Identifier: MIT
+
+# The test stubs of spec 014 in one image: the stub issuer and the stub
+# authorizer, run from flags by test/stubs/cmd/arca-stubs. The kind example
+# runs it beside arcad, the release pipeline's conformance job proves the
+# published arcad image against it, and an operator's first installation
+# can run a released, signed stub authorizer rather than a checkout. Built
+# like Dockerfile: the command is compiled inside the image on the same
+# static distroless runtime, with its own ports and entrypoint.
+
+FROM golang:1.27-alpine AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+ARG TARGETOS
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
+      -o /out/arca-stubs ./test/stubs/cmd/arca-stubs
+
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=build /out/arca-stubs /usr/local/bin/arca-stubs
+EXPOSE 8081 8082
+USER nonroot:nonroot
+ENTRYPOINT ["/usr/local/bin/arca-stubs"]
