@@ -32,8 +32,9 @@ func TestTheSurfaceRefusesToBuildWithoutTheTwoOfSpec006(t *testing.T) {
 }
 
 // TestAPublicLinkRouteTakesNoBearer is the exception of spec 013 end to end:
-// the three link routes answer without a token, and answer the frame's
-// not_implemented until spec 008 lands their behaviour.
+// the three link routes reach their handler without a token and without a
+// question, because the grant the token in the URL resolves to is the whole
+// of the authorization. What that handler then does is spec 008's.
 func TestAPublicLinkRouteTakesNoBearer(t *testing.T) {
 	h := newHarness(t, routeTable)
 	for _, path := range []string{
@@ -43,17 +44,31 @@ func TestAPublicLinkRouteTakesNoBearer(t *testing.T) {
 	} {
 		t.Run(path, func(t *testing.T) {
 			w := h.do(t, http.MethodGet, path, "")
-			if w.Code != http.StatusNotImplemented {
-				t.Fatalf("the route answered %d, want %d: %s", w.Code, http.StatusNotImplemented, w.Body)
+			if w.Code != http.StatusOK {
+				t.Fatalf("the route answered %d with no bearer: %s", w.Code, w.Body)
 			}
-			body := decode(t, w)
-			if body.Error.Code != CodeNotImplemented {
-				t.Errorf("the code is %q", body.Error.Code)
-			}
-			if body.Error.Details["request_id"] == nil {
-				t.Error("the refusal carries no request id")
+			if asked := h.endpoint.Requests(); len(asked) != 0 {
+				t.Errorf("a route outside the verifier asked %v before its handler ran", asked)
 			}
 		})
+	}
+}
+
+// TestAPublicLinkRouteWithNoServiceIsNotImplemented: the row is registered
+// at its right place in a build that bound no service, so the exception to
+// the verifier is a property of the table and not of the handler.
+func TestAPublicLinkRouteWithNoServiceIsNotImplemented(t *testing.T) {
+	h := newHarness(t, routeTable, func(o *Options) { o.Shares = nil })
+	w := h.do(t, http.MethodGet, "/v1/shares/links/tkn/meta", "")
+	if w.Code != http.StatusNotImplemented {
+		t.Fatalf("the route answered %d: %s", w.Code, w.Body)
+	}
+	body := decode(t, w)
+	if body.Error.Code != CodeNotImplemented {
+		t.Errorf("the code is %q", body.Error.Code)
+	}
+	if body.Error.Details["request_id"] == nil {
+		t.Error("the refusal carries no request id")
 	}
 }
 
@@ -210,7 +225,7 @@ func TestTheAddressRateLimitBoundsWhatHasNoSubject(t *testing.T) {
 	h.endpoint.Allow(stub.Rule{Subject: "*", Action: "*", Resource: "*", Allow: true})
 
 	// One guess at a link token and one bad bearer exhaust the bucket.
-	if w := h.do(t, http.MethodGet, "/v1/shares/links/guess", ""); w.Code != http.StatusNotImplemented {
+	if w := h.do(t, http.MethodGet, "/v1/shares/links/guess", ""); w.Code != http.StatusOK {
 		t.Fatalf("a link route answered %d", w.Code)
 	}
 	if w := h.do(t, http.MethodGet, fill(probeRoute.path), "not-a-token"); w.Code != http.StatusUnauthorized {
@@ -244,7 +259,7 @@ func TestARateOfZeroLimitsNothing(t *testing.T) {
 		if w := h.do(t, http.MethodGet, fill(probeRoute.path), h.bearer()); w.Code != http.StatusOK {
 			t.Fatalf("request %d answered %d with the limiters off", i+1, w.Code)
 		}
-		if w := h.do(t, http.MethodGet, "/v1/shares/links/tkn", ""); w.Code != http.StatusNotImplemented {
+		if w := h.do(t, http.MethodGet, "/v1/shares/links/tkn", ""); w.Code != http.StatusOK {
 			t.Fatalf("link request %d answered %d with the limiters off", i+1, w.Code)
 		}
 	}

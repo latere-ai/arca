@@ -250,6 +250,29 @@ func (b bound) RevokeGrant(w http.ResponseWriter, r *http.Request) {
 	b.ask(w, r, authorizer.ActionShareRevoke)
 }
 
+func (b bound) CreateLink(w http.ResponseWriter, r *http.Request) {
+	b.ask(w, r, authorizer.ActionLinkCreate)
+}
+
+func (b bound) ListLinks(w http.ResponseWriter, r *http.Request) {
+	b.ask(w, r, authorizer.ActionLinkRead)
+}
+
+func (b bound) RevokeLink(w http.ResponseWriter, r *http.Request) {
+	b.ask(w, r, authorizer.ActionLinkRevoke)
+}
+
+// The three that redeem a token ask nothing here. What they ask an
+// authorizer is link.read with an anonymous subject once the token has
+// resolved, which is internal/shares' and is proved there; what the table
+// below holds them to is that no question is asked before the row's own
+// handler runs.
+func (b bound) LinkMeta(w http.ResponseWriter, _ *http.Request) { b.acted(w) }
+
+func (b bound) LinkList(w http.ResponseWriter, _ *http.Request) { b.acted(w) }
+
+func (b bound) LinkFile(w http.ResponseWriter, _ *http.Request) { b.acted(w) }
+
 // ask puts the one question the row names and acts on an allow.
 func (b bound) ask(w http.ResponseWriter, r *http.Request, action string) {
 	res := authorizer.Share{
@@ -259,6 +282,11 @@ func (b bound) ask(w http.ResponseWriter, r *http.Request, action string) {
 		WriteError(w, r, FromAuth(err))
 		return
 	}
+	b.acted(w)
+}
+
+// acted is what a row answers once it has run.
+func (b bound) acted(w http.ResponseWriter) {
 	httpjson.Write(w, http.StatusOK, map[string]string{"state": "acted"})
 }
 

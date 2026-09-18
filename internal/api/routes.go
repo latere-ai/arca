@@ -60,6 +60,20 @@ type Shares interface {
 	ReadGrant(w http.ResponseWriter, r *http.Request)
 	// RevokeGrant answers DELETE /v1/shares/{id}.
 	RevokeGrant(w http.ResponseWriter, r *http.Request)
+	// CreateLink answers POST /v1/shares/links.
+	CreateLink(w http.ResponseWriter, r *http.Request)
+	// ListLinks answers GET /v1/shares/links.
+	ListLinks(w http.ResponseWriter, r *http.Request)
+	// RevokeLink answers DELETE /v1/shares/links/{id}.
+	RevokeLink(w http.ResponseWriter, r *http.Request)
+	// LinkMeta answers GET /v1/shares/links/{token}/meta, outside the
+	// verifier.
+	LinkMeta(w http.ResponseWriter, r *http.Request)
+	// LinkList answers GET /v1/shares/links/{token}, outside the verifier.
+	LinkList(w http.ResponseWriter, r *http.Request)
+	// LinkFile answers GET /v1/shares/links/{token}/files/{path...},
+	// outside the verifier.
+	LinkFile(w http.ResponseWriter, r *http.Request)
 }
 
 // share dispatches one row of spec 008's surface to the implementation the
@@ -74,13 +88,13 @@ func (a *API) share(w http.ResponseWriter, r *http.Request, h func(Shares, http.
 	h(a.shares, w, r)
 }
 
-// routeTable is the surface. Today it is the frame of spec 013 and the
-// grants of spec 008: the five routes a grant is created, read, listed and
-// revoked through, and the three public link routes, registered outside the
-// verifier because that is where they belong and because registering them
-// later would be registering them somewhere else. Every other row of spec
-// 013's table arrives with the spec that owns its behaviour, on the phases
-// of spec 019.
+// routeTable is the surface. Today it is the frame of spec 013 and the whole
+// of spec 008: the five routes a grant is created, read, listed and revoked
+// through, the three a token grant is minted, listed and revoked through,
+// and the three that redeem a token, which are registered outside the
+// verifier because the token in the URL is the whole of their
+// authorization. Every other row of spec 013's table arrives with the spec
+// that owns its behaviour, on the phases of spec 019.
 var routeTable = []route{
 	{
 		method: http.MethodPost, path: "/v1/shares",
@@ -113,22 +127,40 @@ var routeTable = []route{
 		handler: func(a *API, w http.ResponseWriter, r *http.Request) { a.share(w, r, Shares.RevokeGrant) },
 	},
 	{
+		method: http.MethodPost, path: "/v1/shares/links",
+		action: authorizer.ActionLinkCreate, status: http.StatusCreated,
+		summary: "Mint a token grant on a subtree; the token is answered once.",
+		handler: func(a *API, w http.ResponseWriter, r *http.Request) { a.share(w, r, Shares.CreateLink) },
+	},
+	{
+		method: http.MethodGet, path: "/v1/shares/links",
+		action: authorizer.ActionLinkRead, status: http.StatusOK,
+		summary: "The token grants on a space.",
+		handler: func(a *API, w http.ResponseWriter, r *http.Request) { a.share(w, r, Shares.ListLinks) },
+	},
+	{
+		method: http.MethodDelete, path: "/v1/shares/links/{id}",
+		action: authorizer.ActionLinkRevoke, status: http.StatusNoContent,
+		summary: "Revoke a token grant.",
+		handler: func(a *API, w http.ResponseWriter, r *http.Request) { a.share(w, r, Shares.RevokeLink) },
+	},
+	{
 		method: http.MethodGet, path: "/v1/shares/links/{token}/meta",
-		public: true, pending: true, status: http.StatusOK,
+		public: true, status: http.StatusOK,
 		summary: "What a link token names, before anything is fetched.",
-		handler: (*API).link,
+		handler: func(a *API, w http.ResponseWriter, r *http.Request) { a.share(w, r, Shares.LinkMeta) },
 	},
 	{
 		method: http.MethodGet, path: "/v1/shares/links/{token}",
-		public: true, pending: true, status: http.StatusOK,
+		public: true, status: http.StatusOK,
 		summary: "A listing of the subtree a link token names.",
-		handler: (*API).link,
+		handler: func(a *API, w http.ResponseWriter, r *http.Request) { a.share(w, r, Shares.LinkList) },
 	},
 	{
 		method: http.MethodGet, path: "/v1/shares/links/{token}/files/{path...}",
-		public: true, pending: true, status: http.StatusOK,
+		public: true, status: http.StatusOK,
 		summary: "One object under the subtree a link token names.",
-		handler: (*API).link,
+		handler: func(a *API, w http.ResponseWriter, r *http.Request) { a.share(w, r, Shares.LinkFile) },
 	},
 }
 
@@ -146,12 +178,4 @@ func Errors() []apidocs.ErrorCode {
 		out[i] = apidocs.ErrorCode{Code: code, Status: Status(code), Sentence: Sentence(code)}
 	}
 	return out
-}
-
-// link answers the three public link routes until spec 008 lands their
-// behaviour. It is registered at the right place with the right exception,
-// so the shape of the surface is settled before the handler is.
-func (a *API) link(w http.ResponseWriter, r *http.Request) {
-	WriteError(w, r, Refuse(CodeNotImplemented,
-		"the public link routes arrive with the shares and links of spec 008"))
 }

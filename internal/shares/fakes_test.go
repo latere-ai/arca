@@ -227,6 +227,25 @@ func (t *table) put(g store.Grant) store.Grant {
 	return written
 }
 
+// file writes one live path directly, for a link's listing to read.
+func (t *table) file(f store.File) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.files = append(t.files, f)
+}
+
+// public answers whether the row one path names carries the public flag.
+func (t *table) public(path string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, f := range t.files {
+		if f.Path == path {
+			return f.IsPublic
+		}
+	}
+	return false
+}
+
 // rung orders the ladder for the covering read.
 func rung(permission string) int {
 	switch permission {
@@ -321,4 +340,13 @@ func (b *bucket) SetPublic(_ context.Context, key string, public bool) error {
 	}
 	b.public[key] = public
 	return nil
+}
+
+// stamped answers the ACL one key carries, and whether it was stamped at
+// all.
+func (b *bucket) stamped(key string) (bool, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	public, ok := b.public[key]
+	return public, ok
 }

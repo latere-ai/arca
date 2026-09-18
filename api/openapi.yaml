@@ -61,11 +61,103 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /v1/shares/links:
+    get:
+      operationId: getV1SharesLinks
+      summary: The token grants on a space.
+      description: Asks the authorizer for link.read before it acts.
+      security:
+      - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {}
+        "401":
+          $ref: "#/components/responses/unauthenticated"
+        "403":
+          $ref: "#/components/responses/forbidden"
+        "404":
+          $ref: "#/components/responses/not_found"
+        "429":
+          $ref: "#/components/responses/rate_limited"
+        "500":
+          $ref: "#/components/responses/internal"
+        "503":
+          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      operationId: postV1SharesLinks
+      summary: Mint a token grant on a subtree; the token is answered once.
+      description: Asks the authorizer for link.create before it acts.
+      security:
+      - bearer: []
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: {}
+        "401":
+          $ref: "#/components/responses/unauthenticated"
+        "403":
+          $ref: "#/components/responses/forbidden"
+        "404":
+          $ref: "#/components/responses/not_found"
+        "429":
+          $ref: "#/components/responses/rate_limited"
+        "500":
+          $ref: "#/components/responses/internal"
+        "503":
+          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v1/shares/links/{id}:
+    delete:
+      operationId: deleteV1SharesLinksById
+      summary: Revoke a token grant.
+      description: Asks the authorizer for link.revoke before it acts.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      security:
+      - bearer: []
+      responses:
+        "204":
+          description: No Content
+          content:
+            application/json:
+              schema: {}
+        "401":
+          $ref: "#/components/responses/unauthenticated"
+        "403":
+          $ref: "#/components/responses/forbidden"
+        "404":
+          $ref: "#/components/responses/not_found"
+        "429":
+          $ref: "#/components/responses/rate_limited"
+        "500":
+          $ref: "#/components/responses/internal"
+        "503":
+          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /v1/shares/links/{token}:
     get:
       operationId: getV1SharesLinksByToken
       summary: A listing of the subtree a link token names.
-      description: "Carries no bearer token: the token in the URL is the whole of the authorization. This build does not serve this route yet and answers not_implemented."
+      description: "Carries no bearer token: the token in the URL is the whole of the authorization."
       parameters:
       - name: token
         in: path
@@ -74,17 +166,20 @@ paths:
           type: string
       security: []
       responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {}
         "429":
           $ref: "#/components/responses/rate_limited"
         "500":
           $ref: "#/components/responses/internal"
-        "501":
-          $ref: "#/components/responses/not_implemented"
   /v1/shares/links/{token}/files/{path}:
     get:
       operationId: getV1SharesLinksByTokenFilesByPath
       summary: One object under the subtree a link token names.
-      description: "Carries no bearer token: the token in the URL is the whole of the authorization. This build does not serve this route yet and answers not_implemented."
+      description: "Carries no bearer token: the token in the URL is the whole of the authorization."
       parameters:
       - name: token
         in: path
@@ -99,17 +194,20 @@ paths:
           type: string
       security: []
       responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {}
         "429":
           $ref: "#/components/responses/rate_limited"
         "500":
           $ref: "#/components/responses/internal"
-        "501":
-          $ref: "#/components/responses/not_implemented"
   /v1/shares/links/{token}/meta:
     get:
       operationId: getV1SharesLinksByTokenMeta
       summary: What a link token names, before anything is fetched.
-      description: "Carries no bearer token: the token in the URL is the whole of the authorization. This build does not serve this route yet and answers not_implemented."
+      description: "Carries no bearer token: the token in the URL is the whole of the authorization."
       parameters:
       - name: token
         in: path
@@ -118,12 +216,15 @@ paths:
           type: string
       security: []
       responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {}
         "429":
           $ref: "#/components/responses/rate_limited"
         "500":
           $ref: "#/components/responses/internal"
-        "501":
-          $ref: "#/components/responses/not_implemented"
   /v1/shares/with-me:
     get:
       operationId: getV1SharesWithMe
