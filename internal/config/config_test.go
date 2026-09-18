@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func env(m map[string]string) Getenv {
@@ -47,6 +48,8 @@ func TestLoadAppliesEveryDefault(t *testing.T) {
 		OIDCAudience:                     DefaultOIDCAudience,
 		RequestsPerMinute:                DefaultRequestsPerMinute,
 		UnauthenticatedRequestsPerMinute: DefaultUnauthenticatedRequestsPerMinute,
+		ReapInterval:                     DefaultReapInterval,
+		TrashRetention:                   DefaultTrashRetention,
 	}
 	if !reflect.DeepEqual(c, want) {
 		t.Fatalf("Load() = %+v, want %+v", c, want)
@@ -76,6 +79,8 @@ func TestLoadReadsEveryVariable(t *testing.T) {
 		"ARCA_ADMIN_SUBJECTS":                      "https://issuer.example|root, https://issuer.example|ops",
 		"ARCA_REQUESTS_PER_MINUTE":                 "1200",
 		"ARCA_UNAUTHENTICATED_REQUESTS_PER_MINUTE": "0",
+		"ARCA_REAP_INTERVAL":                       "90s",
+		"ARCA_TRASH_RETENTION":                     "168h",
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -99,6 +104,8 @@ func TestLoadReadsEveryVariable(t *testing.T) {
 		AuthorizerURL: "https://authz.example/decide", AuthorizerToken: "s3cret",
 		AdminSubjects:     []string{"https://issuer.example|root", "https://issuer.example|ops"},
 		RequestsPerMinute: 1200, UnauthenticatedRequestsPerMinute: 0,
+		ReapInterval:   90 * time.Second,
+		TrashRetention: 168 * time.Hour,
 	}
 	if !reflect.DeepEqual(c, want) {
 		t.Fatalf("Load() = %+v, want %+v", c, want)
@@ -273,6 +280,45 @@ func TestTheIdentityVariablesAreChecked(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), c.mustSay) {
 				t.Errorf("the message is %q, which does not say %q", err, c.mustSay)
+			}
+		})
+	}
+}
+
+func TestTheWindowsOfTheReconcilerAreReadAndChecked(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		variable string
+		value    string
+		want     time.Duration
+		problem  string
+	}{
+		{"an interval", "ARCA_REAP_INTERVAL", "30s", 30 * time.Second, ""},
+		{"an interval of zero, which turns the loop off", "ARCA_REAP_INTERVAL", "0s", 0, ""},
+		{"an interval in no spelling", "ARCA_REAP_INTERVAL", "often", 0, "written the way"},
+		{"an interval that runs backwards", "ARCA_REAP_INTERVAL", "-5m", 0, "backwards"},
+		{"a retention", "ARCA_TRASH_RETENTION", "168h", 168 * time.Hour, ""},
+		{"a retention in no spelling", "ARCA_TRASH_RETENTION", "a month", 0, "written the way"},
+		{"a retention of no time", "ARCA_TRASH_RETENTION", "0", 0, "no time"},
+		{"a retention that runs backwards", "ARCA_TRASH_RETENTION", "-1h", 0, "backwards"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := Load(required(map[string]string{c.variable: c.value}))
+			if c.problem != "" {
+				if err == nil || !strings.Contains(err.Error(), c.problem) {
+					t.Fatalf("%s of %q loaded with %v", c.variable, c.value, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			read := got.ReapInterval
+			if c.variable == "ARCA_TRASH_RETENTION" {
+				read = got.TrashRetention
+			}
+			if read != c.want {
+				t.Fatalf("%s of %q read as %s", c.variable, c.value, read)
 			}
 		})
 	}

@@ -70,6 +70,44 @@ func TestE2EAnUnknownSubcommandIsAUsageError(t *testing.T) {
 	}
 }
 
+// TestE2EReapRunsOneSequenceAndExits is criterion 20 of spec 010 through
+// the binary: arcad reap -once runs one sequence against both stores and
+// exits 0, which is the shape a CronJob runs, and -dry-run reports the same
+// and changes nothing.
+func TestE2EReapRunsOneSequenceAndExits(t *testing.T) {
+	i := start(t)
+	for _, args := range [][]string{{"reap", "-once"}, {"reap", "-once", "-dry-run"}} {
+		out, err := i.command(t, args...)
+		if err != nil {
+			t.Fatalf("arcad %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+		if !strings.Contains(out, "the reconciliation finished") {
+			t.Errorf("arcad %s printed %q", strings.Join(args, " "), out)
+		}
+	}
+	// A dry run says so, so a reader of a job's log knows nothing moved.
+	out, err := i.command(t, "reap", "-once", "-dry-run")
+	if err != nil || !strings.Contains(out, "nothing was changed") {
+		t.Fatalf("a dry run printed %q, %v", out, err)
+	}
+
+	// And a loop with no interval refuses rather than exiting 0 having done
+	// nothing, which is how a CronJob looks healthy while nothing is
+	// reconciled.
+	i.env = append(i.env, "ARCA_REAP_INTERVAL=0")
+	out, err = i.command(t, "reap")
+	if err == nil {
+		t.Fatalf("a loop of no interval exited 0:\n%s", out)
+	}
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+		t.Fatalf("a loop of no interval answered %v:\n%s", err, out)
+	}
+	if !strings.Contains(out, "ARCA_REAP_INTERVAL is 0") {
+		t.Errorf("stderr = %q", out)
+	}
+}
+
 // TestE2ETheTierSkipsWithoutTheStack is criterion 5 of spec 014: a tier
 // whose variables are unset skips with the remediation in its message, so
 // a clean clone with no services is green and a reader knows what to run.

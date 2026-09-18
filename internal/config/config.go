@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"latere.ai/x/pkg/authz"
 )
@@ -32,6 +33,17 @@ const (
 	// per client address before it (spec 015). Zero disables either.
 	DefaultRequestsPerMinute                = 600
 	DefaultUnauthenticatedRequestsPerMinute = 60
+)
+
+// Defaults for the two windows the reconciler of spec 010 works to.
+const (
+	// DefaultReapInterval is how often the reconciler runs inside serve. A
+	// value of zero disables the in-process loop, which is what an
+	// installation that runs arcad reap as a process of its own sets on its
+	// API replicas.
+	DefaultReapInterval = 5 * time.Minute
+	// DefaultTrashRetention is how long a trashed object stays restorable.
+	DefaultTrashRetention = 720 * time.Hour
 )
 
 // prefixShape is what a bucket prefix may hold: the characters a key is
@@ -94,6 +106,12 @@ type Config struct {
 	// token buckets of spec 015. Zero disables one.
 	RequestsPerMinute                int
 	UnauthenticatedRequestsPerMinute int
+	// ReapInterval is how often the reconciler of spec 010 runs inside
+	// serve. Zero leaves serve with no reconciliation loop.
+	ReapInterval time.Duration
+	// TrashRetention is how long a trashed object stays restorable before
+	// the reconciler purges it from both stores.
+	TrashRetention time.Duration
 }
 
 // Database reads the one variable the migrate subcommand needs, so a
@@ -214,6 +232,8 @@ func Load(getenv Getenv) (Config, error) {
 			note("ARCA_AUTHORIZER_TOKEN is unset while ARCA_AUTHORIZER_URL is set, and the endpoint requires a bearer")
 		}
 	}
+	c.ReapInterval = duration(getenv("ARCA_REAP_INTERVAL"), DefaultReapInterval, "ARCA_REAP_INTERVAL", true, note)
+	c.TrashRetention = duration(getenv("ARCA_TRASH_RETENTION"), DefaultTrashRetention, "ARCA_TRASH_RETENTION", false, note)
 	if len(problems) > 0 {
 		sort.Strings(problems)
 		return Config{}, errors.New("configuration: " + strings.Join(problems, "; "))
@@ -276,6 +296,30 @@ func count(raw string, def int, name string, note func(string, ...any)) int {
 		return def
 	}
 	return v
+}
+
+// duration reads one window, in the spelling time.ParseDuration accepts.
+// Unset is the default, and anything the clock cannot read is a problem
+// rather than a silent fallback. offSwitch says whether zero is a value the
+// variable takes: an interval of zero turns a loop off, and a retention of
+// zero would purge what was deleted a moment ago.
+func duration(raw string, def time.Duration, name string, offSwitch bool, note func(string, ...any)) time.Duration {
+	raw = value(raw)
+	if raw == "" {
+		return def
+	}
+	d, err := time.ParseDuration(raw)
+	switch {
+	case err != nil:
+		note("%s is %q, and a window is written the way 5m, 2h30m or 720h is", name, raw)
+	case d < 0:
+		note("%s is %q, and a window does not run backwards", name, raw)
+	case d == 0 && !offSwitch:
+		note("%s is %q, and a window of no time acts on what happened a moment ago", name, raw)
+	default:
+		return d
+	}
+	return 0
 }
 
 // normalisePrefix is spec 003's rule: a missing trailing slash is appended,

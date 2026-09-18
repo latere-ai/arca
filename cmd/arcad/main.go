@@ -28,6 +28,7 @@ import (
 	"latere.ai/x/arca/internal/auth"
 	"latere.ai/x/arca/internal/blob"
 	"latere.ai/x/arca/internal/config"
+	"latere.ai/x/arca/internal/reaper"
 	"latere.ai/x/arca/internal/store"
 	"latere.ai/x/arca/internal/version"
 )
@@ -57,9 +58,102 @@ func run(ctx context.Context, args []string, getenv config.Getenv, stdout, stder
 		return serve(ctx, rest, getenv, stdout, stderr)
 	case "migrate":
 		return migrate(rest, getenv, stdout, stderr)
+	case "reap":
+		return reap(ctx, rest, getenv, stdout, stderr)
 	default:
-		_, _ = fmt.Fprintf(stderr, "arcad: unknown subcommand %q; serve and migrate are the ones this binary has\n", name)
+		_, _ = fmt.Fprintf(stderr, "arcad: unknown subcommand %q; serve, migrate and reap are the ones this binary has\n", name)
 		return 2
+	}
+}
+
+// reap runs the reconciler of spec 010 as a process of its own, for an
+// installation that wants it off the API replicas. It reads the same
+// configuration as the server, because a process reconciling against a
+// different one would reconcile a different installation, and it opens no
+// listener.
+func reap(ctx context.Context, args []string, getenv config.Getenv, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("arcad reap", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	once := fs.Bool("once", false, "run one sequence of passes and exit, which is the shape a CronJob runs")
+	dryRun := fs.Bool("dry-run", false, "report every finding and change nothing in either store")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	cfg, err := config.Load(getenv)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	// Zero is the value that turns the in-process loop of serve off. A
+	// process whose whole job is that loop cannot take it, and exiting 0
+	// having done nothing is how a CronJob looks healthy while nothing is
+	// reconciled.
+	if !*once && cfg.ReapInterval <= 0 {
+		return fail(stderr, errors.New("ARCA_REAP_INTERVAL is 0, which turns the loop off; run arcad reap -once, or set an interval"))
+	}
+
+	bucket, err := blob.NewS3(ctx, bucketOptions(cfg))
+	if err != nil {
+		return fail(stderr, err)
+	}
+	db, err := store.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	defer db.Close()
+	reconciler, err := reaper.New(reaperOptions(cfg, db, bucket, *dryRun))
+	if err != nil {
+		return fail(stderr, err)
+	}
+
+	if !*once {
+		_, _ = fmt.Fprintf(stdout, "arcad: the reconciler runs every %s\n", cfg.ReapInterval)
+		reconciler.Loop(ctx, cfg.ReapInterval)
+		return 0
+	}
+	findings, err := reconciler.Run(ctx)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	report(stdout, findings, *dryRun)
+	return 0
+}
+
+// report is what one sequence prints: a summary line and the table of what
+// it found, which is the whole output of a CronJob's log.
+func report(stdout io.Writer, findings reaper.Findings, dryRun bool) {
+	note := ""
+	if dryRun {
+		note = "; nothing was changed, because this was a dry run"
+	}
+	_, _ = fmt.Fprintf(stdout, "arcad: the reconciliation finished%s\n", note)
+	for _, row := range findings.Rows() {
+		_, _ = fmt.Fprintf(stdout, "  %-18s %-9s %d\n", row.Kind, row.Outcome, row.Count)
+	}
+}
+
+// reaperOptions is what both roles build the reconciler from. serve and reap
+// read the same configuration and reconcile the same way; what differs is
+// where the loop lives.
+func reaperOptions(cfg config.Config, db *store.DB, bucket blob.Store, dryRun bool) reaper.Options {
+	return reaper.Options{
+		DB:             db,
+		Bucket:         bucket,
+		Prefix:         cfg.BucketPrefix,
+		TrashRetention: cfg.TrashRetention,
+		DryRun:         dryRun,
+	}
+}
+
+// bucketOptions is the bucket client every role opens, from the one table of
+// spec 002.
+func bucketOptions(cfg config.Config) blob.Options {
+	return blob.Options{
+		Bucket:    cfg.Bucket,
+		Endpoint:  cfg.BucketEndpoint,
+		Region:    cfg.BucketRegion,
+		AccessKey: cfg.BucketAccessKey,
+		SecretKey: cfg.BucketSecretKey,
+		PathStyle: cfg.BucketPathStyle,
 	}
 }
 
@@ -129,14 +223,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	// configuration, and the readiness check below is what reaches the
 	// store. A store that is briefly unreachable at start-up therefore
 	// delays readiness rather than crashing the process.
-	bucket, err := blob.NewS3(ctx, blob.Options{
-		Bucket:    cfg.Bucket,
-		Endpoint:  cfg.BucketEndpoint,
-		Region:    cfg.BucketRegion,
-		AccessKey: cfg.BucketAccessKey,
-		SecretKey: cfg.BucketSecretKey,
-		PathStyle: cfg.BucketPathStyle,
-	})
+	bucket, err := blob.NewS3(ctx, bucketOptions(cfg))
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -179,6 +266,16 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		UnauthenticatedRequestsPerMinute: cfg.UnauthenticatedRequestsPerMinute,
 	})
 	if err != nil {
+		return fail(stderr, err)
+	}
+
+	// The reconciler of spec 010 runs on every replica, which is what a
+	// small installation wants: one workload and nothing else to operate.
+	// An installation that moves it off the API replicas sets
+	// ARCA_REAP_INTERVAL to 0 here and runs arcad reap as a process of its
+	// own. It starts before the listeners, so a reconciler that cannot be
+	// built fails the start-up before a port is bound.
+	if err := startReaper(ctx, cfg, db, bucket, stdout); err != nil {
 		return fail(stderr, err)
 	}
 
@@ -245,6 +342,23 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		_ = s.Shutdown(shutdownCtx)
 	}
 	return 0
+}
+
+// startReaper starts the in-process reconciliation loop, or says on the
+// start-up line that this replica runs none. Which it is, is a fact an
+// operator reads once rather than infers from a missing metric.
+func startReaper(ctx context.Context, cfg config.Config, db *store.DB, bucket blob.Store, stdout io.Writer) error {
+	if cfg.ReapInterval <= 0 {
+		_, _ = fmt.Fprintln(stdout, "arcad: the reconciler is off on this replica; ARCA_REAP_INTERVAL is 0")
+		return nil
+	}
+	reconciler, err := reaper.New(reaperOptions(cfg, db, bucket, false))
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(stdout, "arcad: the reconciler runs every %s\n", cfg.ReapInterval)
+	go reconciler.Loop(ctx, cfg.ReapInterval)
+	return nil
 }
 
 // fail writes the one line an operator reads on a start-up or runtime

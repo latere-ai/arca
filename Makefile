@@ -112,11 +112,12 @@ up:
 down:
 	-@$(DEV_COMPOSE_ENV) $(COMPOSE) down --remove-orphans 2>/dev/null
 
-# The store tier: internal/blob and internal/store against the real
+# The store tier: every package that reaches a store, against the real
 # MinIO and the real Postgres. Without the stack's variables every test
 # in it skips itself with the remediation in its message.
 test-store: up
-	$(TIER_ENV) $(GO) test -tags=tiers -race -count=1 -run '^TestStore' ./internal/blob/... ./internal/store/...
+	$(TIER_ENV) $(GO) test -tags=tiers -race -count=1 -run '^TestStore' \
+		./internal/blob/... ./internal/store/... ./internal/events/... ./internal/reaper/...
 
 # The e2e tier: arcad as a process against the stack and the stubs.
 test-e2e: up build build-stubs
