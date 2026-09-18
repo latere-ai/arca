@@ -155,6 +155,21 @@ func TestTheOwnerPolicyTable(t *testing.T) {
 			reason: auth.ReasonNotGranted,
 		},
 		{
+			// Administration is a capability and not ownership, so the owner
+			// rung does not reach this one action: a space's owner asking
+			// space.admin on its own space is refused like anyone else who is
+			// not listed (spec 012).
+			name: "an owner who is not an administrator, on its own space", policy: policy(auth.PermissionNone, ""),
+			subject: alice, action: authorizer.ActionSpaceAdmin,
+			res:    authorizer.Space{Owner: alice}.Resource(),
+			reason: auth.ReasonNotGranted,
+		},
+		{
+			name: "an administrator on a named space", policy: policy(auth.PermissionNone, ""),
+			subject: bob, action: authorizer.ActionSpaceAdmin,
+			res: authorizer.Space{Owner: alice}.Resource(), allow: true,
+		},
+		{
 			name: "a grantee reading within a read grant", policy: policy(auth.PermissionRead, "files/reports"),
 			subject: carol, action: authorizer.ActionFileRead, res: file(alice), allow: true,
 		},

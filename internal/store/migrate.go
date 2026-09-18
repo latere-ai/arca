@@ -5,6 +5,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net/url"
@@ -68,6 +69,22 @@ func Pending(ctx context.Context, q Querier) ([]string, error) {
 		return nil, err
 	}
 	return after(applied, files), nil
+}
+
+// Newest is the last migration this binary carries, which is the one a
+// database with nothing pending is at. It is read from the same embedded
+// directory [Pending] compares against, so the check command of spec 012
+// names the schema a healthy installation is at without a second reading of
+// what this binary holds.
+func Newest() (string, error) {
+	files, err := migrationFiles()
+	if err != nil {
+		return "", err
+	}
+	if len(files) == 0 {
+		return "", errors.New("store: this binary carries no migration")
+	}
+	return files[len(files)-1], nil
 }
 
 // appliedVersion reads the version golang-migrate records. A database that

@@ -1,6 +1,6 @@
 ---
 title: "Administration: the overview across spaces, moderation, restore, the record of what was done, the check command"
-status: drafted
+status: testing
 track: core
 depends_on:
   - specs/001-architecture.md
@@ -44,6 +44,88 @@ with no authorizer and no listed subjects has no administrator, and
 every route in this spec answers 403 to everyone. That is the correct
 default for a self-hosted single-user installation, which needs no
 administrator to work.
+
+## Current state
+
+Built and in the tree on 2026-09-18. `internal/admin` holds the two
+routes and contributes them through `api.Route`/`Options.Routes`;
+`internal/store/admin.go` holds the overview's one statement;
+`internal/check` holds `arcad check`, which `cmd/arcad` dispatches as the
+fourth subcommand of [[002-repository-scaffold]]'s table. The gate passes
+with every gate on and every package above 90%.
+
+Criteria 1, 2, 3, 4, 5, 6, 12, 13 and 14 have passing tests. Criterion 7
+is half open: the route, its question and its answers are proved, and
+what it restores waits on the `Restorer` binding below. Criteria 8, 9, 10
+and 11 belong to the mutations and the log, so they land with
+[[005-files]] and [[008-shares-and-links]]; nothing here deletes from the
+log, and this spec's own mutation is the restore. The spec stays at
+`testing` until they close.
+
+What the implementation decided, where this spec was silent or where the
+tree made another reading better:
+
+- **The owner policy does not admit a space's own owner for
+  `space.admin`.** The policy of [[006-identity]] handed the shared frame
+  an owned object for every action, so the frame's owner step admitted an
+  owner asking this one, and the restore under `/v1/admin` answered a
+  caller no installation had made an administrator. The action now
+  reaches the frame with no object to own; the probe is unaffected,
+  because the frame refuses the reserved id first. That spec's prose said
+  the eight ungranted actions were "the owner's or an administrator's",
+  which was the reading the code followed, and it now names this one as
+  the administrator's alone.
+- **The restore is behind a `Restorer` seam and unbound in this build.**
+  What it undoes is [[005-files]]'s trashed row and [[009-workspaces]]'
+  soft deleted workspace, neither of which this build answers, so the row
+  is registered at its right place and answers `not_implemented`, which
+  is what [[013-api]] reserves that code for. An id that names nothing
+  still restorable is `ErrNotRestorable`, which the handler answers 404
+  to with `ARCA_TRASH_RETENTION` named in the developer detail.
+- **`links` arrives through a second seam and counts none here.** The
+  token grants are [[008-shares-and-links]]'s table. A build that binds
+  no counter counts zero, and zero is the true count: the three link
+  routes answer `not_implemented` on this build, so no installation on it
+  has issued one. The seam takes the page's owners together rather than
+  one space at a time, so a page of a hundred spaces costs one query.
+  This is the one divergence from "seven counters per space, in one
+  statement": six come from the statement and the seventh from the seam.
+- **The overview's row set is the tables that hold contents, not the
+  subject directory.** A subject that made one request and stored nothing
+  is not a space that holds anything, and the directory cannot tell the
+  two apart. A space every counter of which is zero is dropped, which is
+  criterion 6's second half as one predicate.
+- **The cursor is the subject as the row carries it**, not the
+  percent-encoded form this spec's example shows. It is opaque and a
+  client sends it back as `?cursor=` unchanged; encoding it into a query
+  is what a client does with any value, and a cursor already encoded in
+  the body would be encoded twice on the way back.
+- **`last_write_at` is the newest `updated_at` among the space's file
+  rows**, and null for a space that holds none. The ledger's own
+  `updated_at` is when bytes last moved, which a rename is not.
+- **The table gains a fifth row, `public-url`.** `ARCA_PUBLIC_URL` is the
+  base of every URL the server writes, and a value naming somewhere else
+  sends every client there, which no other line would catch. A URL that
+  answers something other than this server's version document is a
+  failure; one that cannot be reached at all is not, because an ingress
+  often does not answer from inside its own cluster and the check runs
+  beside the server as often as in front of it.
+- **The probe key carries a fresh id per run and the line never names
+  it.** Criterion 12 asks for two identical runs, which a key in the
+  output would break; a key of a fixed name would break something worse,
+  because every put of [[003-object-store]] carries `If-None-Match`, so
+  two overlapping runs would fail the second on a healthy installation
+  and a run killed before its delete would fail every run after it. The
+  two properties do not fight: the id is in the key and not in the line.
+- **The check builds the authorizer client directly** rather than through
+  `auth.Start`, which warms the verifier against every issuer: an issuer
+  that does not answer would otherwise fail the authorizer line too, and
+  each line answers for one dependency.
+- **`arcad check` reads the same bucket mapping as the node.** The
+  mapping lives in both `cmd/arcad` and `internal/check`, and a test in
+  `cmd/arcad` holds the two equal, because a check reaching a different
+  bucket than the server would pass an installation the server cannot
+  serve.
 
 ## Design
 
@@ -239,17 +321,19 @@ not delete.
 | Requirement | Passes when | Line names |
 |---|---|---|
 | bucket | `HeadBucket` answers, and a put of a small object under `<ARCA_BUCKET_PREFIX>_check/<ulid>` with `If-None-Match: *`, a get of it, and a delete of it all succeed | the bucket, the endpoint, the prefix |
-| database | the connection opens, `SELECT 1` answers, and the schema version equals the highest embedded migration with no dirty flag | the server version and the migration the schema is at |
+| database | the connection opens, the server answers, and the schema version equals the highest embedded migration with no dirty flag | the server version and the migration the schema is at |
 | issuer | for each entry of `ARCA_OIDC_ISSUERS`: discovery answers, the key set parses, and it holds at least one key of an accepted algorithm | the issuer, the key count, the algorithms |
 | authorizer | `ARCA_AUTHORIZER_URL` answers the probe question of [[006-identity]], the resource id `probe` of kind `Space`, with a well-formed `200` carrying `allow: false` | the endpoint and the decision |
+| public-url | `ARCA_PUBLIC_URL` answers the version endpoint of [[002-repository-scaffold]] with this server's build identity. A URL nothing answers at all is not a failure: an ingress often does not answer from inside its own cluster, and the check runs beside the server as often as in front of it | the URL and what answered there |
 
 ```
 $ arcad check
 ok    bucket      arca-prod at https://s3.example, prefix arca/: wrote, read, deleted
-ok    database    PostgreSQL 16.4, schema at 000012, clean
+ok    database    PostgreSQL 16.4, schema at 0005_usage_events, clean
 ok    issuer      https://issuer.example: discovery ok, 3 keys, RS256 ES256
 fail  authorizer  https://authz.example/decide: allowed the probe resource
-arcad: 1 of 4 checks failed
+ok    public-url  https://arca.example: answers the version endpoint
+arcad: 1 of 5 checks failed
 $ echo $?
 1
 ```
@@ -312,4 +396,4 @@ does not emit ([[018-observability]]).
 | 11 | No event `detail` carries object content or a link token | `TestEventDetailIsMetadataOnly` over the shapes the writers pass |
 | 12 | `arcad check` prints one line per requirement in table order, exits 0 when all pass and 1 when any fails, and two runs against a healthy installation print identical output | `internal/check` test against the stubs of [[014-test-stubs-and-tiers]] |
 | 13 | `check` fails on an unreachable bucket, a bucket it cannot write under the prefix, an unreachable database, a schema behind the embedded migrations, an issuer whose discovery does not answer, and an authorizer that allows the probe | `internal/check` table test, one case per failure |
-| 14 | `check` deletes the object it wrote, and a bucket listing after a run holds nothing under `_check/` | the store tier of [[014-test-stubs-and-tiers]] |
+| 14 | `check` deletes the object it wrote, and a bucket listing after a run holds nothing under `_check/` | `internal/check` over the in-process store, and the e2e tier of [[014-test-stubs-and-tiers]] against MinIO |

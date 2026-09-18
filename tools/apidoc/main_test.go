@@ -241,9 +241,10 @@ func specRoutes(t *testing.T) map[string][]string {
 // registers the same union because Routes and Table are two readings of one
 // declaration.
 //
-// The converse — that every row of the table is registered — closes when the
-// last handler lands. The line this logs is how far the build is from the
-// whole surface.
+// The converse — that every row of the table is registered — closed when the
+// last handler landed, and is the second half below: the union holds every
+// row spec 013 names, so criterion 1 of that spec is proved in both
+// directions from the one place every declaration is visible.
 func TestEveryRouteThisBuildRegistersIsOneOfSpec013sTable(t *testing.T) {
 	spec := specRoutes(t)
 	if len(spec) < 41 {
@@ -273,6 +274,11 @@ func TestEveryRouteThisBuildRegistersIsOneOfSpec013sTable(t *testing.T) {
 		}
 		if r.Summary == "" {
 			t.Errorf("%s carries no summary for the document", key)
+		}
+	}
+	for key := range spec {
+		if !seen[key] {
+			t.Errorf("spec 013's table names %s and this build registers no such route", key)
 		}
 	}
 	t.Logf("%d of spec 013's %d routes are registered in this build", len(registered), len(spec))

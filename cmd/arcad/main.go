@@ -25,9 +25,11 @@ import (
 
 	"latere.ai/x/pkg/health"
 
+	"latere.ai/x/arca/internal/admin"
 	"latere.ai/x/arca/internal/api"
 	"latere.ai/x/arca/internal/auth"
 	"latere.ai/x/arca/internal/blob"
+	"latere.ai/x/arca/internal/check"
 	"latere.ai/x/arca/internal/config"
 	"latere.ai/x/arca/internal/events"
 	"latere.ai/x/arca/internal/files"
@@ -66,8 +68,10 @@ func run(ctx context.Context, args []string, getenv config.Getenv, stdout, stder
 		return migrate(rest, getenv, stdout, stderr)
 	case "reap":
 		return reap(ctx, rest, getenv, stdout, stderr)
+	case "check":
+		return check.Command(ctx, rest, getenv, stdout, stderr)
 	default:
-		_, _ = fmt.Fprintf(stderr, "arcad: unknown subcommand %q; serve, migrate and reap are the ones this binary has\n", name)
+		_, _ = fmt.Fprintf(stderr, "arcad: unknown subcommand %q; serve, migrate, reap and check are the ones this binary has\n", name)
 		return 2
 	}
 }
@@ -469,6 +473,18 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	if err != nil {
 		return fail(stderr, err)
 	}
+	// The administration of spec 012. Two of its seams are unbound in this
+	// build and say so rather than guessing: the restore across owners
+	// returns rows the trash of spec 005 and the deleted workspaces of spec
+	// 009 own, so the route answers not_implemented until a build binds one,
+	// and the link counter is spec 008's table, so the overview counts the
+	// links an installation on this build has issued, which is none.
+	administration, err := admin.New(admin.Options{
+		Querier: db.Querier(), Spaces: store.NewAdmin(), Authorizer: identity.Authorizer,
+	})
+	if err != nil {
+		return fail(stderr, err)
+	}
 	surface, err := api.New(api.Options{
 		Verifier: identity.Verifier, Authorizer: identity.Authorizer,
 		Links:                            sharing,
@@ -478,17 +494,18 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		// The log of spec 010 and the database it reads through, which is
 		// what GET /v1/events tails.
 		Events: log, Querier: db.Querier(),
-		// The thirty-five rows four packages own: the twelve of spec 009,
+		// The thirty-seven rows five packages own: the twelve of spec 009,
 		// the eight of spec 008 that sit behind the verifier, the twelve of
-		// spec 005 and the three of spec 007. Each is declared by the
-		// package that answers it and registered through the one seam of
-		// register.go, in the order tools/apidoc unions them, so the
-		// committed document and the mux read one list the same way.
+		// spec 005, the three of spec 007 and the two of spec 012. Each is
+		// declared by the package that answers it and registered through the
+		// one seam of register.go, in the order tools/apidoc unions them, so
+		// the committed document and the mux read one list the same way.
 		Routes: slices.Concat(
 			workspaces.Routes(durable),
 			shares.Routes(sharing),
 			files.Bind(object),
 			uploads.Bind(session),
+			admin.Routes(administration),
 		),
 	})
 	if err != nil {

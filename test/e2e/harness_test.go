@@ -222,8 +222,17 @@ func bucketPrefix(t *testing.T, s stack) string {
 // output.
 func (i *installation) command(t *testing.T, args ...string) (string, error) {
 	t.Helper()
+	return i.commandWith(t, nil, args...)
+}
+
+// commandWith runs one subcommand with the environment this installation
+// starts its server with and the overrides given, each a NAME=value that wins
+// over the installation's own. It is how a tier points one variable somewhere
+// else and reads what the binary says about it.
+func (i *installation) commandWith(t *testing.T, overrides []string, args ...string) (string, error) {
+	t.Helper()
 	cmd := exec.CommandContext(t.Context(), i.binary, args...)
-	cmd.Env = i.env
+	cmd.Env = append(append([]string{}, i.env...), overrides...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }

@@ -23,6 +23,7 @@ import (
 
 	"github.com/goccy/go-yaml"
 
+	"latere.ai/x/arca/internal/admin"
 	"latere.ai/x/arca/internal/api"
 	"latere.ai/x/arca/internal/apidocs"
 	"latere.ai/x/arca/internal/files"
@@ -83,6 +84,7 @@ func routes() []apidocs.Route {
 	rows = append(rows, api.Described(workspaces.Table())...)
 	rows = append(rows, api.Described(shares.Table())...)
 	rows = append(rows, api.Described(append(files.Table(), uploads.Table()...))...)
+	rows = append(rows, api.Described(admin.Table())...)
 	return rows
 }
 
