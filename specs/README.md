@@ -1,0 +1,73 @@
+# Specs
+
+Design specs for Arca, durable storage as an infrastructure component. One
+spec covers one module. Each spec states the problem, the design with
+enough precision to build from, and acceptance criteria that are testable
+statements. Spec 001 fixes the architecture every other spec assumes; read
+it first. Spec 013 is the contract a consumer codes against; it is the one
+document a platform integrating Arca needs, and spec 017 is the suite that
+proves an implementation serves it. Spec 002 is the configuration
+reference: every `ARCA_*` variable is in its table, owned by it or listed
+with its owner, and it owns the binary's subcommand table. Spec 019 is
+the migration: how the code, the data, and the consumers arrive from the
+service Arca replaces, and how that service is retired.
+
+## Layout
+
+Flat files `specs/NNN-name.md` in one number space with `track: core` in
+the frontmatter. Numbers are stable identifiers and are never reused. Open
+specs sit here and are the work queue. A terminal spec moves to
+`specs/.archive/` keeping its number so `depends_on` paths keep resolving.
+
+## Lifecycle
+
+```mermaid
+stateDiagram-v2
+  [*] --> vague
+  [*] --> drafted
+  vague --> drafted: scoped
+  drafted --> validated: review passes
+  validated --> dispatched: every dependency at testing or later
+  dispatched --> in_progress: first commit
+  in_progress --> testing: implementation lands
+  testing --> complete: verified, Outcome written
+  drafted --> stale
+  validated --> stale
+```
+
+`in_progress` is written `in-progress` in the frontmatter. A spec at
+`testing` moves to `complete` when every acceptance criterion has a
+passing test in the tree and the Outcome records every divergence.
+
+The dispatch gate is on the dependencies' state, not on `complete`: a
+validated spec is dispatched when every spec in its `depends_on` is at
+`testing` or later.
+
+## Index
+
+| Spec | Title | Status |
+|---|---|---|
+| [001](001-architecture.md) | Architecture: two stores, spaces and planes, packages, invariants | drafted |
+| [002](002-repository-scaffold.md) | Repository scaffold: module, binary, configuration, quality gate, image, workflow | testing |
+| [003](003-object-store.md) | Object store: the bucket contract, keys, integrity, presigned reads, multipart | drafted |
+| [004](004-metadata-store.md) | Metadata store: the schema, migrations, spaces, the ledger | drafted |
+| [005](005-files.md) | Files: put, get, list, move, delete; versions, trash, stars | drafted |
+| [006](006-identity.md) | Identity: verification, the subject, the action vocabulary, the authorizer question, the owner policy | drafted |
+| [007](007-uploads.md) | Uploads: sessions, size classes, direct-to-bucket parts, integrity | drafted |
+| [008](008-shares-and-links.md) | Shares and links: grants and the permission ladder, public links, what a caller sees shared with them | drafted |
+| [009](009-workspaces.md) | Workspaces: durable subtrees, the writer lease, materialize and sync | drafted |
+| [010](010-quotas-events-and-reaper.md) | Quotas, events, and the reaper: the ledger, the limits, the reconciliation of the two stores | drafted |
+| [011](011-webhooks.md) | Webhooks: subscriptions, delivery, leases, retirement on failure | drafted |
+| [012](012-administration.md) | Administration: the overview, audit, restore, the `check` command | drafted |
+| [013](013-api.md) | API: routes, the error table, OpenAPI, the document served | drafted |
+| [014](014-test-stubs-and-tiers.md) | Test stubs and tiers: the unit tier, the store tier on MinIO and Postgres, the e2e tier | drafted |
+| [015](015-security-and-threat-model.md) | Security and threat model | drafted |
+| [016](016-release-and-installation.md) | Release and installation: images, binaries, deploy manifests, the operator's overlay | drafted |
+| [017](017-conformance-suite.md) | Conformance suite: the contract as an importable test package | drafted |
+| [018](018-observability.md) | Observability: traces, metrics, logs, the alert rules | drafted |
+| [019](019-migration-from-drive.md) | Migration from Drive: the order the code moves, the data, the consumers, the sunset, the archive | drafted |
+
+The order of building is the order of the numbers except where a spec's
+`depends_on` says otherwise, and 019 runs alongside all of them: each
+module arrives from the service Arca replaces, so 019 names, for every
+spec above, what moves and what is left behind.
