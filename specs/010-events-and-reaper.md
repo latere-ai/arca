@@ -9,7 +9,7 @@ depends_on:
 affects: [authorizer/, internal/events/, internal/reaper/, internal/api/, cmd/arcad/, docs/]
 effort: large
 created: 2026-09-18
-updated: 2026-09-18
+updated: 2026-09-19
 author: changkun
 ---
 
@@ -67,6 +67,36 @@ no room left reaches the handler as `quota_exceeded` and not as a fault of
 the counter. Pass 4 is [[007-uploads]]' `Service.Sweep`, so an expired
 session's parts and row leave and its declared bytes go back.
 
+The merge with [[012-administration]] bound the last two passes. Pass 6 is
+`workspaces.Tombstones` and pass 7 is `shares.Expiry`, each a value of the
+package that owns the rows it removes rather than a method of that package's
+service: a service refuses to build without the authorizer its handlers
+decide through, and binding either pass to one would have kept it off `arcad
+reap`, which registers no handler and starts no verifier. Both are bound in
+`serve` and in `reap`, so the line that process prints, that it runs nine of
+the ten passes, is true of what it runs.
+
+Pass 6 ends a tombstone the way a purge ends anything: the row goes first and
+the delete is conditional on it still being a tombstone, so a restore that
+landed after the page was read rolls the whole transaction back rather than
+taking the subtree of a workspace somebody just brought back; then the
+subtree's rows go, the trashed ones and the superseded contents with them,
+the bytes they counted go back to the ledger, and a `purge` event is
+appended in the same transaction. The keys go after the commit, which is
+invariant 1 of [[001-architecture]]'s order for a delete. The pass reports
+`workspace_purged` and not `file_purged`: a `Pass` answers one number, and
+the second count would be a second seam rather than a binding, so the rows
+the subtree held are visible in the `purge` event's detail and not in the
+findings table.
+
+Pass 7 removes what expired a whole retention window ago. It appends no
+event: every read of a grant filters on `expires_at`, so one of these rows
+has granted nothing since the moment it expired ([[008-shares-and-links]]),
+and the deletion is housekeeping rather than a change to who may act on a
+space. The pass table said "revokes it" and now says "deletes it", which is
+what [[008-shares-and-links]] states and the only one of the two that has an
+effect: a revoke of a row that already grants nothing changes nothing.
+
 ### The route
 
 `GET /v1/events` is a handler function, `events.Handler(log, querier, guard,
@@ -122,8 +152,8 @@ writes the status, the one user sentence and the request id.
 | 12 | Holds. `TestStoreADeleteThatFailedAfterTheRowIsReaped` |
 | 13 | Holds. `upload_sessions` joined the union with the migration that creates it ([[007-uploads]]), and `TestObjectReferencedNamesEveryTableThatHoldsAnObjectID` reads the embedded schema for every table carrying an `object_id` and holds the statement to that list |
 | 14 | Holds. `TestPassTwoReportsARowWithoutItsBytesAndDeletesNothing` and `TestStoreARowWithoutItsBytesIsReportedAndKept` |
-| 15 | Holds. Pass 3 is a `Pass` the reconciler is given, bound in `cmd/arcad` to [[009-workspaces]]' `Service.ExpireLeases`, with a unit test on a fake here and the expiry itself tested in that package. Pass 4 is bound the same way to [[007-uploads]]' `Service.Sweep`, which counts on a dry run and aborts the parts before it drops the row |
-| 16 | The trash half holds: `TestStoreTrashPastItsRetentionLeavesBothStores`. The tombstone half is deferred to [[009-workspaces]] |
+| 15 | Holds. Pass 3 is a `Pass` the reconciler is given, bound in `cmd/arcad` to [[009-workspaces]]' `Service.ExpireLeases`, with a unit test on a fake here and the expiry itself tested in that package. Pass 4 is bound the same way to [[007-uploads]]' `Service.Sweep`, which counts on a dry run and aborts the parts before it drops the row. Passes 6 and 7 are bound to `workspaces.Tombstones` and `shares.Expiry`, which are values of their own packages rather than methods of either service, so both run on `arcad reap` as well as on a replica |
+| 16 | Holds. The trash half is `TestStoreTrashPastItsRetentionLeavesBothStores`; the tombstone half is pass 6, bound to `workspaces.Tombstones`, with `TestATombstonePastTheWindowTakesItsSubtreeItsBytesAndItsRow` in that package and `TestStoreDroppingASubtreeTakesTheTrashAndTheHistoryWithIt` against Postgres |
 | 16b | Holds at the statement: `TestPassEightDropsAStarWhoseTargetIsGoneAndKeepsOneOnATrashedTarget`. The star routes are [[005-files]]'s |
 | 17 | Holds. `TestStoreLedgerReconciles` against Postgres, with the healthy run correcting nothing |
 | 18 | Holds. `TestARunTwiceLeavesWhatOneRunLeft` and the settled sweep of the store tier. Two reapers at once are two conditional statements, which is what the second run is |
@@ -376,7 +406,7 @@ what each failure leaves behind.
 | 4 | expired uploads | an upload session idle past its TTL | aborts the multipart, then deletes the row ([[007-uploads]]) |
 | 5 | trash | a trashed object past `ARCA_TRASH_RETENTION` | deletes the rows, then the keys |
 | 6 | tombstones | a workspace soft deleted past `ARCA_TRASH_RETENTION` | deletes the subtree's rows, then its keys, then the row |
-| 7 | grant hygiene | a grant expired long ago | revokes it ([[008-shares-and-links]]) |
+| 7 | grant hygiene | a grant expired long ago | deletes it ([[008-shares-and-links]]) |
 | 8 | stale stars | a star whose path has no live `files` row | deletes it ([[005-files]]) |
 | 9 | log retention | an event older than thirty days | deletes it |
 | 10 | ledger reconciliation | a `space_usage` row that differs from the sum over the rows that hold the bytes | corrects the row and reports the difference |

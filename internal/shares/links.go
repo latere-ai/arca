@@ -247,6 +247,23 @@ func (s *Service) withdraw(ctx context.Context, g store.Grant) error {
 	return s.revoke(ctx, g)
 }
 
+// Counter answers the link count of spec 012's overview through that spec's
+// seam. It is one method over one query, and it is here rather than in
+// internal/admin because the token grants are this spec's table: a package
+// that counted them from outside would carry a second reading of what a live
+// link is.
+type Counter struct{ store store.Shares }
+
+// LinkCounts answers the counter the node binds.
+func LinkCounts(queries store.Shares) Counter { return Counter{store: queries} }
+
+// Counts answers the live link count of each space named, leaving out a
+// space that holds none. The page's owners go together, so an overview of a
+// hundred spaces costs one query.
+func (c Counter) Counts(ctx context.Context, q store.Querier, owners []string) (map[string]int64, error) {
+	return c.store.CountLinks(ctx, q, owners)
+}
+
 // tokenGrant reads the grant a link route's {id} names, and refuses a
 // subject grant with the answer a missing one gets: the two kinds ask two
 // actions, and a grant reached through the wrong route is not one that route

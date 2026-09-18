@@ -250,6 +250,27 @@ func (m *memory) Restore(_ context.Context, _ store.Querier, owner, path string,
 	return true, nil
 }
 
+// RestoreByID answers the id-addressed arm of the restore.
+func (m *memory) RestoreByID(_ context.Context, _ store.Querier, owner, id string, since time.Time) (store.File, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.fault(); err != nil {
+		return store.File{}, false, err
+	}
+	for k, held := range m.files {
+		if held.Owner != owner || held.ID != id {
+			continue
+		}
+		if held.DeletedAt == nil || !held.DeletedAt.After(since) {
+			return store.File{}, false, nil
+		}
+		held.DeletedAt = nil
+		m.files[k] = held
+		return held, true, nil
+	}
+	return store.File{}, false, nil
+}
+
 // ListTrash answers the trashed rows inside the window, newest first.
 func (m *memory) ListTrash(_ context.Context, _ store.Querier, owner string, cursor store.TrashCursor, limit int, since time.Time) ([]store.File, error) {
 	m.mu.Lock()

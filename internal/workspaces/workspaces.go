@@ -100,6 +100,10 @@ type Objects interface {
 	// Unreferenced narrows a set of objects to the ones no row still names,
 	// which is the one question deciding whether bytes may be deleted.
 	Unreferenced(ctx context.Context, q store.Querier, ids []object.ID) ([]object.ID, error)
+	// DropSubtree removes every row under a root prefix, the trashed ones
+	// and the superseded contents included, and answers the objects they
+	// held and the bytes they counted. It is what a tombstone's purge runs.
+	DropSubtree(ctx context.Context, q store.Querier, owner, prefix string) (freed []object.ID, bytes int64, err error)
 }
 
 // Event is one row of the log of spec 010 as this package appends it.
@@ -110,7 +114,7 @@ type Event struct {
 	// sees the attach and the sync beside the puts.
 	Path string
 	// Action is one word of spec 010's closed vocabulary: attach, release,
-	// sync, reap, or restore.
+	// sync, reap, restore, or purge.
 	Action string
 	// Actor is the subject that caused it.
 	Actor string
@@ -130,6 +134,9 @@ const (
 	ActionReap = "reap"
 	// ActionRestore is a soft deleted workspace brought back.
 	ActionRestore = "restore"
+	// ActionPurge is a tombstone the reaper ended, with the subtree it
+	// held. It is the last row a workspace appears in.
+	ActionPurge = "purge"
 )
 
 // Ledger is the log and the usage counter of spec 010. Both calls run inside

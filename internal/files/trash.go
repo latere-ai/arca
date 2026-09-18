@@ -4,6 +4,7 @@
 package files
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
 	"net/http"
@@ -118,6 +119,38 @@ func (s *Service) restoreTrash(w http.ResponseWriter, r *http.Request) {
 	})
 	api.SetETag(w, row.Checksum)
 	write(w, http.StatusOK, s.Render(row))
+}
+
+// ErrNotTrashed is an id that names no trashed object of the space still
+// inside the retention window: a typo, an id of another space, or one the
+// reaper has already purged.
+var ErrNotTrashed = errors.New("files: no trashed object of that space carries the id")
+
+// RestoreTrashed returns the trashed object an id names to its path, and is
+// the arm the restore across owners of spec 012 reaches for [KindFile].
+//
+// It takes an id where the route above takes a path, because the
+// administrative restore takes one id that names either a trashed object or
+// a soft deleted workspace and answers which it was. The condition is the
+// trash's own: the row is the space's, it is trashed, and it is inside
+// ARCA_TRASH_RETENTION.
+//
+// It asks nothing. The caller asked space.admin before it reached here, and
+// asking file.restore as well would ask an administrator for a permission on
+// a space it does not own, which is the one thing the administrative route
+// exists to act without.
+func (s *Service) RestoreTrashed(ctx context.Context, owner, id string) (store.File, error) {
+	row, restored, err := s.files.RestoreByID(ctx, s.db.Querier(), owner, id, s.window())
+	switch {
+	case err != nil:
+		return store.File{}, fault(ctx, "restore the object", err)
+	case !restored:
+		return store.File{}, ErrNotTrashed
+	}
+	s.ledger.Append(ctx, s.db.Querier(), Event{
+		Owner: owner, Path: row.Path, Action: EventRestore, Actor: Caller(ctx),
+	})
+	return row, nil
 }
 
 // purged is what emptying a trash answers: how many entries left for good.

@@ -57,14 +57,19 @@ const (
 	// 2 broken, and the one finding a human always reads (pass 2).
 	KindMissingBytes Kind = "missing_bytes"
 	// KindWorkspacePurged is a soft deleted workspace past its window (pass
-	// 6).
+	// 6). It is the one count that pass reports: a [Pass] answers one
+	// number, and how many rows the subtree held is in the purge event's
+	// detail instead.
 	KindWorkspacePurged Kind = "workspace_purged"
 	// KindFilePurged is a row removed with the subtree its workspace held
-	// (pass 6).
+	// (pass 6). It is in the vocabulary spec 018 labels with and is
+	// reported by no pass today, for the reason above.
 	KindFilePurged Kind = "file_purged"
 	// KindTrashPurged is a trashed object past its retention (pass 5).
 	KindTrashPurged Kind = "trash_purged"
-	// KindShareExpired is a grant revoked for age (pass 7).
+	// KindShareExpired is a grant removed for age (pass 7). An expired
+	// grant already grants nothing, because every read of one filters on
+	// the expiry, so what the pass does is remove the row and not revoke it.
 	KindShareExpired Kind = "share_expired"
 	// KindEventPruned is a log row past thirty days (pass 9).
 	KindEventPruned Kind = "event_pruned"

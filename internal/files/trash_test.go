@@ -4,7 +4,9 @@
 package files
 
 import (
+	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -232,5 +234,81 @@ func TestPurgingOnePathLeavesTheRest(t *testing.T) {
 	}
 	if _, err := h.store.Get(t.Context(), nil, h.owner, "files/b.md"); err != nil {
 		t.Error("purging one path took the other")
+	}
+}
+
+// The id-addressed restore of spec 012, which the node binds as the file arm
+// of the administrative restore across owners. It asks nothing: the caller
+// asked space.admin before it got here, and asking file.restore as well would
+// ask an administrator for a permission on a space it does not own.
+func TestRestoringATrashedObjectByItsIDBringsThePathBack(t *testing.T) {
+	h := newHarness(t)
+	h.seed(t, "files/reports/q3.pdf", "figures")
+	if w := h.call(t, http.MethodDelete, h.object("files/reports/q3.pdf"), nil); w.Code != http.StatusNoContent {
+		t.Fatalf("the trash answered %d: %s", w.Code, w.Body)
+	}
+	trashed, ok := h.read(t, "files/reports/q3.pdf")
+	if !ok || trashed.DeletedAt == nil {
+		t.Fatalf("the row is %+v", trashed)
+	}
+
+	h.asked.asked = nil
+	back, err := h.service.RestoreTrashed(t.Context(), h.owner, trashed.ID)
+	if err != nil {
+		t.Fatalf("RestoreTrashed: %v", err)
+	}
+	if back.Path != "files/reports/q3.pdf" || back.DeletedAt != nil {
+		t.Fatalf("the restored row is %+v", back)
+	}
+	if live, ok := h.read(t, "files/reports/q3.pdf"); !ok || live.DeletedAt != nil {
+		t.Fatalf("the path is %+v after the restore", live)
+	}
+	if asked := h.asked.actions(); len(asked) != 0 {
+		t.Errorf("the restore across owners asked %v; the caller was already allowed", asked)
+	}
+	if !slices.Contains(h.store.actions(), EventRestore) {
+		t.Errorf("the restore appended %v and no restore row", h.store.actions())
+	}
+}
+
+// An id of another space, one that names nothing, one past the retention
+// window, and a string that is not an id at all are one answer, so the node's
+// adapter tries the workspace arm next and the route renders one refusal.
+func TestRestoringATrashedObjectRefusesWhatTheSpaceCannotBringBack(t *testing.T) {
+	h := newHarness(t)
+	h.seed(t, "files/plan.md", "first")
+	if w := h.call(t, http.MethodDelete, h.object("files/plan.md"), nil); w.Code != http.StatusNoContent {
+		t.Fatalf("the trash answered %d: %s", w.Code, w.Body)
+	}
+	trashed, _ := h.read(t, "files/plan.md")
+
+	for _, tc := range []struct {
+		name  string
+		owner string
+		id    string
+		aged  time.Duration
+	}{
+		{name: "another space's id", owner: "https://issuer.example|c1d0", id: trashed.ID},
+		{name: "an id that names nothing", owner: h.owner, id: "no-such-id"},
+		{name: "past the retention window", owner: h.owner, id: trashed.ID, aged: 721 * time.Hour},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h.clock = time.Now().Add(tc.aged)
+			defer func() { h.clock = time.Now() }()
+			if _, err := h.service.RestoreTrashed(t.Context(), tc.owner, tc.id); !errors.Is(err, ErrNotTrashed) {
+				t.Fatalf("RestoreTrashed answered %v", err)
+			}
+		})
+	}
+}
+
+// A store that will not answer is a fault and not a missing object: the
+// adapter above must not read it as "try the workspace arm".
+func TestRestoringATrashedObjectCarriesAStoreFailure(t *testing.T) {
+	h := newHarness(t)
+	h.store.failAll = errOutage
+	_, err := h.service.RestoreTrashed(t.Context(), h.owner, "id")
+	if err == nil || errors.Is(err, ErrNotTrashed) {
+		t.Fatalf("a failed restore answered %v", err)
 	}
 }

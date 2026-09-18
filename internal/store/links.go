@@ -63,6 +63,46 @@ func (shares) ListTokens(ctx context.Context, q Querier, owner, cursor string, l
 		 LIMIT $3`, owner, cursor, limit)
 }
 
+// CountLinks answers the live token grants each space named holds.
+//
+// It reads liveToken, the same condition every other token query carries, so
+// the number the overview of spec 012 reports and the rows GET
+// /v1/shares/links lists are one predicate read twice. A count with a
+// predicate of its own would drift from the listing the first time either
+// changed.
+//
+// A space holding none is left out rather than answered as zero: the caller
+// reads a map and a missing key is zero, and a row per space that has no
+// link is a row that says nothing.
+func (shares) CountLinks(ctx context.Context, q Querier, owners []string) (map[string]int64, error) {
+	if len(owners) == 0 {
+		return nil, nil
+	}
+	rows, err := q.Query(ctx, `
+		SELECT owner, COUNT(*)
+		  FROM shares
+		 WHERE owner = ANY($1) AND `+liveToken+`
+		 GROUP BY owner`, owners)
+	if err != nil {
+		return nil, fmt.Errorf("store: count the links of %d spaces: %w", len(owners), err)
+	}
+	defer rows.Close()
+
+	counts := make(map[string]int64, len(owners))
+	for rows.Next() {
+		var owner string
+		var n int64
+		if err := rows.Scan(&owner, &n); err != nil {
+			return nil, fmt.Errorf("store: count the links of %d spaces: %w", len(owners), err)
+		}
+		counts[owner] = n
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: count the links of %d spaces: %w", len(owners), err)
+	}
+	return counts, nil
+}
+
 // Subtree answers one page of the live paths a grant's prefix covers: the
 // path itself, where the prefix names one object, and everything under it.
 //

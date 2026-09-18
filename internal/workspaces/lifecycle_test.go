@@ -450,3 +450,79 @@ func TestTheServiceRefusesToBuildWithoutASeamItWouldReachThrough(t *testing.T) {
 		t.Error("a service with no clock reads no time")
 	}
 }
+
+// The id-addressed restore of spec 012, which the node binds as the
+// workspace arm of the administrative restore across owners. It asks
+// nothing: the caller asked space.admin before it got here, and
+// workspace.restore is the owner's question, which an administrator acting
+// on somebody else's space would be refused.
+func TestRestoreDeletedBringsBackATombstoneOfTheSpaceItNames(t *testing.T) {
+	h := newHarness(t)
+	ws := h.create(t, "build")
+	if got := h.do(t, http.MethodDelete, "/v1/workspaces/"+ws.ID, nil); got.code != http.StatusNoContent {
+		t.Fatalf("the delete = %d", got.code)
+	}
+	// Every question is denied from here on. The restore still runs, which
+	// is the property: it asks nothing, because the caller was allowed
+	// space.admin before it reached this arm and workspace.restore is the
+	// owner's question.
+	h.endpoint.Deny(stub.Rule{Subject: "*", Action: "*", Resource: "*"}, "no rule allows it")
+
+	back, err := h.service.RestoreDeleted(t.Context(), h.subject, ws.ID)
+	if err != nil {
+		t.Fatalf("RestoreDeleted: %v", err)
+	}
+	if back.Slug != "build" || back.DeletedAt != nil {
+		t.Fatalf("the restored workspace is %+v", back)
+	}
+	read, err := h.store.Get(t.Context(), nil, ws.ID)
+	if err != nil || read.DeletedAt != nil {
+		t.Fatalf("the row is %+v, %v after the restore", read, err)
+	}
+	if !slices.Contains(h.ledger.actions(), ActionRestore) {
+		t.Errorf("the restore appended %v and no restore row", h.ledger.actions())
+	}
+}
+
+// The space is checked against the row and never taken from it. An id of
+// another owner is a workspace nothing authorized this caller to touch, and
+// it answers as an id that names nothing, so the node's adapter renders one
+// refusal rather than restoring across a space boundary nobody asked about.
+func TestRestoreDeletedRefusesWhatTheSpaceCannotBringBack(t *testing.T) {
+	h := newHarness(t)
+	live := h.create(t, "live")
+	gone := h.create(t, "gone")
+	if got := h.do(t, http.MethodDelete, "/v1/workspaces/"+gone.ID, nil); got.code != http.StatusNoContent {
+		t.Fatalf("the delete = %d", got.code)
+	}
+	for _, tc := range []struct {
+		name  string
+		owner string
+		id    string
+	}{
+		{"another space's tombstone", "https://issuer.example|c1d0", gone.ID},
+		{"an id that names nothing", h.subject, "no-such-workspace"},
+		{"a live workspace", h.subject, live.ID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := h.service.RestoreDeleted(t.Context(), tc.owner, tc.id); !errors.Is(err, ErrNotDeleted) {
+				t.Fatalf("RestoreDeleted answered %v", err)
+			}
+		})
+	}
+}
+
+// A store that will not answer is a fault and not a missing workspace: the
+// node's adapter must not read it as an id that names nothing.
+func TestRestoreDeletedCarriesAStoreFailure(t *testing.T) {
+	h := newHarness(t)
+	ws := h.create(t, "build")
+	if got := h.do(t, http.MethodDelete, "/v1/workspaces/"+ws.ID, nil); got.code != http.StatusNoContent {
+		t.Fatalf("the delete = %d", got.code)
+	}
+	h.store.fail = map[string]error{"Restore": errors.New("the connection failed")}
+	_, err := h.service.RestoreDeleted(t.Context(), h.subject, ws.ID)
+	if err == nil || errors.Is(err, ErrNotDeleted) {
+		t.Fatalf("a failed restore answered %v", err)
+	}
+}

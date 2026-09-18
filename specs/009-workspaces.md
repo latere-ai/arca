@@ -10,7 +10,7 @@ depends_on:
 affects: [space/, authorizer/, internal/workspaces/, internal/api/, internal/store/, docs/]
 effort: xlarge
 created: 2026-09-18
-updated: 2026-09-18
+updated: 2026-09-19
 author: changkun
 ---
 
@@ -256,7 +256,12 @@ reaper of [[010-events-and-reaper]] purges the rows and the bytes
 and the row itself.
 
 `GET /v1/workspaces/deleted` lists what is inside the window and
-`POST /v1/workspaces/{id}/restore` clears `deleted_at`. Restore needs no
+`POST /v1/workspaces/{id}/restore` clears `deleted_at`.
+`Service.RestoreDeleted(ctx, owner, id)` is the same clearing without the
+route's question, which [[012-administration]]'s restore across owners binds:
+that route asked `space.admin` on the space its path named, so this arm
+checks the row against that space rather than taking the space from the row,
+and an id of another owner answers as an id that names nothing. Restore needs no
 collision guard, and the reason is the uniqueness constraint: because
 `(owner, slug)` is unique regardless of `deleted_at`, a tombstone
 keeps its slug reserved until purge, so no live workspace can have taken
@@ -333,7 +338,11 @@ one; the pass writes on every statement it issues and has no counting half,
 so a dry run runs it not at all, and `arcad reap` as a process of its own
 does not carry it, because the service the sweep is a method of refuses to
 build without the authorizer its handlers decide through and that process
-starts no verifier. `workspaces.Objects` stays `store.NewWorkspaceObjects()` now that
+starts no verifier. Pass 6 is `Tombstones`, a value of this package built
+from the same stores less that authorizer, so it runs in both roles: a
+tombstone past `ARCA_TRASH_RETENTION` loses its subtree's rows, its bytes
+and its own row, and the restore an administrator made a moment earlier is
+what the conditional delete matches out. `workspaces.Objects` stays `store.NewWorkspaceObjects()` now that
 [[005-files]] has landed. That spec holds handlers over one path and this
 seam is five statements over a subtree; both read the `files` table of
 [[004-metadata-store]], and the query set is where a statement over that
@@ -443,11 +452,17 @@ fails without the fix.
   [[008-shares-and-links]]. The statement is one line beside the two that
   move the objects and the bookmarks, and `MoveSubtree` says so where it is
   written.
-- **The reaper's pass lives here.** `Service.ExpireLeases(ctx, now)` marks
-  every lapsed attachment reaped, clears the lease each reaped writer held,
-  frees a lease no attachment holds, and appends the `reap` rows.
+- **The reaper's two passes live here.** `Service.ExpireLeases(ctx, now)` is
+  pass 3: it marks every lapsed attachment reaped, clears the lease each
+  reaped writer held, frees a lease no attachment holds, and appends the
+  `reap` rows. `Tombstones` is pass 6: it purges a workspace soft deleted
+  past `ARCA_TRASH_RETENTION`, with the subtree's rows, the bytes those rows
+  counted and a `purge` event. It is a value of this package and not a method
+  of the service, because the service refuses to build without the authorizer
+  its handlers decide through and this pass puts no question; binding it to
+  the service would keep it off `arcad reap`, which starts no verifier.
   [[010-events-and-reaper]] owns the loop, the interval and the schedule; what
-  a lapsed lease means is this spec's.
+  a lapsed lease and a tombstone past its window mean is this spec's.
 
 ### Known, left for the specs that own the other half
 

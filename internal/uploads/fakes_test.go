@@ -175,6 +175,10 @@ func (m *memory) Restore(context.Context, store.Querier, string, string, time.Ti
 	return false, nil
 }
 
+func (m *memory) RestoreByID(context.Context, store.Querier, string, string, time.Time) (store.File, bool, error) {
+	return store.File{}, false, nil
+}
+
 func (m *memory) ListTrash(context.Context, store.Querier, string, store.TrashCursor, int, time.Time) ([]store.File, error) {
 	return nil, nil
 }

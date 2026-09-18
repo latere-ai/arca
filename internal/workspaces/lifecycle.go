@@ -297,6 +297,60 @@ func (s *Service) restore(w http.ResponseWriter, r *http.Request) {
 	httpjson.Write(w, http.StatusOK, s.view(restored))
 }
 
+// ErrNotDeleted is an id that names no soft deleted workspace of the space:
+// a typo, an id of another space, a workspace that is live, or one the
+// reaper has already purged.
+var ErrNotDeleted = errors.New("workspaces: no deleted workspace of that space carries the id")
+
+// RestoreDeleted returns the soft deleted workspace an id names to its slug,
+// and is the arm the restore across owners of spec 012 reaches for
+// [KindWorkspace].
+//
+// The space is checked against the row and not taken from it. The
+// administrative route asked space.admin on the space its path named, so a
+// row of another owner that happens to carry the id is a workspace nothing
+// authorized this caller to touch, and it answers as if the id named
+// nothing.
+//
+// It asks nothing further, for the reason the route above asks
+// workspace.restore: that question is the owner's, and an administrator
+// acting on somebody else's space would be refused it.
+func (s *Service) RestoreDeleted(ctx context.Context, owner, id string) (store.Workspace, error) {
+	var back store.Workspace
+	err := s.db.Tx(ctx, func(q store.Querier) error {
+		// The row is held for the rest of the transaction, so the check that
+		// it is this space's tombstone and the statement that brings it back
+		// cannot be interleaved with a purge or a second restore.
+		ws, err := s.workspaces.GetForUpdate(ctx, q, id)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			return ErrNotDeleted
+		case err != nil:
+			return err
+		case ws.Owner != owner, ws.DeletedAt == nil:
+			return ErrNotDeleted
+		}
+		ok, err := s.workspaces.Restore(ctx, q, ws.ID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return ErrNotDeleted
+		}
+		ws.DeletedAt = nil
+		back = ws
+		return s.ledger.Append(ctx, q, Event{
+			Owner: ws.Owner, Path: Root(ws.Slug), Action: ActionRestore,
+			Actor:  auth.CallerFrom(ctx).Subject,
+			Detail: map[string]any{"slug": ws.Slug},
+		})
+	})
+	if err != nil {
+		return store.Workspace{}, err
+	}
+	return back, nil
+}
+
 // visibility says which workspaces a route reads.
 type visibility bool
 

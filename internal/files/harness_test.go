@@ -48,6 +48,10 @@ type harness struct {
 	asked    *recorder
 	owner    string
 	clock    time.Time
+	// service is the one the routes are bound to, so a case reaches a
+	// method the node calls directly — the object read of a public link,
+	// or the restore across owners of spec 012 — without a request.
+	service *Service
 	// read answers one path from whichever metadata store the harness was
 	// built on: the maps of the unit tier, or the real Postgres of the store
 	// tier. seed is what both reach it through.
@@ -94,9 +98,10 @@ func newHarness(t *testing.T, opts ...func(*Options)) *harness {
 	for _, opt := range opts {
 		opt(&o)
 	}
+	h.service = New(o)
 	surface, err := api.New(api.Options{
 		Verifier: id.Verifier, Authorizer: id.Authorizer,
-		PublicURL: "https://storage.example", Routes: Routes(o),
+		PublicURL: "https://storage.example", Routes: Bind(h.service),
 		// The frame registers the event tail of spec 010 and refuses to
 		// build without its log. No test here drives that route, so the
 		// node's own log is wired with no database behind it: what the tail

@@ -14,7 +14,7 @@ depends_on:
 affects: [internal/admin/, internal/check/, internal/api/, internal/store/, cmd/arcad/, docs/]
 effort: medium
 created: 2026-09-18
-updated: 2026-09-18
+updated: 2026-09-19
 author: changkun
 ---
 
@@ -54,10 +54,16 @@ routes and contributes them through `api.Route`/`Options.Routes`;
 fourth subcommand of [[002-repository-scaffold]]'s table. The gate passes
 with every gate on and every package above 90%.
 
-Criteria 1, 2, 3, 4, 5, 6, 12, 13 and 14 have passing tests. Criterion 7
-is half open: the route, its question and its answers are proved, and
-what it restores waits on the `Restorer` binding below. Criteria 8, 9, 10
-and 11 belong to the mutations and the log, so they land with
+Both seams are bound as of the merge to `main`, so neither route answers
+for a build that has half of what it needs. `Restorer` is a `cmd/arcad`
+adapter over [[005-files]]' `Service.RestoreTrashed` and
+[[009-workspaces]]' `Service.RestoreDeleted`, and `Links` is
+[[008-shares-and-links]]' `shares.LinkCounts`. The overview counts the
+links a space actually holds, and the restore restores; the surface is
+forty-one of [[013-api]]'s forty-one routes with these two in it.
+
+Criteria 1, 2, 3, 4, 5, 6, 7, 12, 13 and 14 have passing tests. Criteria
+8, 9, 10 and 11 belong to the mutations and the log, so they land with
 [[005-files]] and [[008-shares-and-links]]; nothing here deletes from the
 log, and this spec's own mutation is the restore. The spec stays at
 `testing` until they close.
@@ -75,21 +81,34 @@ tree made another reading better:
   the eight ungranted actions were "the owner's or an administrator's",
   which was the reading the code followed, and it now names this one as
   the administrator's alone.
-- **The restore is behind a `Restorer` seam and unbound in this build.**
-  What it undoes is [[005-files]]'s trashed row and [[009-workspaces]]'
-  soft deleted workspace, neither of which this build answers, so the row
-  is registered at its right place and answers `not_implemented`, which
-  is what [[013-api]] reserves that code for. An id that names nothing
-  still restorable is `ErrNotRestorable`, which the handler answers 404
-  to with `ARCA_TRASH_RETENTION` named in the developer detail.
-- **`links` arrives through a second seam and counts none here.** The
-  token grants are [[008-shares-and-links]]'s table. A build that binds
-  no counter counts zero, and zero is the true count: the three link
-  routes answer `not_implemented` on this build, so no installation on it
-  has issued one. The seam takes the page's owners together rather than
-  one space at a time, so a page of a hundred spaces costs one query.
-  This is the one divergence from "seven counters per space, in one
-  statement": six come from the statement and the seventh from the seam.
+- **The restore is behind a `Restorer` seam, and the node binds it by
+  trying the two arms in order.** What it undoes is [[005-files]]'s
+  trashed row and [[009-workspaces]]' soft deleted workspace, and both
+  ids are database identifiers of the same shape, so an id does not say
+  which table it belongs to and this spec states no rule that would make
+  it say so. The adapter asks the trash first and the tombstones second;
+  each arm answers its own "not mine" rather than a fault, so a miss on
+  the first is a question put to the second and a miss on both is
+  `ErrNotRestorable`, which the handler answers 404 to with
+  `ARCA_TRASH_RETENTION` named in the developer detail. A failure of
+  either store is carried out as a failure and never read as a miss,
+  because reading it as one would render a 404 for a restore that was
+  never attempted. Both arms are scoped to the space the route named and
+  asked about, so an id of another owner is a row this caller was not
+  allowed to touch and answers as an id that names nothing. Neither arm
+  asks a question of its own: `file.restore` and `workspace.restore` are
+  the owner's, and an administrator acting on somebody else's space would
+  be refused them. A build that binds no restorer still answers
+  `not_implemented`, which is what [[013-api]] reserves that code for.
+- **`links` arrives through a second seam.** The token grants are
+  [[008-shares-and-links]]'s table, and `shares.LinkCounts` is what the
+  node binds, so the count reads the same predicate the link listing
+  reads and the two cannot drift. The seam takes the page's owners
+  together rather than one space at a time, so a page of a hundred spaces
+  costs one query. This is the one divergence from "seven counters per
+  space, in one statement": six come from the statement and the seventh
+  from the seam. A build that binds no counter counts zero, which is the
+  true count for a build whose link routes answer `not_implemented`.
 - **The overview's row set is the tables that hold contents, not the
   subject directory.** A subject that made one request and stored nothing
   is not a space that holds anything, and the directory cannot tell the
@@ -389,7 +408,7 @@ does not emit ([[018-observability]]).
 | 4 | A non-human caller the authorizer allows may moderate; no handler reads `principal_type` | `TestAdminReadsNoClaims`, plus the `identity` gate's `claims` rule |
 | 5 | The overview's seven counters per space equal a direct count of the fixtures, `bytes` equals the ledger, and no counter reads the approvals table, which does not exist | e2e against Postgres |
 | 6 | The overview pages by `cursor` across more spaces than one page holds, and lists no space that holds nothing | e2e |
-| 7 | A restore across owners returns the object to its path and a soft-deleted workspace to its slug; an id past the retention window is 404 with the window named in the developer detail | e2e |
+| 7 | A restore across owners returns the object to its path and a soft-deleted workspace to its slug; an id past the retention window is 404 with the window named in the developer detail | e2e, with the two arms and the order the node tries them in held by `TestTheRestoreAcrossOwnersTriesTheTrashThenTheTombstones` |
 | 8 | A moderation delete and its event commit together: a forced failure after the delete leaves neither | `internal/admin` test on a transaction that is made to fail at commit |
 | 9 | An allow on a space the caller neither owns nor holds a covering grant on marks its event `admin` wherever it happened; a read of the caller's own space and a read through a grant mark none | e2e: a moderation delete on `/v1/files/...` appears on `/v1/events?owner=` marked `admin`, and a grantee's read of the same path does not |
 | 10 | `GET /v1/events` serves that record to an administrator for any space and to an owner for its own, and no route in this spec deletes from the log | e2e |

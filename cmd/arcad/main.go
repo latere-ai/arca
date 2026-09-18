@@ -119,10 +119,21 @@ func reap(ctx context.Context, args []string, getenv config.Getenv, stdout, stde
 	// installation that moved the reconciler here would otherwise expire no
 	// lease and read a healthy log.
 	//
-	// Pass 4 is given: the expiry sweep of spec 007 asks nothing of the
-	// authorizer, so it runs wherever the two stores are reachable.
+	// Passes 4, 6 and 7 are given: the expiry sweep of spec 007, the
+	// tombstone purge of spec 009 and the grant hygiene of spec 008 each ask
+	// nothing of the authorizer, so they run wherever the two stores are
+	// reachable.
+	log := events.NewLog()
+	tombstones, err := tombstonePass(cfg, db, bucket, log)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	grants, err := grantPass(cfg, store.NewShares())
+	if err != nil {
+		return fail(stderr, err)
+	}
 	reconciler, err := reaper.New(reaperOptions(cfg, db, bucket, *dryRun, nil,
-		uploadPass(cfg, db, bucket, events.NewLog())))
+		uploadPass(cfg, db, bucket, log), tombstones, grants))
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -157,7 +168,7 @@ func report(stdout io.Writer, findings reaper.Findings, dryRun bool) {
 // reaperOptions is what both roles build the reconciler from. serve and reap
 // read the same configuration and reconcile the same way; what differs is
 // where the loop lives.
-func reaperOptions(cfg config.Config, db *store.DB, bucket blob.Store, dryRun bool, leases, sessions reaper.Pass) reaper.Options {
+func reaperOptions(cfg config.Config, db *store.DB, bucket blob.Store, dryRun bool, leases, sessions, tombstones, grants reaper.Pass) reaper.Options {
 	return reaper.Options{
 		DB:             db,
 		Bucket:         bucket,
@@ -166,6 +177,8 @@ func reaperOptions(cfg config.Config, db *store.DB, bucket blob.Store, dryRun bo
 		DryRun:         dryRun,
 		Leases:         leases,
 		Sessions:       sessions,
+		Tombstones:     tombstones,
+		Grants:         grants,
 	}
 }
 
@@ -179,6 +192,27 @@ func uploadPass(cfg config.Config, db *store.DB, bucket blob.Store, log events.L
 		DB: db, Bucket: bucket, Config: cfg,
 		Ledger: fileLedger{log: log, usage: events.NewLedger()},
 	})
+}
+
+// tombstonePass builds pass 6 of spec 010's table: the tombstone purge of
+// spec 009, over the workspaces and the subtree that spec and spec 005 own.
+// Like the expiry sweep above it asks nothing of the authorizer, so it runs
+// wherever the two stores are reachable and not only on a replica that
+// started a verifier.
+func tombstonePass(cfg config.Config, db *store.DB, bucket blob.Store, log events.Log) (reaper.Pass, error) {
+	return workspaces.NewTombstones(workspaces.TombstoneOptions{
+		DB: db, Workspaces: store.NewWorkspaces(), Objects: store.NewWorkspaceObjects(),
+		Bucket: bucket, Prefix: cfg.BucketPrefix, Retention: cfg.TrashRetention,
+		Ledger: ledger{log: log, usage: events.NewLedger()},
+	})
+}
+
+// grantPass builds pass 7: the grant hygiene of spec 008, over the table
+// that spec owns. The window is the trash retention, because an expired
+// grant is kept for an audit as long as a deleted object is kept for a
+// restore and spec 009 says there is no second retention setting.
+func grantPass(cfg config.Config, grants store.Shares) (reaper.Pass, error) {
+	return shares.NewExpiry(shares.ExpiryOptions{Store: grants, Window: cfg.TrashRetention})
 }
 
 // The two seams spec 009 declared and spec 010 fills. Both are here rather
@@ -302,6 +336,59 @@ func (p leasePass) Sweep(ctx context.Context, _ store.Querier, now time.Time, dr
 		return 0, nil
 	}
 	return p.service.ExpireLeases(ctx, now)
+}
+
+// restorer binds the restore across owners of spec 012 to the two packages
+// that own what it undoes. It is here rather than in either of them for the
+// reason every seam above is: internal/admin knows no trash and no
+// workspace, internal/files and internal/workspaces know no administrator,
+// and the node is what knows all three.
+type restorer struct {
+	objects trashRestorer
+	durable tombstoneRestorer
+}
+
+// The two arms, as interfaces, so this adapter is driven with the two
+// answers that decide it — "not mine" and a failure — without a bucket and a
+// database behind each.
+type (
+	// trashRestorer is spec 005's trash, keyed by the row's id.
+	trashRestorer interface {
+		RestoreTrashed(ctx context.Context, owner, id string) (store.File, error)
+	}
+	// tombstoneRestorer is spec 009's soft deleted workspace.
+	tombstoneRestorer interface {
+		RestoreDeleted(ctx context.Context, owner, id string) (store.Workspace, error)
+	}
+)
+
+// Restore brings back the trashed object or the soft deleted workspace the
+// id names, and answers which it was.
+//
+// Both ids are database identifiers of the same shape, so an id does not say
+// which table it belongs to and spec 012 states no rule that would make it
+// say so. The two arms are therefore tried in order, and each answers its
+// own "not mine" rather than a fault, so a miss on the first is a question
+// put to the second and a miss on both is the one answer the route renders:
+// an id that names nothing this space can still bring back.
+//
+// Both arms are scoped to the space the route named and asked about. An id
+// of another owner is not this space's to restore, and each arm answers it
+// as an id that names nothing.
+func (r restorer) Restore(ctx context.Context, owner, id string) (admin.Restored, error) {
+	switch _, err := r.objects.RestoreTrashed(ctx, owner, id); {
+	case err == nil:
+		return admin.Restored{ID: id, Kind: admin.KindFile}, nil
+	case !errors.Is(err, files.ErrNotTrashed):
+		return admin.Restored{}, err
+	}
+	switch _, err := r.durable.RestoreDeleted(ctx, owner, id); {
+	case err == nil:
+		return admin.Restored{ID: id, Kind: admin.KindWorkspace}, nil
+	case !errors.Is(err, workspaces.ErrNotDeleted):
+		return admin.Restored{}, err
+	}
+	return admin.Restored{}, admin.ErrNotRestorable
 }
 
 // bucketOptions is the bucket client every role opens, from the one table of
@@ -473,14 +560,16 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	if err != nil {
 		return fail(stderr, err)
 	}
-	// The administration of spec 012. Two of its seams are unbound in this
-	// build and say so rather than guessing: the restore across owners
-	// returns rows the trash of spec 005 and the deleted workspaces of spec
-	// 009 own, so the route answers not_implemented until a build binds one,
-	// and the link counter is spec 008's table, so the overview counts the
-	// links an installation on this build has issued, which is none.
+	// The administration of spec 012, with both of its seams bound. The
+	// restore across owners returns rows the trash of spec 005 and the
+	// deleted workspaces of spec 009 own, and both are in this build, so the
+	// route restores rather than answering not_implemented; the link counter
+	// is spec 008's table, and it is here too, so the overview reports the
+	// links a space actually holds.
 	administration, err := admin.New(admin.Options{
 		Querier: db.Querier(), Spaces: store.NewAdmin(), Authorizer: identity.Authorizer,
+		Links:    shares.LinkCounts(grants),
+		Restorer: restorer{objects: object, durable: durable},
 	})
 	if err != nil {
 		return fail(stderr, err)
@@ -518,7 +607,15 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	// ARCA_REAP_INTERVAL to 0 here and runs arcad reap as a process of its
 	// own. It starts before the listeners, so a reconciler that cannot be
 	// built fails the start-up before a port is bound.
-	if err := startReaper(ctx, cfg, db, bucket, leasePass{durable}, session, stdout); err != nil {
+	tombstones, err := tombstonePass(cfg, db, bucket, log)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	expiredGrants, err := grantPass(cfg, grants)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	if err := startReaper(ctx, cfg, db, bucket, leasePass{durable}, session, tombstones, expiredGrants, stdout); err != nil {
 		return fail(stderr, err)
 	}
 
@@ -590,12 +687,12 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 // startReaper starts the in-process reconciliation loop, or says on the
 // start-up line that this replica runs none. Which it is, is a fact an
 // operator reads once rather than infers from a missing metric.
-func startReaper(ctx context.Context, cfg config.Config, db *store.DB, bucket blob.Store, leases, sessions reaper.Pass, stdout io.Writer) error {
+func startReaper(ctx context.Context, cfg config.Config, db *store.DB, bucket blob.Store, leases, sessions, tombstones, grants reaper.Pass, stdout io.Writer) error {
 	if cfg.ReapInterval <= 0 {
 		_, _ = fmt.Fprintln(stdout, "arcad: the reconciler is off on this replica; ARCA_REAP_INTERVAL is 0")
 		return nil
 	}
-	reconciler, err := reaper.New(reaperOptions(cfg, db, bucket, false, leases, sessions))
+	reconciler, err := reaper.New(reaperOptions(cfg, db, bucket, false, leases, sessions, tombstones, grants))
 	if err != nil {
 		return err
 	}

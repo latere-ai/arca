@@ -108,6 +108,56 @@ func (t *table) ListTokens(_ context.Context, _ store.Querier, owner, cursor str
 	})
 }
 
+func (t *table) CountLinks(_ context.Context, _ store.Querier, owners []string) (map[string]int64, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.failList != nil {
+		return nil, t.failList
+	}
+	counts := map[string]int64{}
+	for _, g := range t.grants {
+		if g.GranteeKind == store.GranteeSubject || !t.live(g) || !slices.Contains(owners, g.Owner) {
+			continue
+		}
+		counts[g.Owner]++
+	}
+	return counts, nil
+}
+
+func (t *table) Expired(_ context.Context, _ store.Querier, before time.Time) (int64, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.failList != nil {
+		return 0, t.failList
+	}
+	var n int64
+	for _, g := range t.grants {
+		if g.ExpiresAt != nil && g.ExpiresAt.Before(before) {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (t *table) PurgeExpired(_ context.Context, _ store.Querier, before time.Time) (int64, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.failList != nil {
+		return 0, t.failList
+	}
+	kept := t.grants[:0]
+	var gone int64
+	for _, g := range t.grants {
+		if g.ExpiresAt != nil && g.ExpiresAt.Before(before) {
+			gone++
+			continue
+		}
+		kept = append(kept, g)
+	}
+	t.grants = kept
+	return gone, nil
+}
+
 func (t *table) Covering(_ context.Context, _ store.Querier, owner, path string) ([]store.Grant, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()

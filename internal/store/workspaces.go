@@ -158,6 +158,13 @@ type Workspaces interface {
 	// ExpiredLeases answers the leases whose deadline had passed at now,
 	// which is what the reaper of spec 010 sweeps. It changes nothing.
 	ExpiredLeases(ctx context.Context, q Querier, now time.Time, limit int) ([]Workspace, error)
+	// Tombstones answers the workspaces soft deleted before the cutoff,
+	// which is what pass 6 of spec 010 purges. It changes nothing.
+	Tombstones(ctx context.Context, q Querier, before time.Time, limit int) ([]Workspace, error)
+	// Purge removes a tombstone for good, with the attachments the row
+	// cascades to. It is conditional on the row still being a tombstone, so
+	// a restore that landed between the read and the write survives.
+	Purge(ctx context.Context, q Querier, id string) (bool, error)
 }
 
 // Attachments is the query set over the attachments of a workspace.
@@ -546,6 +553,52 @@ func changed(what string, tag pgconn.CommandTag, err error) (bool, error) {
 	default:
 		return tag.RowsAffected() == 1, nil
 	}
+}
+
+// Tombstones answers the workspaces soft deleted before the cutoff.
+//
+// It is the counting half of pass 6 as well as its working set: a dry run
+// reads this page and changes nothing, which is what lets that run report
+// the number a live run would purge rather than a number it did not measure
+// (spec 010).
+func (workspaces) Tombstones(ctx context.Context, q Querier, before time.Time, limit int) ([]Workspace, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("store: read the tombstones: the page holds %d rows", limit)
+	}
+	rows, err := q.Query(ctx, `
+		SELECT `+workspaceColumns+`
+		  FROM workspaces
+		 WHERE deleted_at IS NOT NULL AND deleted_at < $1
+		 ORDER BY deleted_at
+		 LIMIT $2`, before, limit)
+	if err != nil {
+		return nil, fmt.Errorf("store: read the tombstones: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]Workspace, 0, limit)
+	for rows.Next() {
+		w, err := scanWorkspace(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: read the tombstones: %w", err)
+		}
+		out = append(out, w)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: read the tombstones: %w", err)
+	}
+	return out, nil
+}
+
+// Purge removes a tombstone for good.
+//
+// The deleted_at condition is not decoration. An administrator may restore a
+// workspace between the page pass 6 read and the statement that ends it, and
+// a delete with no condition would take back a restore nobody asked to undo;
+// with it, the purge matches no row and the pass reports one fewer.
+func (workspaces) Purge(ctx context.Context, q Querier, id string) (bool, error) {
+	tag, err := q.Exec(ctx, `DELETE FROM workspaces WHERE id = $1 AND deleted_at IS NOT NULL`, id)
+	return changed(fmt.Sprintf("purge the workspace %q", id), tag, err)
 }
 
 // noSuchID maps a string the database refused as not an identifier onto the

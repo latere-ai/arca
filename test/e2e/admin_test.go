@@ -8,6 +8,7 @@ package e2e
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"os/exec"
 	"strings"
 	"testing"
@@ -152,6 +153,10 @@ func TestE2ETheAdministrativeOverviewReadsAcrossSpaces(t *testing.T) {
 	}
 	i.expect(t, http.StatusCreated, http.MethodPost, "/v1/workspaces",
 		map[string]any{"slug": "build"}, &workspace)
+	// One link, so the seventh counter is read off spec 008's table rather
+	// than off a build that binds no counter.
+	i.expect(t, http.StatusCreated, http.MethodPost, "/v1/shares/links",
+		map[string]any{"owner": "me", "path_prefix": "files/reports"}, nil)
 
 	var overview struct {
 		Entries    []overviewRow `json:"entries"`
@@ -183,8 +188,8 @@ func TestE2ETheAdministrativeOverviewReadsAcrossSpaces(t *testing.T) {
 	if row.Leases != 0 {
 		t.Errorf("the space holds %d leases and nothing attached", row.Leases)
 	}
-	if row.Links != 0 {
-		t.Errorf("the space holds %d links and none was issued", row.Links)
+	if row.Links != 1 {
+		t.Errorf("the space holds %d links, want the one that was issued", row.Links)
 	}
 	if row.LastWriteAt == nil {
 		t.Error("the row names no last write and the space holds two paths")
@@ -207,18 +212,73 @@ func TestE2EADeniedAdministratorIsForbidden(t *testing.T) {
 	}
 }
 
-// TestE2ETheRestoreAcrossOwnersIsRegisteredAndUnbound: the row is registered
-// at its right place and answers the one code spec 013 reserves for a route
-// whose behaviour has not landed, so the surface is settled before the
-// handler is.
-func TestE2ETheRestoreAcrossOwnersIsRegisteredAndUnbound(t *testing.T) {
+// TestE2ETheRestoreAcrossOwnersReturnsAnObjectAndAWorkspace is criterion 7
+// of spec 012 through the running server: one route, one id, and the kind in
+// the answer saying which of the two tables it came from.
+//
+// Both ids are database identifiers of the same shape, so the node's adapter
+// asks the trash first and the tombstones second; what this holds is that
+// each arm answers for its own rows and that an id neither knows is one
+// refusal naming the retention window.
+func TestE2ETheRestoreAcrossOwnersReturnsAnObjectAndAWorkspace(t *testing.T) {
 	i := start(t)
 	i.allowEverything()
-	code, body := i.api(t, http.MethodPost, "/v1/admin/spaces/me/restore", map[string]any{"id": "01J8R4A"})
-	if code != http.StatusNotImplemented {
-		t.Fatalf("the restore answered %d: %s", code, body)
+	db := i.database(t)
+
+	i.put(t, db, "files/reports/q3.pdf", "the third quarter")
+	i.expect(t, http.StatusNoContent, http.MethodDelete,
+		"/v1/files/"+url.PathEscape(i.subject())+"/files/reports/q3.pdf", nil, nil)
+	var trashed string
+	if err := db.Querier().QueryRow(t.Context(),
+		`SELECT id FROM files WHERE owner = $1 AND path = $2`,
+		i.subject(), "files/reports/q3.pdf").Scan(&trashed); err != nil {
+		t.Fatalf("read the trashed row: %v", err)
 	}
-	if got := errorCode(t, body); got != "not_implemented" {
-		t.Errorf("the restore answered %q", got)
+
+	var workspace struct {
+		ID string `json:"id"`
+	}
+	i.expect(t, http.StatusCreated, http.MethodPost, "/v1/workspaces",
+		map[string]any{"slug": "build"}, &workspace)
+	i.expect(t, http.StatusNoContent, http.MethodDelete, "/v1/workspaces/"+workspace.ID, nil, nil)
+
+	var restored struct {
+		ID     string `json:"id"`
+		Kind   string `json:"kind"`
+		Status string `json:"status"`
+	}
+	i.expect(t, http.StatusOK, http.MethodPost, "/v1/admin/spaces/me/restore",
+		map[string]any{"id": trashed}, &restored)
+	if restored.Kind != "file" || restored.Status != "restored" {
+		t.Fatalf("the object restore answered %+v", restored)
+	}
+	var deleted *time.Time
+	if err := db.Querier().QueryRow(t.Context(),
+		`SELECT deleted_at FROM files WHERE id = $1`, trashed).Scan(&deleted); err != nil {
+		t.Fatalf("read the restored row: %v", err)
+	}
+	if deleted != nil {
+		t.Errorf("the object is still trashed at %v", deleted)
+	}
+
+	i.expect(t, http.StatusOK, http.MethodPost, "/v1/admin/spaces/me/restore",
+		map[string]any{"id": workspace.ID}, &restored)
+	if restored.Kind != "workspace" {
+		t.Fatalf("the workspace restore answered %+v", restored)
+	}
+	i.expect(t, http.StatusOK, http.MethodGet, "/v1/workspaces/"+workspace.ID, nil, nil)
+
+	// An id neither table knows and one past the window are one answer, and
+	// the developer detail names the window so an administrator is not left
+	// guessing between a typo and an expiry.
+	code, body := i.api(t, http.MethodPost, "/v1/admin/spaces/me/restore", map[string]any{"id": "01J8R4A"})
+	if code != http.StatusNotFound {
+		t.Fatalf("an id that names nothing answered %d: %s", code, body)
+	}
+	if got := errorCode(t, body); got != "not_found" {
+		t.Errorf("an id that names nothing answered %q", got)
+	}
+	if !strings.Contains(string(body), "ARCA_TRASH_RETENTION") {
+		t.Errorf("the refusal does not name the window: %s", body)
 	}
 }

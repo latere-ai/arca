@@ -27,6 +27,7 @@ import (
 	"latere.ai/x/pkg/health"
 
 	"latere.ai/x/arca/authorizer"
+	"latere.ai/x/arca/internal/admin"
 	"latere.ai/x/arca/internal/auth"
 	"latere.ai/x/arca/internal/blob"
 	"latere.ai/x/arca/internal/check"
@@ -725,7 +726,7 @@ func TestReapAsALoopRunsUntilItIsStopped(t *testing.T) {
 
 func TestTheReconcilerIsNotStartedOnAConfigurationItCannotRun(t *testing.T) {
 	var out bytes.Buffer
-	if err := startReaper(t.Context(), config.Config{ReapInterval: time.Minute}, nil, nil, nil, nil, &out); err == nil {
+	if err := startReaper(t.Context(), config.Config{ReapInterval: time.Minute}, nil, nil, nil, nil, nil, nil, &out); err == nil {
 		t.Fatal("a reconciler with no stores was started anyway")
 	}
 }
@@ -1087,4 +1088,101 @@ func TestTheLeaseSweepRunsOnALiveRunAndNeverOnADryOne(t *testing.T) {
 	if _, err := (leasePass{service: service}).Sweep(t.Context(), nil, time.Now(), false); !errors.Is(err, failure) {
 		t.Errorf("a live sweep = %v", err)
 	}
+}
+
+// The two arms of the restore across owners, as fakes: each answers its own
+// "not mine", a row, or a failure, which are the three answers the adapter
+// decides on.
+type trashArm struct {
+	restored store.File
+	err      error
+	asked    []string
+}
+
+func (a *trashArm) RestoreTrashed(_ context.Context, owner, id string) (store.File, error) {
+	a.asked = append(a.asked, owner+" "+id)
+	return a.restored, a.err
+}
+
+type tombstoneArm struct {
+	restored store.Workspace
+	err      error
+	asked    []string
+}
+
+func (a *tombstoneArm) RestoreDeleted(_ context.Context, owner, id string) (store.Workspace, error) {
+	a.asked = append(a.asked, owner+" "+id)
+	return a.restored, a.err
+}
+
+// TestTheRestoreAcrossOwnersTriesTheTrashThenTheTombstones is the binding of
+// spec 012's Restorer. Both ids are database identifiers of the same shape,
+// so an id does not say which table it belongs to and the two arms are tried
+// in order; each answers its own "not mine", and a miss on both is the one
+// refusal the route renders.
+func TestTheRestoreAcrossOwnersTriesTheTrashThenTheTombstones(t *testing.T) {
+	space := "https://issuer.example|9ab3"
+	t.Run("a trashed object", func(t *testing.T) {
+		trash := &trashArm{restored: store.File{Path: "files/reports/q3.pdf"}}
+		durable := &tombstoneArm{}
+		back, err := restorer{objects: trash, durable: durable}.Restore(t.Context(), space, "an-id")
+		if err != nil {
+			t.Fatalf("Restore: %v", err)
+		}
+		if back.Kind != admin.KindFile || back.ID != "an-id" {
+			t.Fatalf("the answer is %+v", back)
+		}
+		if len(durable.asked) != 0 {
+			t.Errorf("the workspace arm was asked %v after the trash answered", durable.asked)
+		}
+	})
+	t.Run("a deleted workspace", func(t *testing.T) {
+		trash := &trashArm{err: files.ErrNotTrashed}
+		durable := &tombstoneArm{restored: store.Workspace{Slug: "build"}}
+		back, err := restorer{objects: trash, durable: durable}.Restore(t.Context(), space, "an-id")
+		if err != nil {
+			t.Fatalf("Restore: %v", err)
+		}
+		if back.Kind != admin.KindWorkspace {
+			t.Fatalf("the answer is %+v", back)
+		}
+		if len(trash.asked) != 1 || trash.asked[0] != space+" an-id" {
+			t.Errorf("the trash arm was asked %v", trash.asked)
+		}
+	})
+	t.Run("neither", func(t *testing.T) {
+		trash := &trashArm{err: files.ErrNotTrashed}
+		durable := &tombstoneArm{err: workspaces.ErrNotDeleted}
+		_, err := restorer{objects: trash, durable: durable}.Restore(t.Context(), space, "an-id")
+		if !errors.Is(err, admin.ErrNotRestorable) {
+			t.Fatalf("an id that names nothing answered %v", err)
+		}
+	})
+}
+
+// A store that will not answer is a fault and never a miss. Reading it as
+// one would put the question to the other arm and then render a 404 for a
+// restore that was never attempted.
+func TestTheRestoreAcrossOwnersCarriesAFailureOfEitherArm(t *testing.T) {
+	space := "https://issuer.example|9ab3"
+	failure := errors.New("the store said no")
+	t.Run("the trash", func(t *testing.T) {
+		durable := &tombstoneArm{}
+		_, err := restorer{objects: &trashArm{err: failure}, durable: durable}.Restore(t.Context(), space, "an-id")
+		if !errors.Is(err, failure) {
+			t.Fatalf("a failed trash restore answered %v", err)
+		}
+		if len(durable.asked) != 0 {
+			t.Errorf("a failure was read as a miss and the workspace arm was asked %v", durable.asked)
+		}
+	})
+	t.Run("the tombstones", func(t *testing.T) {
+		_, err := restorer{
+			objects: &trashArm{err: files.ErrNotTrashed},
+			durable: &tombstoneArm{err: failure},
+		}.Restore(t.Context(), space, "an-id")
+		if !errors.Is(err, failure) {
+			t.Fatalf("a failed workspace restore answered %v", err)
+		}
+	})
 }

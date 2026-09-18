@@ -154,3 +154,68 @@ func TestMarkPublicWritesTheRowAndAnswersTheObjectItNames(t *testing.T) {
 		t.Errorf("marking a path that is not there = %v", err)
 	}
 }
+
+// The overview of spec 012 counts a space's links through the same predicate
+// every other token query carries, so the number it reports and the rows the
+// link listing serves are one reading of what a live link is.
+func TestCountingLinksReadsThePredicateEveryTokenQueryCarries(t *testing.T) {
+	rows := &fakeRows{scans: []func(...any) error{
+		func(dest ...any) error { return assign(dest, []any{"space-a", int64(3)}) },
+		func(dest ...any) error { return assign(dest, []any{"space-b", int64(1)}) },
+	}}
+	q := &fakeQuerier{rows: rows}
+	owners := []string{"space-a", "space-b", "space-c"}
+
+	counts, err := NewShares().CountLinks(t.Context(), q, owners)
+	if err != nil {
+		t.Fatalf("CountLinks: %v", err)
+	}
+	if counts["space-a"] != 3 || counts["space-b"] != 1 {
+		t.Fatalf("the counts are %v", counts)
+	}
+	// A space holding none is absent rather than zero: the caller reads a
+	// map, and a row that says nothing is a row nobody needs.
+	if _, named := counts["space-c"]; named {
+		t.Errorf("a space that holds no link is a row of the answer: %v", counts)
+	}
+	statement := q.statements[0]
+	if !strings.Contains(statement, liveToken) {
+		t.Errorf("the count does not read the live-token predicate:\n%s", statement)
+	}
+	for _, want := range []string{"owner = ANY($1)", "GROUP BY owner"} {
+		if !strings.Contains(statement, want) {
+			t.Errorf("the statement does not carry %q:\n%s", want, statement)
+		}
+	}
+	if !rows.closed {
+		t.Error("the rows were not closed")
+	}
+}
+
+// The page's owners go together. No owners is no query at all, so an
+// overview whose page came back empty costs nothing.
+func TestCountingNoSpacesReachesNoDatabase(t *testing.T) {
+	q := &fakeQuerier{}
+	counts, err := NewShares().CountLinks(t.Context(), q, nil)
+	if err != nil || counts != nil {
+		t.Fatalf("CountLinks over no spaces = %v, %v", counts, err)
+	}
+	if len(q.statements) != 0 {
+		t.Errorf("a count of no spaces reached the database: %v", q.statements)
+	}
+}
+
+func TestCountingLinksCarriesWhatTheDatabaseAnswered(t *testing.T) {
+	owners := []string{"space"}
+	if _, err := NewShares().CountLinks(t.Context(), &fakeQuerier{queryErr: errFault}, owners); !errors.Is(err, errFault) {
+		t.Errorf("a failed count answered %v", err)
+	}
+	broken := &fakeRows{scans: []func(...any) error{func(...any) error { return errFault }}}
+	if _, err := NewShares().CountLinks(t.Context(), &fakeQuerier{rows: broken}, owners); !errors.Is(err, errFault) {
+		t.Errorf("a row that did not scan answered %v", err)
+	}
+	ended := &fakeRows{err: errFault}
+	if _, err := NewShares().CountLinks(t.Context(), &fakeQuerier{rows: ended}, owners); !errors.Is(err, errFault) {
+		t.Errorf("a page that ended in a failure answered %v", err)
+	}
+}

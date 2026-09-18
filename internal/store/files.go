@@ -79,6 +79,7 @@ type Files interface {
 	SoftDelete(ctx context.Context, q Querier, owner, path string) (bool, error)
 	HardDelete(ctx context.Context, q Querier, owner, path string) (File, bool, error)
 	Restore(ctx context.Context, q Querier, owner, path string, since time.Time) (bool, error)
+	RestoreByID(ctx context.Context, q Querier, owner, id string, since time.Time) (File, bool, error)
 	ListTrash(ctx context.Context, q Querier, owner string, cursor TrashCursor, limit int, since time.Time) ([]File, error)
 	PurgeTrash(ctx context.Context, q Querier, owner, path string) ([]File, error)
 }

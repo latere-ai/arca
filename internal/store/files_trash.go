@@ -38,6 +38,38 @@ func (files) Restore(ctx context.Context, q Querier, owner, path string, since t
 	return tag.RowsAffected() == 1, nil
 }
 
+// RestoreByID clears deleted_at on the one trashed row of a space the id
+// names, and answers the row it restored.
+//
+// It is the id-addressed arm of the restore, which the administrative route
+// of spec 012 reaches: that route takes an id rather than a path, because one
+// id names either a trashed object or a soft deleted workspace and the answer
+// says which it was. The condition is the same as Restore's, expressed once
+// per address: the row is the space's, it is trashed, and it is inside the
+// window.
+//
+// The restore and the read are one statement. A read followed by a write
+// would let a purge land between them and restore a row that is already
+// gone, and RETURNING is what makes the caller's answer the row the database
+// actually changed.
+//
+// A string that is not an identifier at all names no row, which is the same
+// answer a wrong id gets (spec 001, invariant 6).
+func (files) RestoreByID(ctx context.Context, q Querier, owner, id string, since time.Time) (File, bool, error) {
+	f, err := scanFile(q.QueryRow(ctx, `
+		UPDATE files SET deleted_at = NULL, updated_at = now()
+		 WHERE owner = $1 AND id = $2 AND deleted_at IS NOT NULL AND deleted_at > $3
+		RETURNING `+fileColumns, owner, id, since))
+	switch err = noSuchID(err); {
+	case missing(err):
+		return File{}, false, nil
+	case err != nil:
+		return File{}, false, classify(fmt.Sprintf("restore %q of %q", id, owner), err)
+	default:
+		return f, true, nil
+	}
+}
+
 // ListTrash answers one page of a space's trash, newest first, of the rows
 // still inside the retention window. A row past it is the reaper's and is
 // not offered to a caller that could not restore it.

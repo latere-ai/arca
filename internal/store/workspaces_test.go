@@ -706,3 +706,122 @@ func TestBytesGoOnlyWhenNoRowStillNamesThem(t *testing.T) {
 		t.Fatal("a row that does not scan read as a row")
 	}
 }
+
+// Pass 6 of spec 010 reads its working set and then ends it. The read is
+// also its counting half, so a dry run reports the rows a live run purges.
+func TestTombstonesReadsWhatIsPastTheWindowOldestFirst(t *testing.T) {
+	older, newer := aWorkspace(), aWorkspace()
+	deleted := time.Now().Add(-800 * time.Hour)
+	older.DeletedAt, newer.DeletedAt = &deleted, &deleted
+	q := &fakeQuerier{rows: workspaceRowsOf(older, newer)}
+	before := time.Now().Add(-720 * time.Hour)
+
+	page, err := NewWorkspaces().Tombstones(t.Context(), q, before, 100)
+	if err != nil {
+		t.Fatalf("Tombstones: %v", err)
+	}
+	if len(page) != 2 {
+		t.Fatalf("the page holds %d rows, want 2", len(page))
+	}
+	statement := q.statements[0]
+	for _, want := range []string{"deleted_at IS NOT NULL", "deleted_at < $1", "ORDER BY deleted_at"} {
+		if !strings.Contains(statement, want) {
+			t.Errorf("the statement does not carry %q:\n%s", want, statement)
+		}
+	}
+	if q.args[0][0] != before || q.args[0][1] != 100 {
+		t.Errorf("the read bound %v, want the cutoff and the page", q.args[0])
+	}
+	if !q.rows.(*fakeRows).closed {
+		t.Error("the rows were not closed")
+	}
+}
+
+func TestTombstonesRefusesAPageOfNoRowsAndCarriesWhatTheDatabaseAnswered(t *testing.T) {
+	empty := &fakeQuerier{}
+	if _, err := NewWorkspaces().Tombstones(t.Context(), empty, time.Now(), 0); err == nil {
+		t.Fatal("a page of no rows was accepted")
+	}
+	if len(empty.statements) != 0 {
+		t.Errorf("a page of no rows reached the database: %v", empty.statements)
+	}
+	if _, err := NewWorkspaces().Tombstones(t.Context(), &fakeQuerier{queryErr: errFault}, time.Now(), 10); !errors.Is(err, errFault) {
+		t.Errorf("a failed read answered %v", err)
+	}
+	broken := &fakeRows{scans: []func(...any) error{func(...any) error { return errFault }}}
+	if _, err := NewWorkspaces().Tombstones(t.Context(), &fakeQuerier{rows: broken}, time.Now(), 10); !errors.Is(err, errFault) {
+		t.Errorf("a row that did not scan answered %v", err)
+	}
+	ended := workspaceRowsOf(aWorkspace())
+	ended.err = errFault
+	if _, err := NewWorkspaces().Tombstones(t.Context(), &fakeQuerier{rows: ended}, time.Now(), 10); !errors.Is(err, errFault) {
+		t.Errorf("a page that ended in a failure answered %v", err)
+	}
+}
+
+// The purge is conditional on the row still being a tombstone. A restore
+// that landed between the page and the delete matches it out, so an
+// administrator's undo is not undone by the housekeeping behind it.
+func TestPurgingAWorkspaceOnlyEndsATombstone(t *testing.T) {
+	purged := &fakeQuerier{tag: pgconn.NewCommandTag("DELETE 1")}
+	ok, err := NewWorkspaces().Purge(t.Context(), purged, "id")
+	if err != nil || !ok {
+		t.Fatalf("Purge = %t, %v", ok, err)
+	}
+	if !strings.Contains(purged.statements[0], "deleted_at IS NOT NULL") {
+		t.Fatalf("the purge is not conditional on the tombstone:\n%s", purged.statements[0])
+	}
+	restored := &fakeQuerier{tag: pgconn.NewCommandTag("DELETE 0")}
+	if ok, err := NewWorkspaces().Purge(t.Context(), restored, "id"); err != nil || ok {
+		t.Fatalf("a purge of a restored workspace = %t, %v", ok, err)
+	}
+	if _, err := NewWorkspaces().Purge(t.Context(), &fakeQuerier{execErr: errFault}, "id"); !errors.Is(err, errFault) {
+		t.Fatalf("a failed purge answered %v", err)
+	}
+}
+
+// DropSubtree ends a subtree rather than reconciling one: a trashed row goes
+// with the live ones, because nothing can restore it any more, and the
+// superseded contents go too, because the ledger counts both tables and a
+// purge that left the history behind would leave bytes charged to a space
+// that holds nothing.
+func TestDroppingASubtreeTakesTheTrashAndTheHistoryWithIt(t *testing.T) {
+	rows := &fakeRows{scans: []func(...any) error{
+		func(dest ...any) error { return assign(dest, []any{object.ID("1f1e"), int64(10)}) },
+		func(dest ...any) error { return assign(dest, []any{object.ID("2a2b"), int64(32)}) },
+	}}
+	q := &fakeQuerier{rows: rows}
+	freed, bytes, err := NewWorkspaceObjects().DropSubtree(t.Context(), q, "space", "workspaces/build/")
+	if err != nil {
+		t.Fatalf("DropSubtree: %v", err)
+	}
+	if len(freed) != 2 || bytes != 42 {
+		t.Fatalf("the drop answered %v and %d bytes", freed, bytes)
+	}
+	statement := q.statements[0]
+	for _, want := range []string{"DELETE FROM files", "DELETE FROM file_versions", "UNION ALL"} {
+		if !strings.Contains(statement, want) {
+			t.Errorf("the statement does not carry %q:\n%s", want, statement)
+		}
+	}
+	if strings.Contains(statement, "deleted_at IS NULL") {
+		t.Errorf("the drop leaves the trash behind:\n%s", statement)
+	}
+	if !rows.closed {
+		t.Error("the rows were not closed")
+	}
+}
+
+func TestDroppingASubtreeCarriesWhatTheDatabaseAnswered(t *testing.T) {
+	if _, _, err := NewWorkspaceObjects().DropSubtree(t.Context(), &fakeQuerier{queryErr: errFault}, "space", "workspaces/a/"); !errors.Is(err, errFault) {
+		t.Errorf("a failed drop answered %v", err)
+	}
+	broken := &fakeRows{scans: []func(...any) error{func(...any) error { return errFault }}}
+	if _, _, err := NewWorkspaceObjects().DropSubtree(t.Context(), &fakeQuerier{rows: broken}, "space", "workspaces/a/"); !errors.Is(err, errFault) {
+		t.Errorf("a row that did not scan answered %v", err)
+	}
+	ended := &fakeRows{err: errFault}
+	if _, _, err := NewWorkspaceObjects().DropSubtree(t.Context(), &fakeQuerier{rows: ended}, "space", "workspaces/a/"); !errors.Is(err, errFault) {
+		t.Errorf("a page that ended in a failure answered %v", err)
+	}
+}

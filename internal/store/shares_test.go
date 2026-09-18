@@ -277,3 +277,39 @@ func TestNullIsWhatAnAbsentColumnHolds(t *testing.T) {
 // carol is the grantee of the cases above: neither the owner of the space
 // nor its creator.
 const carol = "https://issuer.example|carol"
+
+// Pass 7 of spec 010 counts and removes through one condition, so a dry run
+// reports the rows the live run takes. A grant with no expiry is in neither:
+// it grants until somebody revokes it.
+func TestTheExpiredGrantsAreCountedAndRemovedByOneCondition(t *testing.T) {
+	before := time.Now().Add(-720 * time.Hour)
+	counted := &fakeQuerier{row: values(int64(4))}
+	n, err := NewShares().Expired(t.Context(), counted, before)
+	if err != nil || n != 4 {
+		t.Fatalf("Expired = %d, %v", n, err)
+	}
+	purged := &fakeQuerier{tag: pgconn.NewCommandTag("DELETE 4")}
+	gone, err := NewShares().PurgeExpired(t.Context(), purged, before)
+	if err != nil || gone != 4 {
+		t.Fatalf("PurgeExpired = %d, %v", gone, err)
+	}
+	if !strings.Contains(counted.statements[0], expiredGrants) ||
+		!strings.Contains(purged.statements[0], expiredGrants) {
+		t.Fatalf("the two halves read two conditions:\n%s\n%s", counted.statements[0], purged.statements[0])
+	}
+	if !strings.Contains(expiredGrants, "expires_at IS NOT NULL") {
+		t.Errorf("a grant with no expiry is swept:\n%s", expiredGrants)
+	}
+	if counted.args[0][0] != before || purged.args[0][0] != before {
+		t.Errorf("the halves bound %v and %v as the cutoff", counted.args[0][0], purged.args[0][0])
+	}
+}
+
+func TestTheExpiredGrantsCarryWhatTheDatabaseAnswered(t *testing.T) {
+	if _, err := NewShares().Expired(t.Context(), &fakeQuerier{row: failing(errFault)}, time.Now()); !errors.Is(err, errFault) {
+		t.Errorf("a failed count answered %v", err)
+	}
+	if _, err := NewShares().PurgeExpired(t.Context(), &fakeQuerier{execErr: errFault}, time.Now()); !errors.Is(err, errFault) {
+		t.Errorf("a failed purge answered %v", err)
+	}
+}

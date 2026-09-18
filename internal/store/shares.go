@@ -110,6 +110,15 @@ type Shares interface {
 	// Subtree answers one page of the live paths a grant's prefix covers
 	// (links.go).
 	Subtree(ctx context.Context, q Querier, owner, prefix, cursor string, limit int) ([]File, error)
+	// CountLinks answers the live token grants each space named holds,
+	// which is the link counter of spec 012's overview. It takes the page's
+	// owners together, so a page of a hundred spaces is one query.
+	CountLinks(ctx context.Context, q Querier, owners []string) (map[string]int64, error)
+	// Expired answers how many grants expired before the cutoff, and
+	// PurgeExpired removes them. They are the counting and the working
+	// halves of pass 7 of spec 010.
+	Expired(ctx context.Context, q Querier, before time.Time) (int64, error)
+	PurgeExpired(ctx context.Context, q Querier, before time.Time) (int64, error)
 	// MarkPublic stamps or clears the public flag on one path (links.go).
 	MarkPublic(ctx context.Context, q Querier, owner, path string, public bool) (File, error)
 }
@@ -190,6 +199,40 @@ func (shares) Revoke(ctx context.Context, q Querier, id string) (bool, error) {
 		return false, classify(fmt.Sprintf("revoke the grant %q", id), err)
 	}
 	return tag.RowsAffected() == 1, nil
+}
+
+// expiredGrants is the condition pass 7 of spec 010 works to: a grant whose
+// expiry passed before the cutoff. The counting half and the working half
+// read it once, so a dry run reports the rows the live run removes.
+//
+// A grant with no expiry is never here. It grants until somebody revokes it,
+// and a revoked row is kept so an audit can see the grant existed (spec
+// 008); what leaves is a grant that stopped granting on its own long enough
+// ago that nothing will ask about it again.
+const expiredGrants = `shares WHERE expires_at IS NOT NULL AND expires_at < $1`
+
+// Expired counts the grants that expired before the cutoff.
+func (shares) Expired(ctx context.Context, q Querier, before time.Time) (int64, error) {
+	var n int64
+	if err := q.QueryRow(ctx, `SELECT COUNT(*) FROM `+expiredGrants, before).Scan(&n); err != nil {
+		return 0, fmt.Errorf("store: count the expired grants: %w", err)
+	}
+	return n, nil
+}
+
+// PurgeExpired removes them and answers how many left.
+//
+// Expiry needs no sweep to take effect: every read of a grant filters on
+// expires_at, so one of these rows has granted nothing since the moment it
+// expired (spec 008). This statement is therefore housekeeping and never a
+// change of who may act on a space, which is why it appends no event of its
+// own.
+func (shares) PurgeExpired(ctx context.Context, q Querier, before time.Time) (int64, error) {
+	tag, err := q.Exec(ctx, `DELETE FROM `+expiredGrants, before)
+	if err != nil {
+		return 0, classify("purge the expired grants", err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 // ListSpace answers one page of a space's grants.

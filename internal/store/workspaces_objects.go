@@ -61,6 +61,11 @@ type WorkspaceObjects interface {
 	// is the batched form of ObjectReferenced, because a sync that drops a
 	// large tree asks it once and not once per file.
 	Unreferenced(ctx context.Context, q Querier, ids []object.ID) ([]object.ID, error)
+	// DropSubtree removes every row under a root prefix, the trashed ones
+	// and the superseded contents included, and answers the objects they
+	// held and the bytes they counted. It is what pass 6 of spec 010 runs
+	// before it removes the tombstone itself.
+	DropSubtree(ctx context.Context, q Querier, owner, prefix string) (freed []object.ID, bytes int64, err error)
 }
 
 // workspaceObjects is the query set over Postgres.
@@ -158,6 +163,57 @@ func (workspaceObjects) Drop(ctx context.Context, q Querier, owner string, paths
 	}
 	if err := rows.Err(); err != nil {
 		return nil, 0, fmt.Errorf("store: drop %d objects of %q: %w", len(paths), owner, err)
+	}
+	return freed, bytes, nil
+}
+
+// DropSubtree removes every row under a root prefix and answers what they
+// held.
+//
+// It is Drop's whole-subtree arm, and it differs from Drop in the two ways a
+// purge differs from a sync: a sync drops the live paths a client no longer
+// declares, and a purge ends the subtree, so a trashed row is taken too and
+// nothing is left for a restore that can no longer happen. The superseded
+// contents go with it, because the ledger of spec 010 counts files and
+// file_versions together and a purge that left the history behind would
+// leave bytes charged to a space that holds nothing.
+//
+// The bytes are the sum over both tables, so the caller releases exactly
+// what a recomputation would no longer find.
+func (workspaceObjects) DropSubtree(ctx context.Context, q Querier, owner, prefix string) ([]object.ID, int64, error) {
+	rows, err := q.Query(ctx, `
+		WITH gone AS (
+		    DELETE FROM files
+		     WHERE owner = $1 AND path LIKE $2 ESCAPE '\'
+		    RETURNING object_id, size_bytes
+		), history AS (
+		    DELETE FROM file_versions
+		     WHERE owner = $1 AND path LIKE $2 ESCAPE '\'
+		    RETURNING object_id, size_bytes
+		)
+		SELECT object_id, size_bytes FROM gone
+		 UNION ALL
+		SELECT object_id, size_bytes FROM history`, owner, likePrefix(prefix))
+	if err != nil {
+		return nil, 0, fmt.Errorf("store: drop the objects under %q of %q: %w", prefix, owner, err)
+	}
+	defer rows.Close()
+
+	var (
+		freed []object.ID
+		bytes int64
+	)
+	for rows.Next() {
+		var id object.ID
+		var size int64
+		if err := rows.Scan(&id, &size); err != nil {
+			return nil, 0, fmt.Errorf("store: drop the objects under %q of %q: %w", prefix, owner, err)
+		}
+		freed = append(freed, id)
+		bytes += size
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("store: drop the objects under %q of %q: %w", prefix, owner, err)
 	}
 	return freed, bytes, nil
 }

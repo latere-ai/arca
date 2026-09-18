@@ -285,6 +285,42 @@ func (m *memory) Restore(_ context.Context, q store.Querier, id string) (bool, e
 	return true, nil
 }
 
+func (m *memory) Tombstones(_ context.Context, q store.Querier, before time.Time, limit int) ([]store.Workspace, error) {
+	m.use(q)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.refuse("Tombstones"); err != nil {
+		return nil, err
+	}
+	var out []store.Workspace
+	for _, id := range slices.Sorted(maps.Keys(m.workspaces)) {
+		w := m.workspaces[id]
+		if w.DeletedAt == nil || !w.DeletedAt.Before(before) {
+			continue
+		}
+		out = append(out, w)
+		if len(out) == limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+func (m *memory) Purge(_ context.Context, q store.Querier, id string) (bool, error) {
+	m.use(q)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.refuse("Purge"); err != nil {
+		return false, err
+	}
+	w, ok := m.workspaces[id]
+	if !ok || w.DeletedAt == nil {
+		return false, nil
+	}
+	delete(m.workspaces, id)
+	return true, nil
+}
+
 func (m *memory) TakeLease(_ context.Context, q store.Querier, id, holder string, now, until time.Time) (bool, error) {
 	m.use(q)
 	m.mu.Lock()
@@ -598,6 +634,27 @@ func (m *memory) Drop(_ context.Context, q store.Querier, owner string, paths []
 		if !ok {
 			continue
 		}
+		delete(m.files[owner], path)
+		freed = append(freed, f.ObjectID)
+		bytes += f.Size
+	}
+	return freed, bytes, nil
+}
+
+func (m *memory) DropSubtree(_ context.Context, q store.Querier, owner, prefix string) ([]object.ID, int64, error) {
+	m.use(q)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.refuse("DropSubtree"); err != nil {
+		return nil, 0, err
+	}
+	var freed []object.ID
+	var bytes int64
+	for _, path := range slices.Sorted(maps.Keys(m.files[owner])) {
+		if !strings.HasPrefix(path, prefix) {
+			continue
+		}
+		f := m.files[owner][path]
 		delete(m.files[owner], path)
 		freed = append(freed, f.ObjectID)
 		bytes += f.Size

@@ -254,16 +254,26 @@ func (s *Service) sync(w http.ResponseWriter, r *http.Request) {
 // committed, so a client that hangs up on the response must not be able to
 // leave the bytes behind by doing it.
 func (s *Service) sweep(ctx context.Context, freed []object.ID) {
+	removeBytes(ctx, s.bucket, s.prefix, freed)
+}
+
+// removeBytes drops the keys of objects no row names any more. It is shared
+// by the sync above and by the tombstone purge of spec 010's pass 6, because
+// both reach it having already committed the rows and both owe the same
+// promise: the request's cancellation is dropped, so a client that hangs up
+// cannot leave the bytes behind, and a failure is a warning rather than a
+// refusal to a caller whose work is done.
+func removeBytes(ctx context.Context, bucket blob.Store, prefix string, freed []object.ID) {
 	if len(freed) == 0 {
 		return
 	}
 	ctx = context.WithoutCancel(ctx)
 	keys := make([]string, 0, len(freed))
 	for _, id := range freed {
-		keys = append(keys, id.Key(s.prefix))
+		keys = append(keys, id.Key(prefix))
 	}
-	if err := s.bucket.DeleteMany(ctx, keys); err != nil {
-		slog.WarnContext(ctx, "the bytes a sync dropped are still in the bucket",
+	if err := bucket.DeleteMany(ctx, keys); err != nil {
+		slog.WarnContext(ctx, "the bytes the rows no longer name are still in the bucket",
 			"keys", len(keys), "err", err)
 	}
 }

@@ -9,7 +9,7 @@ depends_on:
 affects: [space/, authorizer/, internal/shares/, internal/api/, internal/store/, docs/]
 effort: large
 created: 2026-09-18
-updated: 2026-09-18
+updated: 2026-09-19
 author: changkun
 ---
 
@@ -56,6 +56,17 @@ the e2e tier), `a2dabc0` (the refusal that names no token), `32fdacc` (the
 rows declared where they are answered) and `0390a84` (those rows held to
 spec 013's table), each followed by the note it put in this section. The
 gate passes with all fifteen gates on at every one of them.
+
+The merge with [[012-administration]] bound two seams onto this table.
+`shares.LinkCounts` answers that spec's link counter, and it reads the same
+predicate every other token query carries, so the number the overview reports
+and the rows `GET /v1/shares/links` lists are one reading of what a live link
+is. `shares.Expiry` is pass 7 of [[010-events-and-reaper]]: it removes the
+grants whose expiry passed a whole `ARCA_TRASH_RETENTION` ago and appends no
+event, because such a row has granted nothing since the moment it expired.
+Both are values of this package rather than methods of the service, which
+refuses to build without an authorizer; the pass puts no question, and the
+node binds it in `arcad reap` as well as in `serve`.
 
 What arrived from the service Arca replaces is
 `drive/internal/handler/shares.go` (create, list, what is shared with the
@@ -375,7 +386,11 @@ immediate and there is no grace window: the next `Covering` call does not
 return the grant, and the next redemption of a revoked token is a
 not-found. A revoked row is kept so an audit can see the grant existed
 ([[012-administration]]); the reaper of [[010-events-and-reaper]]
-deletes grants that expired long ago.
+deletes grants that expired long ago, which is pass 7 of that spec's table
+and `shares.Expiry` here. A revoked row with no expiry is not its business:
+the sweep takes what stopped granting on its own, and the window it works to
+is `ARCA_TRASH_RETENTION`, because there is no second retention setting
+([[009-workspaces]]).
 
 Expiry needs no sweep to take effect. `Covering` and the token lookup both
 filter on `expires_at`, so an expired grant stops granting at the moment

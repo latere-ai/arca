@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -116,5 +117,60 @@ func TestPurgingAnswersEveryRowItRemovedSoItsBytesCanFollow(t *testing.T) {
 	cut := &fakeQuerier{rows: &fakeRows{err: errFault}}
 	if _, err := NewFiles().PurgeTrash(t.Context(), cut, "space", ""); !errors.Is(err, errFault) {
 		t.Fatalf("a purge cut short answered %v", err)
+	}
+}
+
+// The id-addressed arm of the restore, which the administrative route of
+// spec 012 reaches. It answers the row it changed, so the caller reads what
+// the database restored rather than what it read a moment before.
+func TestRestoringByIDAnswersTheRowItBroughtBack(t *testing.T) {
+	row := aTrashedFile("files/reports/q3.pdf", time.Hour)
+	row.ID = "d0e6b0f8-0000-4000-8000-000000000001"
+	live := row
+	live.DeletedAt = nil
+	q := &fakeQuerier{row: fakeRow{scan: fileScan(live)}}
+	since := time.Now().Add(-720 * time.Hour)
+
+	back, ok, err := NewFiles().RestoreByID(t.Context(), q, "space", row.ID, since)
+	if err != nil || !ok {
+		t.Fatalf("RestoreByID = %t, %v", ok, err)
+	}
+	if back.Path != row.Path || back.DeletedAt != nil {
+		t.Fatalf("the restored row is %+v", back)
+	}
+	statement := q.statements[0]
+	for _, want := range []string{"owner = $1", "id = $2", "deleted_at IS NOT NULL", "deleted_at > $3", "RETURNING"} {
+		if !strings.Contains(statement, want) {
+			t.Errorf("the statement does not carry %q:\n%s", want, statement)
+		}
+	}
+	if q.args[0][0] != "space" || q.args[0][1] != row.ID || q.args[0][2] != since {
+		t.Errorf("the restore bound %v", q.args[0])
+	}
+}
+
+// An id of another space, one past the window, one that names nothing, and a
+// string that is not an identifier at all are one answer: there is nothing to
+// bring back. A word that is not an id names nothing, and answering a fault
+// would make a wrong request a 500 (spec 001, invariant 6).
+func TestRestoringByIDAnswersNothingForAnIDItCannotBringBack(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		row  fakeRow
+	}{
+		{"no such row", failing(pgx.ErrNoRows)},
+		{"not an identifier", failing(&pgconn.PgError{Code: "22P02"})},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			q := &fakeQuerier{row: tc.row}
+			back, ok, err := NewFiles().RestoreByID(t.Context(), q, "space", "nope", time.Now())
+			if err != nil || ok {
+				t.Fatalf("RestoreByID = %+v, %t, %v", back, ok, err)
+			}
+		})
+	}
+	broken := &fakeQuerier{row: failing(errFault)}
+	if _, _, err := NewFiles().RestoreByID(t.Context(), broken, "space", "id", time.Now()); !errors.Is(err, errFault) {
+		t.Fatalf("a failed restore answered %v", err)
 	}
 }
