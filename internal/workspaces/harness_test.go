@@ -118,7 +118,11 @@ func (h *harness) at() time.Time {
 	if h.clock != nil {
 		return h.clock()
 	}
-	return time.Now()
+	// The service stores and answers a deadline at the database's
+	// precision, so a test measures against the same precision; on a
+	// nanosecond clock the untruncated instant is a few hundred
+	// nanoseconds ahead of every deadline the service can answer.
+	return time.Now().Truncate(StoredPrecision)
 }
 
 // travel moves the harness clock forward by d for the rest of the test.
