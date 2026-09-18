@@ -63,10 +63,15 @@ depcheck:
         S3 client of spec 003 with the modules the SDK splits itself
         into, the Postgres driver and migrator of spec 004, and the
         OpenTelemetry SDK that pkg/otel exports through, which spec 006
-        brought: the authorizer client and the verifier both send their
-        calls through an instrumented transport, so the request's trace
-        reaches the operator's endpoint and every call is a span.
-        Nothing else joins without a row here (spec 001). The S3 SDK is
+        brought and spec 018 now reads whole: the authorizer client and
+        the verifier send their calls through an instrumented transport,
+        so the request's trace reaches the operator's endpoint and every
+        call is a span, and the node bootstraps the tracer, the metric
+        reader and the log bridge, whose OTLP exporters carry all three
+        to the endpoint ARCA_OTEL_EXPORTER_OTLP_ENDPOINT names. The
+        scrape endpoint of spec 018 adds nothing: it is
+        latere.ai/x/pkg/metrics, which links no Prometheus client
+        library. Nothing else joins without a row here (spec 001). The S3 SDK is
         the one cloud dependency invariant 9 admits, because it speaks
         the S3 API and nothing else: no cloud control plane, no
         Kubernetes client.
@@ -98,7 +103,7 @@ depcheck:
         github.com/jackc/pgerrcode: the SQLSTATE names the migrate driver branches on
         github.com/golang-migrate/migrate/v4: the migrator of spec 004, with its iofs source and its pgx/v5 driver, run through latere.ai/x/pkg/pgxmigrate
         github.com/google/uuid: the object id of spec 003, a UUIDv7 per write of content; reached through latere.ai/x/pkg besides, and not a cloud SDK
-        go.opentelemetry.io: the OpenTelemetry SDK, exporters, and instrumentation the traces and metrics of spec 018 go out through, reached through pkg/otel's instrumented transport (spec 006)
+        go.opentelemetry.io: the OpenTelemetry SDK and its OTLP exporters, the otelslog bridge that tees every log record beside the local JSON handler, the otelhttp instrumentation of the transport, and the proto types of the wire; the traces, the metrics and the logs of spec 018 go out through them, reached through pkg/otel (spec 006 brought the transport, spec 018 the bootstrap)
         google.golang.org: protobuf and gRPC, the wire format and the transport of the OTLP exporters
         golang.org/x/net: reached by the OTLP exporters
         golang.org/x/sync: the singleflight and errgroup pgx and the migrator reach
@@ -106,9 +111,9 @@ depcheck:
         golang.org/x/text: the encodings pgx reads a server message in, and reached by the OTLP exporters
         golang.org/x/time: reached by the OTLP exporters and by pkg/ratelimit's token buckets (spec 015)
         github.com/cenkalti/backoff: the OTLP exporters' retry schedule
-        github.com/cespare/xxhash: the metric SDK's aggregation keys
+        github.com/cespare/xxhash: the metric SDK's aggregation keys. The scrape endpoint of spec 018 is latere.ai/x/pkg/metrics, which links no Prometheus client library, so this is the OTLP side alone
         github.com/felixge/httpsnoop: otelhttp's response recorder
-        github.com/go-logr: the OpenTelemetry SDK's internal logging interface
+        github.com/go-logr: the OpenTelemetry SDK's internal logging interface, with the standard library sink the SDK installs behind it for its own diagnostics
         github.com/grpc-ecosystem/grpc-gateway: the OTLP status marshalling the exporters read errors with
 
 license:

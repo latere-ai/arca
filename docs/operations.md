@@ -120,12 +120,84 @@ of a kind cluster does not.
 
 ## What to watch
 
-The internal listener serves `/metrics` in the Prometheus text format, and
-is reached where the pod runs rather than through a Service: it is not
-routed, and nothing should route it.
+### Metrics
 
-`deploy/base/prometheusrule.yaml` holds the alert rules, applied beside the
-base by an installation that runs the Prometheus operator.
+The internal listener serves `/metrics` in the Prometheus text format. It is
+reached where the pod runs rather than through a Service: it is not routed,
+and nothing should route it. The public listener answers `/metrics` with a
+404, and that is deliberate.
+
+Every metric name is on the endpoint from the first scrape, at zero, so a
+dashboard and an alert work before the first request. The names begin
+`arca_`. The ones you will reach for first:
+
+| Metric | What it answers |
+|---|---|
+| `arca_requests_total` | is the API serving, by route and status class |
+| `arca_request_duration_seconds` | how long a route takes |
+| `arca_bucket_ops_total` | are the calls to the bucket succeeding |
+| `arca_reaper_findings_total` | what the reconciler found, by kind |
+| `arca_spaces_by_usage` | how many spaces are at least 1, 10 and 100 GiB |
+| `arca_space_usage_bytes` | how the installation's bytes are spread |
+| `arca_decisions_total` | are authorization decisions being made, and by whom |
+
+Usage is published in aggregate and never per space. A space is addressed by
+the subject its owner's token carries, so a label naming one would put a
+person's identity on an endpoint anyone who can scrape the namespace reads,
+and would add a series for every principal that ever used the installation.
+To find out which space is the large one, read the administrative overview
+under an administrator's token.
+
+To scrape with the Prometheus operator, point a `PodMonitor` at the internal
+port. Without the operator, add the pod IP and port 8081 to your scrape
+configuration.
+
+### Alerts
+
+`deploy/base/prometheusrule.yaml` holds thirteen alert rules. Apply it beside
+the base:
+
+```sh
+kubectl apply -n arca -f deploy/base/prometheusrule.yaml
+```
+
+It needs the Prometheus operator's CustomResourceDefinition, which is why it
+is not part of the base. Without the operator, copy the rules out of its
+`spec` into your own Prometheus configuration; `go run ./tools/rules` prints
+exactly that document.
+
+Two of them matter more than the rest. `ArcaMissingBytes` means a row names
+an object the bucket does not hold, which is data loss and always reaches a
+human. `ArcaReaperFailing` means the reconciler has stopped, and everything
+it cleans up will accumulate until it runs again. Its window is three times
+the default `ARCA_REAP_INTERVAL` of five minutes; if you lengthened the
+interval, lengthen the window.
+
+Two alerts read metrics Arca does not publish, `ArcaReadinessFailing` and
+`ArcaReplicasPinned`. They come from kube-state-metrics, and an installation
+without it simply never fires them.
+
+### Traces and logs
+
+Set `ARCA_OTEL_EXPORTER_OTLP_ENDPOINT` to your collector and `arcad` exports
+traces and log records over OTLP. Leave it unset and nothing leaves the
+process: `/metrics` still serves everything, so an installation without a
+collector loses no local signal.
+
+Logs are JSON on standard error. Each request ends on one line carrying the
+route, the method, the status, the error code, the duration, the subject, the
+request id and the trace id. The request id is not the trace id: the first is
+what a client sees in `X-Request-Id` and in every error body, the second is
+what your tracing backend indexes, and both are on the line, so you can go
+from a user's complaint to a trace and back.
+
+The route on a line and on a metric is the pattern a route is registered
+under, such as `GET /v1/workspaces/{id}/sync`, never the path a caller sent.
+A path carries what a person called their file, and it belongs in neither.
+
+`arcad reap`, run as a job of its own, opens no listener. Its traces and its
+lines still reach the collector; its counters are scraped from a replica that
+serves.
 
 ## Running the reconciler on its own
 
