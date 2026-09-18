@@ -376,4 +376,14 @@ func TestE2EAnAuthorizerThatDeniesLinkReadStopsEveryLink(t *testing.T) {
 	if code != http.StatusNotFound || !strings.Contains(body, `"not_found"`) {
 		t.Fatalf("a denied link = %d: %s", code, body)
 	}
+	// On the wire the refusal names neither the token it arrived on nor the
+	// reason the endpoint gave, so a log line that records the developer
+	// detail records no capability (spec 015).
+	if strings.Contains(body, denied.Token) || strings.Contains(body, "serves no public links") {
+		t.Fatalf("the refusal names the token or the reason: %s", body)
+	}
+	code, body, _ = i.call(t, http.MethodGet, "/v1/shares/links/t0ken-unknown/meta", "", nil)
+	if code != http.StatusNotFound || strings.Contains(body, "t0ken-unknown") {
+		t.Fatalf("an unknown token = %d: %s", code, body)
+	}
 }

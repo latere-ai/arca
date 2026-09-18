@@ -515,3 +515,67 @@ func TestALinkRouteWithNoTokenIsNotFound(t *testing.T) {
 		t.Errorf("a redemption of no token = %d", w.Code)
 	}
 }
+
+// TestARefusedRedemptionNamesNoToken is the second half of criterion 5b and
+// spec 015's rule about the token: the three redemption routes carry the
+// capability in their path, so a refusal built from the URL would copy it
+// into the developer detail, which is the field an error log and a trace
+// record. Every cause answers one fixed sentence instead, which also makes
+// a token that never existed, a revoked one, an expired one, a path outside
+// the grant and a denied link.read one answer rather than five.
+func TestARefusedRedemptionNamesNoToken(t *testing.T) {
+	h := newHarness(t)
+	anObject(h, "files/reports/q3.pdf")
+	revoked := mint(t, h, "files/reports", "")
+	if w := h.do(t, http.MethodDelete, "/v1/shares/links/"+revoked.ID, "alice", nil); w.Code != http.StatusNoContent {
+		t.Fatalf("the revoke = %d: %s", w.Code, w.Body)
+	}
+	past := time.Now().Add(-time.Minute)
+	h.table.put(store.Grant{
+		Owner: h.subject("alice"), PathPrefix: "files/reports", GranteeKind: store.GranteeLink,
+		Permission: "read", Token: "t0ken-expired", CreatedBy: h.subject("alice"), ExpiresAt: &past,
+	})
+	live := mint(t, h, "files/reports", "")
+	denied := mint(t, h, "files/reports", "")
+
+	cases := []struct{ cause, token, path string }{
+		{"a token that never existed", "t0ken-unknown", "/meta"},
+		{"a revoked token", revoked.Token, "/meta"},
+		{"an expired token", "t0ken-expired", "/meta"},
+		{"a path outside the grant", live.Token, "/files/files/elsewhere.txt"},
+	}
+	const first = "a token that never existed"
+	details := map[string]string{}
+	for _, c := range cases {
+		w := h.do(t, http.MethodGet, "/v1/shares/links/"+c.token+c.path, "", nil)
+		if got := refusalOf(t, w); got != api.CodeNotFound {
+			t.Errorf("%s = %q %d", c.cause, got, w.Code)
+		}
+		if body := w.Body.String(); strings.Contains(body, c.token) {
+			t.Errorf("%s answered with the token in the body: %s", c.cause, body)
+		}
+		details[c.cause] = detailOf(t, w)
+	}
+
+	h.endpoint.SetRules(stub.Rule{
+		Subject: "*", Action: authorizer.ActionLinkRead, Resource: "*", Allow: false,
+		Reason: "this installation serves no public links",
+	})
+	w := h.do(t, http.MethodGet, "/v1/shares/links/"+denied.Token+"/meta", "", nil)
+	if got := refusalOf(t, w); got != api.CodeNotFound {
+		t.Errorf("a denied link.read = %q %d", got, w.Code)
+	}
+	if body := w.Body.String(); strings.Contains(body, denied.Token) {
+		t.Errorf("a denied link.read answered with the token in the body: %s", body)
+	}
+	if body := w.Body.String(); strings.Contains(body, "no public links") {
+		t.Errorf("a denied link.read named the endpoint's reason: %s", body)
+	}
+	details["a denied link.read"] = detailOf(t, w)
+
+	for cause, detail := range details {
+		if detail != details[first] {
+			t.Errorf("%s is told %q, and %s is told %q", cause, detail, first, details[first])
+		}
+	}
+}

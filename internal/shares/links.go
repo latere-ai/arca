@@ -339,7 +339,7 @@ func (s *Service) LinkFile(w http.ResponseWriter, r *http.Request) {
 	if err := usablePath(path); err != nil {
 		// A path this server does not accept names no object, and a link
 		// route says nothing more than that about what it holds.
-		api.WriteError(w, r, notFound(r))
+		api.WriteError(w, r, notFound())
 		return
 	}
 	link, err := s.redeem(r, path)
@@ -371,25 +371,33 @@ func (s *Service) LinkFile(w http.ResponseWriter, r *http.Request) {
 func (s *Service) redeem(r *http.Request, path string) (store.Grant, error) {
 	token := r.PathValue("token")
 	if token == "" {
-		return store.Grant{}, notFound(r)
+		return store.Grant{}, notFound()
 	}
 	link, err := s.store.ByToken(r.Context(), s.db.Querier(), token)
 	switch {
 	case missing(err):
-		return store.Grant{}, notFound(r)
+		return store.Grant{}, notFound()
 	case err != nil:
 		return store.Grant{}, fmt.Errorf("shares: resolve a link token: %w", err)
 	}
 	asked := link.PathPrefix
 	if path != "" {
 		if !covers(link.PathPrefix, path) {
-			return store.Grant{}, notFound(r)
+			return store.Grant{}, notFound()
 		}
 		asked = path
 	}
 	res := authorizer.Link{ID: link.ID, Owner: link.Owner, Path: asked}.Resource()
 	if _, err := s.authorizer.Lookup(r.Context(), authorizer.ActionLinkRead, res); err != nil {
-		return store.Grant{}, api.FromAuth(err)
+		refusal := api.FromAuth(err)
+		if refusal.Code == api.CodeNotFound {
+			// A deny answers exactly what an unknown token answers, developer
+			// detail included. The endpoint's reason is worth reading on every
+			// other route, but here it would say that this token resolved,
+			// which is the one fact these three routes withhold.
+			return store.Grant{}, notFound()
+		}
+		return store.Grant{}, refusal
 	}
 	return link, nil
 }
@@ -403,8 +411,13 @@ func noReferrer(w http.ResponseWriter) { w.Header().Set(HeaderReferrerPolicy, No
 // token, a revoked one, an expired one, a path outside the grant, and a
 // denied link.read are indistinguishable, so a caller learns nothing about
 // what the space holds by asking.
-func notFound(r *http.Request) error {
-	return api.Refuse(api.CodeNotFound, "%s names no link this server serves", r.URL.Path)
+//
+// It names neither the token nor the path it arrived on. The token is a path
+// segment of these three routes, so a detail built from the URL would put the
+// capability in the developer detail, which is the field an error log and a
+// trace carry (spec 015).
+func notFound() error {
+	return api.Refuse(api.CodeNotFound, "this token names no link this server serves")
 }
 
 // tokenKind reads the kind a create asks for.

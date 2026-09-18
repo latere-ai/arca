@@ -20,7 +20,13 @@ import (
 func TestNoHandlerReadsAClaimForMeaning(t *testing.T) {
 	// The words that would mean a claim was read for meaning. They are
 	// spelled in pieces so this test does not match itself.
-	forbidden := []string{"org" + "_id", "princip" + "al_type", "claims.Rol" + "es", "claims.Ema" + "il"}
+	// The quoted forms catch a claim read by name out of a map, which is
+	// what criterion 11 names; the quotes keep prose in a comment from
+	// matching.
+	forbidden := []string{
+		"org" + "_id", "princip" + "al_type", "claims.Rol" + "es", "claims.Ema" + "il",
+		`"ema` + `il"`, `"rol` + `es"`, `"org` + `_id"`,
+	}
 	files, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)

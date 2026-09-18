@@ -169,6 +169,17 @@ type envelope struct {
 	} `json:"error"`
 }
 
+// detailOf reads the developer detail of a refusal, which is the field an
+// error log and a trace carry.
+func detailOf(t *testing.T, w *httptest.ResponseRecorder) string {
+	t.Helper()
+	var e envelope
+	if err := json.Unmarshal(w.Body.Bytes(), &e); err != nil {
+		t.Fatalf("the refusal is not an envelope: %v\n%s", err, w.Body)
+	}
+	return e.Error.Details.Detail
+}
+
 // refusalOf reads the code a refusal carries, and fails the test when the
 // status is not the one the table gives that code.
 func refusalOf(t *testing.T, w *httptest.ResponseRecorder) string {
