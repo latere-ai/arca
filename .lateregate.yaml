@@ -53,6 +53,7 @@ depcheck:
         does without a row here (spec 001)
       allow:
         latere.ai/x/pkg: the shared library every Latere service is built on (spec 002)
+        github.com/google/uuid: reached behind latere.ai/x/pkg's error envelope, which the configuration reads the authorizer's subject parser from (spec 006); not a cloud SDK
 
 license:
   spdx: MIT
@@ -71,13 +72,7 @@ identity:
   reached_by: self-hosted
   # Access is by role: the roles rule runs, and it is one way once set.
   roles_only: true
-  # The two rules that read an import the scaffold does not make yet.
-  # Spec 006 mounts the shared verifier and the authorizer client on /v1,
-  # and both waivers go with it; the dates are the leaf's deadline.
-  waive:
-    verifier:
-      until: 2026-10-31
-      reason: spec 006 mounts latere.ai/x/pkg/authkit/jwt on /v1; nothing is served under /v1 before it
-    authorizer:
-      until: 2026-10-31
-      reason: spec 006 asks its question through latere.ai/x/pkg/authz; nothing decides before it
+  # The verifier and authorizer rules carried dated waivers until spec 006
+  # landed. internal/auth now verifies with latere.ai/x/pkg/authkit/jwt and
+  # asks through latere.ai/x/pkg/authz, so both waivers are gone and the
+  # real rules run.

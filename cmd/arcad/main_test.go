@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"regexp"
@@ -16,8 +17,17 @@ import (
 	"time"
 )
 
+// env is the environment a case runs arcad in: the variables spec 002's
+// table marks required, which the binary refuses to start without, plus
+// whatever the case sets. A case overrides a required variable by naming it,
+// and clears one by naming it empty.
 func env(m map[string]string) func(string) string {
-	return func(k string) string { return m[k] }
+	base := map[string]string{
+		"ARCA_PUBLIC_URL":   "http://127.0.0.1:8080",
+		"ARCA_OIDC_ISSUERS": "https://issuer.example",
+	}
+	maps.Copy(base, m)
+	return func(k string) string { return base[k] }
 }
 
 func TestVersionFlagPrintsTheIdentityAndExitsZero(t *testing.T) {

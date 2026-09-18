@@ -19,7 +19,7 @@ import "latere.ai/x/pkg/authz"
 // Bytes is a size an object carries, for the Size field of a question that
 // knows one. It exists so a zero-byte object sends a zero and a question
 // that has not looked the object up sends nothing at all.
-func Bytes(n int64) *int64 { return &n }
+func Bytes(n int64) *int64 { return new(n) }
 
 // File is the resource of every file.* action: a put, a read, a head, a
 // listing, a move, a delete, a version, a star, and a restore from trash.

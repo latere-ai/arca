@@ -195,11 +195,25 @@ The ladder a grant is read against is [[008-shares-and-links]]'s:
 `workspace.list`; `write` adds `file.write`, `file.delete`,
 `file.restore`, `upload.write`, `workspace.write`, `workspace.attach`,
 `workspace.sync`; `manage` adds `share.create`, `share.read`,
-`share.list`, `share.revoke` on the granted subtree. `space.admin`,
-`workspace.create`, and `workspace.delete` are the owner's or an
-administrator's. The owner
-policy applies `authz.Restrict` last, so a narrowed personal key is
-narrowed here too.
+`share.list`, `share.revoke` on the granted subtree.
+
+No grant reaches the remaining eight, which are the owner's or an
+administrator's: `space.admin`, `workspace.create`, `workspace.delete`,
+`workspace.restore`, `event.read`, `link.create`, `link.read`,
+`link.revoke`. Making a workspace, removing one, undoing a delete,
+reading a space's log, and minting or revoking a token anyone may read
+with are powers over the space and not over a subtree of it, so a grant
+on a subtree does not confer them. `link.read` sits on that list and is
+still the one action an anonymous caller reaches, because the link step
+of the flowchart answers it and no grant does.
+
+A grant names a path prefix, and a workspace names a slug rather than a
+path, so the prefix a grant on a workspace is read against is
+`workspaces/<slug>`, the subtree of the workspaces plane
+([[001-architecture]]) that workspace owns.
+
+The owner policy applies `authz.Restrict` last, so a narrowed personal
+key is narrowed here too.
 
 The owner policy answers from Arca's own grants table, which is the one
 place this core reads its own state to decide. That is deliberate: a
