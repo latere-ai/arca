@@ -127,12 +127,13 @@ type Workspaces interface {
 	// ListDeleted answers one page of the soft deleted ones, in the same
 	// order, which is what is still restorable.
 	ListDeleted(ctx context.Context, q Querier, owner, cursor string, limit int) ([]Workspace, error)
-	// Rename gives a live workspace whose lease is free another slug. It
-	// answers false when the row moved under the caller and ErrConflict
-	// when the space already holds the slug.
-	Rename(ctx context.Context, q Querier, id, slug string) (bool, error)
-	// SoftDelete stamps deleted_at on a live workspace whose lease is free.
-	SoftDelete(ctx context.Context, q Querier, id string) (bool, error)
+	// Rename gives a live workspace whose lease is free at now another
+	// slug. It answers false when the row moved under the caller and
+	// ErrConflict when the space already holds the slug.
+	Rename(ctx context.Context, q Querier, id, slug string, now time.Time) (bool, error)
+	// SoftDelete stamps deleted_at on a live workspace whose lease is free
+	// at now.
+	SoftDelete(ctx context.Context, q Querier, id string, now time.Time) (bool, error)
 	// Restore clears deleted_at. It answers false for a workspace that is
 	// not deleted, which the caller has already told from one that is gone.
 	Restore(ctx context.Context, q Querier, id string) (bool, error)
@@ -163,6 +164,9 @@ type Attachments interface {
 	// Get reads one attachment of one workspace. An attachment of another
 	// workspace is pgx.ErrNoRows, so an id cannot be used to read across.
 	Get(ctx context.Context, q Querier, workspaceID, id string) (Attachment, error)
+	// SetExpiry stamps a new deadline on an active attachment, which is
+	// the whole of what a renew writes.
+	SetExpiry(ctx context.Context, q Querier, id string, until time.Time) (bool, error)
 	// Release marks an active attachment released.
 	Release(ctx context.Context, q Querier, id string) (bool, error)
 	// Reap marks an active attachment reaped, which is what the sweep of
@@ -288,20 +292,23 @@ func listWorkspaces(ctx context.Context, q Querier, owner, cursor string, limit 
 }
 
 // Rename gives a live workspace whose lease is free another slug.
-func (workspaces) Rename(ctx context.Context, q Querier, id, slug string) (bool, error) {
+func (workspaces) Rename(ctx context.Context, q Querier, id, slug string, now time.Time) (bool, error) {
 	tag, err := q.Exec(ctx, `
 		UPDATE workspaces SET slug = $2, updated_at = now()
-		 WHERE id = $1 AND deleted_at IS NULL AND writer_holder IS NULL`, id, slug)
+		 WHERE id = $1 AND deleted_at IS NULL
+		   AND (writer_holder IS NULL OR writer_expires_at <= $3)`, id, slug, now)
 	return changed(fmt.Sprintf("rename the workspace %q", id), tag, err)
 }
 
 // SoftDelete stamps deleted_at on a live workspace whose lease is free. A
 // delete while the lease is held is refused: the writer's view of its own
-// paths would change underneath it.
-func (workspaces) SoftDelete(ctx context.Context, q Querier, id string) (bool, error) {
+// paths would change underneath it. A lapsed lease is not held, which is the
+// clause TakeLease reads too, so one rule decides both.
+func (workspaces) SoftDelete(ctx context.Context, q Querier, id string, now time.Time) (bool, error) {
 	tag, err := q.Exec(ctx, `
 		UPDATE workspaces SET deleted_at = now(), updated_at = now()
-		 WHERE id = $1 AND deleted_at IS NULL AND writer_holder IS NULL`, id)
+		 WHERE id = $1 AND deleted_at IS NULL
+		   AND (writer_holder IS NULL OR writer_expires_at <= $2)`, id, now)
 	return changed(fmt.Sprintf("delete the workspace %q", id), tag, err)
 }
 
@@ -429,6 +436,14 @@ func (attachments) Get(ctx context.Context, q Querier, workspaceID, id string) (
 		return Attachment{}, fmt.Errorf("store: read the attachment %q: %w", id, noSuchID(err))
 	}
 	return a, nil
+}
+
+// SetExpiry stamps a new deadline on an active attachment.
+func (attachments) SetExpiry(ctx context.Context, q Querier, id string, until time.Time) (bool, error) {
+	tag, err := q.Exec(ctx, `
+		UPDATE workspace_attachments SET expires_at = $2
+		 WHERE id = $1 AND status = 'active'`, id, until)
+	return changed(fmt.Sprintf("renew the attachment %q", id), tag, err)
 }
 
 // Release marks an active attachment released.

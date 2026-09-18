@@ -243,11 +243,11 @@ func TestARenameAndADeleteAreRefusedWhileTheLeaseIsHeld(t *testing.T) {
 		want string
 	}{
 		{"rename", func(q Querier) (bool, error) {
-			return NewWorkspaces().Rename(t.Context(), q, want.ID, "release")
-		}, "writer_holder IS NULL"},
+			return NewWorkspaces().Rename(t.Context(), q, want.ID, "release", time.Now())
+		}, "writer_holder IS NULL OR writer_expires_at <="},
 		{"delete", func(q Querier) (bool, error) {
-			return NewWorkspaces().SoftDelete(t.Context(), q, want.ID)
-		}, "writer_holder IS NULL"},
+			return NewWorkspaces().SoftDelete(t.Context(), q, want.ID, time.Now())
+		}, "writer_holder IS NULL OR writer_expires_at <="},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			done := &fakeQuerier{tag: pgconn.NewCommandTag("UPDATE 1")}

@@ -58,6 +58,11 @@ type Options struct {
 	PublicURL                        string
 	RequestsPerMinute                int
 	UnauthenticatedRequestsPerMinute int
+	// Routes are the rows of spec 013's table the packages that own their
+	// behaviour contribute. See register.go: a contributed row is behind
+	// the verifier, asks one action of spec 006's vocabulary, and joins the
+	// one list the mux and the document are both built from.
+	Routes []Route
 	// Now is the clock request ids are minted on. time.Now when nil.
 	Now func() time.Time
 }
@@ -71,6 +76,7 @@ type API struct {
 	perSubject *ratelimit.Buckets
 	perAddress *ratelimit.Buckets
 	clock      func() time.Time
+	rows       []route
 	document   []byte
 }
 
@@ -84,13 +90,18 @@ func New(o Options) (*API, error) {
 	if o.Authorizer == nil {
 		return nil, errors.New("api: no authorizer, and every route asks before it acts")
 	}
+	rows, err := merge(routeTable, o.Routes)
+	if err != nil {
+		return nil, err
+	}
 	a := &API{
 		verifier: o.Verifier, authorizer: o.Authorizer,
 		publicURL: o.PublicURL, clock: o.Now,
 		perSubject: buckets(o.RequestsPerMinute),
 		perAddress: buckets(o.UnauthenticatedRequestsPerMinute),
+		rows:       rows,
 	}
-	a.document = a.build(routeTable)
+	a.document = a.build(rows)
 	return a, nil
 }
 
@@ -109,7 +120,7 @@ func (a *API) Authorizer() *auth.Authorizer { return a.authorizer }
 // which is the right order: whether a route exists is not something an
 // unauthenticated caller learns.
 func (a *API) Mount(mux *http.ServeMux) {
-	a.mount(mux, routeTable)
+	a.mount(mux, a.rows)
 }
 
 func (a *API) mount(mux *http.ServeMux, rows []route) {

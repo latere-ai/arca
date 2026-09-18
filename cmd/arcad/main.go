@@ -30,6 +30,7 @@ import (
 	"latere.ai/x/arca/internal/config"
 	"latere.ai/x/arca/internal/store"
 	"latere.ai/x/arca/internal/version"
+	"latere.ai/x/arca/internal/workspaces"
 )
 
 // Shutdown timing of spec 002: readiness answers 503 at once, the drain
@@ -172,11 +173,24 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	if err != nil {
 		return fail(stderr, err)
 	}
+	// The workspaces of spec 009. The file plane of spec 005 and the ledger
+	// of spec 010 are seams: the queries below are the file-plane half a
+	// workspace reads as a subtree, and a nil ledger writes nothing until
+	// that spec lands its log.
+	durable, err := workspaces.New(workspaces.Options{
+		DB: db, Workspaces: store.NewWorkspaces(), Attachments: store.NewAttachments(),
+		Objects: store.NewWorkspaceObjects(), Bucket: bucket, Prefix: cfg.BucketPrefix,
+		Authorizer: identity.Authorizer,
+	})
+	if err != nil {
+		return fail(stderr, err)
+	}
 	surface, err := api.New(api.Options{
 		Verifier: identity.Verifier, Authorizer: identity.Authorizer,
 		PublicURL:                        cfg.PublicURL,
 		RequestsPerMinute:                cfg.RequestsPerMinute,
 		UnauthenticatedRequestsPerMinute: cfg.UnauthenticatedRequestsPerMinute,
+		Routes:                           workspaces.Routes(durable),
 	})
 	if err != nil {
 		return fail(stderr, err)
