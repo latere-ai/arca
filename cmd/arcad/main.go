@@ -33,6 +33,7 @@ import (
 	"latere.ai/x/arca/internal/config"
 	"latere.ai/x/arca/internal/events"
 	"latere.ai/x/arca/internal/files"
+	"latere.ai/x/arca/internal/metrics"
 	"latere.ai/x/arca/internal/reaper"
 	"latere.ai/x/arca/internal/shares"
 	"latere.ai/x/arca/internal/store"
@@ -93,6 +94,13 @@ func reap(ctx context.Context, args []string, getenv config.Getenv, stdout, stde
 	if err != nil {
 		return fail(stderr, err)
 	}
+	// Spec 018's exporter. This process opens no listener, so what it
+	// publishes leaves over OTLP: the run's spans and its lines, each
+	// carrying the trace id. Its counters are on the registry below and are
+	// scraped from a replica that serves, which is what the Current state of
+	// that spec records.
+	recorder, flush := observe(ctx, cfg, stderr)
+	defer func() { _ = flush(context.WithoutCancel(ctx)) }()
 	// Zero is the value that turns the in-process loop of serve off. A
 	// process whose whole job is that loop cannot take it, and exiting 0
 	// having done nothing is how a CronJob looks healthy while nothing is
@@ -101,10 +109,11 @@ func reap(ctx context.Context, args []string, getenv config.Getenv, stdout, stde
 		return fail(stderr, errors.New("ARCA_REAP_INTERVAL is 0, which turns the loop off; run arcad reap -once, or set an interval"))
 	}
 
-	bucket, err := blob.NewS3(ctx, bucketOptions(cfg))
+	s3, err := blob.NewS3(ctx, bucketOptions(cfg))
 	if err != nil {
 		return fail(stderr, err)
 	}
+	bucket := recorder.Bucket(s3)
 	db, err := store.Open(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return fail(stderr, err)
@@ -124,7 +133,7 @@ func reap(ctx context.Context, args []string, getenv config.Getenv, stdout, stde
 	// nothing of the authorizer, so they run wherever the two stores are
 	// reachable.
 	log := events.NewLog()
-	tombstones, err := tombstonePass(cfg, db, bucket, log)
+	tombstones, err := tombstonePass(cfg, db, bucket, log, recorder)
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -133,7 +142,7 @@ func reap(ctx context.Context, args []string, getenv config.Getenv, stdout, stde
 		return fail(stderr, err)
 	}
 	reconciler, err := reaper.New(reaperOptions(cfg, db, bucket, *dryRun, nil,
-		uploadPass(cfg, db, bucket, log), tombstones, grants))
+		uploadPass(cfg, db, bucket, log), tombstones, grants, recorder))
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -168,7 +177,7 @@ func report(stdout io.Writer, findings reaper.Findings, dryRun bool) {
 // reaperOptions is what both roles build the reconciler from. serve and reap
 // read the same configuration and reconcile the same way; what differs is
 // where the loop lives.
-func reaperOptions(cfg config.Config, db *store.DB, bucket blob.Store, dryRun bool, leases, sessions, tombstones, grants reaper.Pass) reaper.Options {
+func reaperOptions(cfg config.Config, db *store.DB, bucket blob.Store, dryRun bool, leases, sessions, tombstones, grants reaper.Pass, recorder reaper.Metrics) reaper.Options {
 	return reaper.Options{
 		DB:             db,
 		Bucket:         bucket,
@@ -179,6 +188,7 @@ func reaperOptions(cfg config.Config, db *store.DB, bucket blob.Store, dryRun bo
 		Sessions:       sessions,
 		Tombstones:     tombstones,
 		Grants:         grants,
+		Metrics:        recorder,
 	}
 }
 
@@ -199,11 +209,11 @@ func uploadPass(cfg config.Config, db *store.DB, bucket blob.Store, log events.L
 // Like the expiry sweep above it asks nothing of the authorizer, so it runs
 // wherever the two stores are reachable and not only on a replica that
 // started a verifier.
-func tombstonePass(cfg config.Config, db *store.DB, bucket blob.Store, log events.Log) (reaper.Pass, error) {
+func tombstonePass(cfg config.Config, db *store.DB, bucket blob.Store, log events.Log, recorder *metrics.Set) (reaper.Pass, error) {
 	return workspaces.NewTombstones(workspaces.TombstoneOptions{
 		DB: db, Workspaces: store.NewWorkspaces(), Objects: store.NewWorkspaceObjects(),
 		Bucket: bucket, Prefix: cfg.BucketPrefix, Retention: cfg.TrashRetention,
-		Ledger: ledger{log: log, usage: events.NewLedger()},
+		Ledger: ledger{log: log, usage: events.NewLedger(), metrics: recorder},
 	})
 }
 
@@ -227,6 +237,10 @@ func grantPass(cfg config.Config, grants store.Shares) (reaper.Pass, error) {
 type ledger struct {
 	log   events.Log
 	usage events.Ledger
+	// metrics is spec 018's counter of the rows the log took, which is here
+	// rather than in internal/events because this is the one place a
+	// workspace's mutation becomes a row of that log.
+	metrics *metrics.Set
 }
 
 // Append writes one row of the log. The action is one word of spec 010's
@@ -241,6 +255,9 @@ func (l ledger) Append(ctx context.Context, q store.Querier, e workspaces.Event)
 		Owner: e.Owner, Path: e.Path, Action: events.Action(e.Action),
 		Actor: e.Actor, Detail: e.Detail,
 	})
+	if err == nil {
+		l.metrics.EventAppended(e.Action)
+	}
 	return err
 }
 
@@ -324,7 +341,14 @@ func (l shareLedger) Append(ctx context.Context, q store.Querier, e shares.Event
 // reconciler hands every pass a querier and a dry flag; this sweep opens its
 // own transactions, one per row it ends, because a reap is a row, a lease and
 // a log entry written together.
-type leasePass struct{ service *workspaces.Service }
+type leasePass struct {
+	service *workspaces.Service
+	// metrics is spec 018's arca_lease_expiries_total. The reconciler counts
+	// the same sweep as a finding of kind lease_expired; this is the rate a
+	// platform alerts on, and it is recorded here because the sweep's own
+	// package knows nothing of a registry.
+	metrics *metrics.Set
+}
 
 // Sweep ends what outlived its deadline, and runs nothing at all on a dry
 // run. The sweep has no counting half: every statement it issues is a write,
@@ -335,7 +359,9 @@ func (p leasePass) Sweep(ctx context.Context, _ store.Querier, now time.Time, dr
 	if dry {
 		return 0, nil
 	}
-	return p.service.ExpireLeases(ctx, now)
+	ended, err := p.service.ExpireLeases(ctx, now)
+	p.metrics.LeaseExpired(ended)
+	return ended, err
 }
 
 // restorer binds the restore across owners of spec 012 to the two packages
@@ -466,14 +492,25 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		return fail(stderr, err)
 	}
 
+	// Spec 018, before anything else is built: the logger every line goes
+	// through, the tracer the spans go to, and the one registry the internal
+	// listener serves. Nothing leaves the process without
+	// ARCA_OTEL_EXPORTER_OTLP_ENDPOINT, and /metrics serves either way.
+	recorder, flush := observe(ctx, cfg, stderr)
+	defer func() { _ = flush(context.WithoutCancel(ctx)) }()
+
 	// The bucket client opens no connection here: it is built from the
 	// configuration, and the readiness check below is what reaches the
 	// store. A store that is briefly unreachable at start-up therefore
 	// delays readiness rather than crashing the process.
-	bucket, err := blob.NewS3(ctx, bucketOptions(cfg))
+	s3, err := blob.NewS3(ctx, bucketOptions(cfg))
 	if err != nil {
 		return fail(stderr, err)
 	}
+	// Spec 018's decorator: every call this replica makes against the bucket
+	// is counted by operation and result, timed, and opened as a span named
+	// bucket.<op>. internal/blob is left holding the S3 contract alone.
+	bucket := recorder.Bucket(s3)
 
 	db, err := store.Open(ctx, cfg.DatabaseURL)
 	if err != nil {
@@ -506,6 +543,10 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		AdminSubjects: cfg.AdminSubjects,
 		Grants:        shares.Grants(db, grants),
 		Links:         shares.Links(db, grants),
+		// Spec 018's identity row: the duration of a call to the operator's
+		// endpoint, and the outcome of every decision this node acted on,
+		// whichever of the two answered.
+		Observe: recorder.AuthorizerCall, Decided: recorder.Decided,
 	})
 	if err != nil {
 		return fail(stderr, err)
@@ -555,7 +596,10 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		DB: db, Workspaces: store.NewWorkspaces(), Attachments: store.NewAttachments(),
 		Objects: store.NewWorkspaceObjects(), Bucket: bucket, Prefix: cfg.BucketPrefix,
 		Authorizer: identity.Authorizer,
-		Ledger:     ledger{log: log, usage: events.NewLedger()},
+		Ledger:     ledger{log: log, usage: events.NewLedger(), metrics: recorder},
+		// Spec 018's seam for the bytes a materialize hands out and a sync
+		// declares, which is the workspace plane's half of arca_bytes_*.
+		Metrics: recorder,
 	})
 	if err != nil {
 		return fail(stderr, err)
@@ -596,6 +640,9 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 			uploads.Bind(session),
 			admin.Routes(administration),
 		),
+		// Spec 018's request path: the counters and the one line per request.
+		// The logger is slog's default, which the bootstrap above set.
+		Metrics: recorder,
 	})
 	if err != nil {
 		return fail(stderr, err)
@@ -607,7 +654,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	// ARCA_REAP_INTERVAL to 0 here and runs arcad reap as a process of its
 	// own. It starts before the listeners, so a reconciler that cannot be
 	// built fails the start-up before a port is bound.
-	tombstones, err := tombstonePass(cfg, db, bucket, log)
+	tombstones, err := tombstonePass(cfg, db, bucket, log, recorder)
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -615,7 +662,8 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	if err != nil {
 		return fail(stderr, err)
 	}
-	if err := startReaper(ctx, cfg, db, bucket, leasePass{durable}, session, tombstones, expiredGrants, stdout); err != nil {
+	if err := startReaper(ctx, cfg, db, bucket, leasePass{service: durable, metrics: recorder},
+		session, tombstones, expiredGrants, recorder, stdout); err != nil {
 		return fail(stderr, err)
 	}
 
@@ -627,6 +675,14 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		Commit:    version.Commit,
 		BuildTime: version.Date,
 	})
+
+	// The internal listener of spec 002: the four probes, and GET /metrics
+	// beside them. The router prefers the more specific pattern, so the
+	// probes keep answering under the catch-all while the scrape endpoint
+	// answers its own path. It is on this listener and on no other.
+	internal := http.NewServeMux()
+	internal.Handle("/", probes)
+	internal.Handle("GET /metrics", recorder.Handler())
 
 	public := http.NewServeMux()
 	for _, p := range []string{"/livez", "/readyz", "/version"} {
@@ -655,7 +711,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 
 	servers := []*http.Server{
 		{Handler: public, ReadHeaderTimeout: 10 * time.Second},
-		{Handler: probes, ReadHeaderTimeout: 10 * time.Second},
+		{Handler: internal, ReadHeaderTimeout: 10 * time.Second},
 	}
 	errc := make(chan error, len(servers))
 	for i, ln := range []net.Listener{publicLn, internalLn} {
@@ -687,12 +743,12 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 // startReaper starts the in-process reconciliation loop, or says on the
 // start-up line that this replica runs none. Which it is, is a fact an
 // operator reads once rather than infers from a missing metric.
-func startReaper(ctx context.Context, cfg config.Config, db *store.DB, bucket blob.Store, leases, sessions, tombstones, grants reaper.Pass, stdout io.Writer) error {
+func startReaper(ctx context.Context, cfg config.Config, db *store.DB, bucket blob.Store, leases, sessions, tombstones, grants reaper.Pass, recorder reaper.Metrics, stdout io.Writer) error {
 	if cfg.ReapInterval <= 0 {
 		_, _ = fmt.Fprintln(stdout, "arcad: the reconciler is off on this replica; ARCA_REAP_INTERVAL is 0")
 		return nil
 	}
-	reconciler, err := reaper.New(reaperOptions(cfg, db, bucket, false, leases, sessions, tombstones, grants))
+	reconciler, err := reaper.New(reaperOptions(cfg, db, bucket, false, leases, sessions, tombstones, grants, recorder))
 	if err != nil {
 		return err
 	}

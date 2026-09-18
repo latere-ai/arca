@@ -51,6 +51,12 @@ type Options struct {
 	// Observe receives every authorizer call's result and duration, for the
 	// metric of spec 018. Optional.
 	Observe func(result string, seconds float64)
+	// Decided receives every decision this node acted on: which of the two
+	// answered, and what it answered. It is the other half of spec 018's
+	// identity row, and it is here rather than beside Observe because the
+	// owner policy decides in process and makes no call to observe.
+	// Optional.
+	Decided func(source, outcome string)
 }
 
 // Identity is what the node holds once spec 006 is wired: who a caller is,
@@ -85,6 +91,7 @@ func Start(ctx context.Context, o Options) (*Identity, error) {
 		// authorizer set it is read and unused, because an administrator is
 		// then whoever that endpoint says.
 		id.Authorizer = NewAuthorizer(&OwnerPolicy{Admins: o.AdminSubjects, Grants: o.Grants, Links: o.Links})
+		id.Authorizer.decided = source(o.Decided, "owner_policy")
 		return id, nil
 	}
 	if o.AuthorizerToken == "" {
@@ -97,6 +104,17 @@ func Start(ctx context.Context, o Options) (*Identity, error) {
 		return nil, err
 	}
 	id.Authorizer = NewAuthorizer(asking)
+	id.Authorizer.decided = source(o.Decided, "authorizer")
 	id.Mode = ModeAuthorizer
 	return id, nil
+}
+
+// source fixes the label of whichever of the two this deployment runs, so a
+// decision records which answered without carrying the mode through every
+// call.
+func source(decided func(source, outcome string), name string) func(string) {
+	if decided == nil {
+		return nil
+	}
+	return func(outcome string) { decided(name, outcome) }
 }

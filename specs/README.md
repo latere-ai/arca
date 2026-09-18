@@ -64,7 +64,7 @@ validated spec is dispatched when every spec in its `depends_on` is at
 | [015](015-security-and-threat-model.md) | Security and threat model | drafted |
 | [016](016-release-and-installation.md) | Release and installation: images, binaries, deploy manifests, the operator's overlay | testing |
 | [017](017-conformance-suite.md) | Conformance suite: the contract as an importable test package | drafted |
-| [018](018-observability.md) | Observability: traces, metrics, logs, the alert rules | drafted |
+| [018](018-observability.md) | Observability: traces, metrics, logs, the alert rules | testing |
 | [019](019-migration-from-drive.md) | Migration from Drive: the order the code moves, the data, the consumers, the sunset, the archive | drafted |
 
 The order of building is the order of the numbers except where a spec's

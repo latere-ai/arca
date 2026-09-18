@@ -69,10 +69,35 @@ type Decision struct {
 // arcad cannot tell which.
 type Authorizer struct {
 	inner authz.Authorizer
+	// decided is spec 018's seam: every answer this node acted on, by
+	// outcome. The source is fixed when the node is built, because which of
+	// the two decides is a property of the deployment and not of a request.
+	// Nil records nothing.
+	decided func(outcome string)
 }
 
 // NewAuthorizer wraps whichever authorizer this deployment runs.
 func NewAuthorizer(inner authz.Authorizer) *Authorizer { return &Authorizer{inner: inner} }
+
+// The three outcomes of spec 018's arca_decisions_total. They are counted
+// per decision and not per call: a decision the client answered from its
+// cache is a decision this node acted on, and an endpoint that was asked is
+// what arca_authorizer_seconds times.
+const (
+	// OutcomeAllow is an answer the handler acted on.
+	OutcomeAllow = "allow"
+	// OutcomeDeny is an answer that refused.
+	OutcomeDeny = "deny"
+	// OutcomeUnavailable is no answer at all, which is never an allow.
+	OutcomeUnavailable = "unavailable"
+)
+
+// record reports one decision, when the node bound the seam.
+func (a *Authorizer) record(outcome string) {
+	if a.decided != nil {
+		a.decided(outcome)
+	}
+}
 
 // Envelope is what one call carries: the caller's subject and its claims
 // verbatim, the action, the resource, and what is known about the request
@@ -116,13 +141,17 @@ func (a *Authorizer) decide(ctx context.Context, action string, res authz.Resour
 		if _, ok := errors.AsType[*authz.UnknownAction](err); ok {
 			// An action outside the vocabulary is a bug in the handler that
 			// asked, not an outage, and the client caught it before the wire.
+			// Nothing decided it, so nothing is recorded.
 			return Decision{}, err
 		}
+		a.record(OutcomeUnavailable)
 		return Decision{}, refuse(CodeAuthorizerUnavailable, "%s: %v", action, err)
 	}
 	if !d.Allow {
+		a.record(OutcomeDeny)
 		return Decision{}, refuse(deny, "%s: %s", action, reasonOf(d))
 	}
+	a.record(OutcomeAllow)
 	return Decision{TTL: d.TTL, Limits: d.Limits, Filter: d.Filter}, nil
 }
 

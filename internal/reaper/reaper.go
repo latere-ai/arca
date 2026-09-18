@@ -85,15 +85,17 @@ const (
 	// ledger that keeps needing one has a write path that forgot its delta.
 	KindUsageCorrected Kind = "usage_corrected"
 	// KindLeaseExpired is an attachment past its expiry, whose writer lease
-	// the pass cleared (pass 3). It is the one member spec 018's table does
-	// not list: that table has a counter of its own for the expiry,
-	// arca_lease_expiries_total, and a pass whose findings no run reports is
-	// a pass an operator cannot see run at all.
+	// the pass cleared (pass 3). Spec 018's table absorbed it as the
+	// thirteenth member when that spec was built, and it stands beside that
+	// table's own counter of the expiry rather than duplicating it:
+	// arca_lease_expiries_total is the rate a platform alerts on, and this
+	// is the row of a run's table that says the pass ran. A pass whose
+	// findings no run reports is a pass an operator cannot see run at all.
 	KindLeaseExpired Kind = "lease_expired"
 )
 
-// kinds is the vocabulary in the order spec 018 lists it, with the
-// thirteenth member above at the end.
+// kinds is the vocabulary in the order spec 018 lists it, the thirteenth
+// member above at the end.
 var kinds = []Kind{
 	KindOrphanObject, KindOrphanCandidate, KindMissingBytes, KindWorkspacePurged,
 	KindFilePurged, KindTrashPurged, KindShareExpired, KindEventPruned,

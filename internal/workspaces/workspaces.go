@@ -181,9 +181,36 @@ type Options struct {
 	Authorizer *auth.Authorizer
 	// Ledger is the log and the usage counter. Nil writes nothing.
 	Ledger Ledger
+	// Metrics is spec 018's seam for the bytes this plane moves. Nil
+	// records nothing.
+	Metrics Metrics
 	// Now is the clock the lease is measured on. time.Now when nil.
 	Now func() time.Time
 }
+
+// Metrics is where the bytes of this plane go. Spec 018 owns the registry
+// and the names; this is the seam it binds, so this package registers
+// nothing.
+//
+// Neither number is a transfer this process saw. A materialize hands out
+// presigned URLs and a sync declares what the client already sent to the
+// bucket, so both are what a manifest says, which is invariant 4 of spec
+// 001: the bytes go between the client and the bucket and never through
+// arcad.
+type Metrics interface {
+	// In records bytes accepted into a space, by spec 018's vocabulary.
+	In(kind string, n int64)
+	// Out records bytes served out of a space.
+	Out(kind string, n int64)
+}
+
+// uncounted is the seam of a node that bound none, so every call site is one
+// line rather than a branch.
+type uncounted struct{}
+
+func (uncounted) In(string, int64) {}
+
+func (uncounted) Out(string, int64) {}
 
 // Service answers the workspace routes. It is built once at start and serves
 // every replica's requests; it holds no state of its own.
@@ -196,6 +223,7 @@ type Service struct {
 	prefix      string
 	authorizer  *auth.Authorizer
 	ledger      Ledger
+	metrics     Metrics
 	clock       func() time.Time
 }
 
@@ -222,10 +250,13 @@ func New(o Options) (*Service, error) {
 	s := &Service{
 		db: o.DB, workspaces: o.Workspaces, attachments: o.Attachments,
 		objects: o.Objects, bucket: o.Bucket, prefix: o.Prefix,
-		authorizer: o.Authorizer, ledger: o.Ledger, clock: o.Now,
+		authorizer: o.Authorizer, ledger: o.Ledger, metrics: o.Metrics, clock: o.Now,
 	}
 	if s.ledger == nil {
 		s.ledger = silent{}
+	}
+	if s.metrics == nil {
+		s.metrics = uncounted{}
 	}
 	return s, nil
 }

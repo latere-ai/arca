@@ -34,6 +34,7 @@ import (
 	"latere.ai/x/arca/internal/config"
 	"latere.ai/x/arca/internal/events"
 	"latere.ai/x/arca/internal/files"
+	"latere.ai/x/arca/internal/metrics"
 	"latere.ai/x/arca/internal/reaper"
 	"latere.ai/x/arca/internal/shares"
 	"latere.ai/x/arca/internal/store"
@@ -293,8 +294,10 @@ func TestServeAnswersTheProbesOnBothListenersAndStopsCleanly(t *testing.T) {
 	if code, body := get(t, publicURL+"/"); code != 200 || !strings.HasPrefix(body, "arcad dev (") {
 		t.Errorf("GET / = %d %q", code, body)
 	}
+	// The scrape endpoint of spec 018 is on the internal listener and on no
+	// other; TestMetricsListenerOnly reads it there.
 	if code, _ := get(t, publicURL+"/metrics"); code != 404 {
-		t.Errorf("GET /metrics on the public listener = %d, want 404 until a later spec mounts it", code)
+		t.Errorf("GET /metrics on the public listener = %d, and it is the internal listener's alone", code)
 	}
 
 	if code := stop(); code != 0 {
@@ -694,8 +697,11 @@ func TestReapIsASubcommandWithTwoFlags(t *testing.T) {
 	// A sequence that could not reach a store is a failure and not a quiet
 	// success. A sequence that reaches both is the e2e tier's.
 	errOut.Reset()
+	// The structured lines of spec 018 share this writer with the one
+	// sentence a failure ends on, so the sentence is looked for rather than
+	// expected first.
 	code = run(t.Context(), []string{"reap", "-once"}, stores(t, nil), io.Discard, &errOut)
-	if code != 1 || !strings.HasPrefix(errOut.String(), "arcad: ") {
+	if code != 1 || !strings.Contains(errOut.String(), "\narcad: ") {
 		t.Fatalf("exit %d, stderr %q", code, errOut.String())
 	}
 	// And a configuration it cannot read is exit 1 with one line.
@@ -726,7 +732,7 @@ func TestReapAsALoopRunsUntilItIsStopped(t *testing.T) {
 
 func TestTheReconcilerIsNotStartedOnAConfigurationItCannotRun(t *testing.T) {
 	var out bytes.Buffer
-	if err := startReaper(t.Context(), config.Config{ReapInterval: time.Minute}, nil, nil, nil, nil, nil, nil, &out); err == nil {
+	if err := startReaper(t.Context(), config.Config{ReapInterval: time.Minute}, nil, nil, nil, nil, nil, nil, nil, &out); err == nil {
 		t.Fatal("a reconciler with no stores was started anyway")
 	}
 }
@@ -854,7 +860,8 @@ func TestEveryActionAWorkspaceAppendsIsOneOfSpec010sVocabulary(t *testing.T) {
 // bytes a sync dropped reach the space's counter.
 func TestTheWorkspaceLedgerWritesThroughTheLogAndTheCounter(t *testing.T) {
 	log, usage := &recordingLog{}, &recordingLedger{}
-	bound := ledger{log: log, usage: usage}
+	recorder := metrics.Register(nil)
+	bound := ledger{log: log, usage: usage, metrics: recorder}
 
 	event := workspaces.Event{
 		Owner: "https://issuer.example|9ab3", Path: "workspaces/build/",
@@ -879,14 +886,22 @@ func TestTheWorkspaceLedgerWritesThroughTheLogAndTheCounter(t *testing.T) {
 	if usage.released[event.Owner] != 4096 {
 		t.Errorf("the counter gave back %d bytes", usage.released[event.Owner])
 	}
+	// The row is counted by its action, which is spec 018's arca_events_
+	// appended_total. A row the log refused is not counted below.
+	if got := recorder.EventsAppended.Value(map[string]string{"kind": "sync"}); got != 1 {
+		t.Errorf("the appended row was counted %d times", got)
+	}
 
 	// A failure on either half is the caller's: both run inside the
 	// transaction of the mutation they record, and a number that cannot be
 	// written is a number that stops being current.
 	failure := errors.New("the store said no")
-	broken := ledger{log: &recordingLog{err: failure}, usage: &recordingLedger{err: failure}}
+	broken := ledger{log: &recordingLog{err: failure}, usage: &recordingLedger{err: failure}, metrics: recorder}
 	if err := broken.Append(t.Context(), nil, event); !errors.Is(err, failure) {
 		t.Errorf("a failed append = %v", err)
+	}
+	if got := recorder.EventsAppended.Value(map[string]string{"kind": "sync"}); got != 1 {
+		t.Errorf("a row the log refused was counted; the counter reads %d", got)
 	}
 	if err := broken.Release(t.Context(), nil, event.Owner, 1); !errors.Is(err, failure) {
 		t.Errorf("a failed release = %v", err)
@@ -1085,8 +1100,19 @@ func TestTheLeaseSweepRunsOnALiveRunAndNeverOnADryOne(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the service would not build: %v", err)
 	}
-	if _, err := (leasePass{service: service}).Sweep(t.Context(), nil, time.Now(), false); !errors.Is(err, failure) {
+	recorder := metrics.Register(nil)
+	if _, err := (leasePass{service: service, metrics: recorder}).Sweep(t.Context(), nil, time.Now(), false); !errors.Is(err, failure) {
 		t.Errorf("a live sweep = %v", err)
+	}
+	// A sweep that ended nothing counts nothing: spec 018's
+	// arca_lease_expiries_total is the rate leases are ending at, and a
+	// failed sweep ended none.
+	if got := recorder.LeaseExpiries.Value(nil); got != 0 {
+		t.Errorf("a failed sweep counted %d expiries", got)
+	}
+	recorder.LeaseExpired(2)
+	if got := recorder.LeaseExpiries.Value(nil); got != 2 {
+		t.Errorf("two ended leases read %d", got)
 	}
 }
 

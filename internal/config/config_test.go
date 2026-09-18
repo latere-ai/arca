@@ -85,6 +85,7 @@ func TestLoadReadsEveryVariable(t *testing.T) {
 		"ARCA_INLINE_BYTES":                        "8388608",
 		"ARCA_REAP_INTERVAL":                       "90s",
 		"ARCA_TRASH_RETENTION":                     "168h",
+		"ARCA_OTEL_EXPORTER_OTLP_ENDPOINT":         "https://collector.example:4318",
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -110,6 +111,7 @@ func TestLoadReadsEveryVariable(t *testing.T) {
 		RequestsPerMinute: 1200, UnauthenticatedRequestsPerMinute: 0,
 		MaxUploadBytes: 1 << 30, InlineBytes: 8 << 20,
 		ReapInterval: 90 * time.Second, TrashRetention: 168 * time.Hour,
+		OTelEndpoint: "https://collector.example:4318",
 	}
 	if !reflect.DeepEqual(c, want) {
 		t.Fatalf("Load() = %+v, want %+v", c, want)
@@ -206,6 +208,10 @@ func TestTheBucketVariablesAreCheckedForShape(t *testing.T) {
 		"ARCA_BUCKET_ENDPOINT":   {"store.example", "ftp://store.example", "https://"},
 		"ARCA_PUBLIC_CDN_URL":    {"cdn.example", "//cdn.example"},
 		"ARCA_BUCKET_PATH_STYLE": {"yes please", "1.5"},
+		// The exporter's endpoint is spec 018's and is checked in the same
+		// round as the rest: a collector nobody can reach is a deployment
+		// fixed at start-up rather than telemetry that quietly goes nowhere.
+		"ARCA_OTEL_EXPORTER_OTLP_ENDPOINT": {"collector.example", "grpc://collector.example", "https://"},
 	} {
 		for _, raw := range cases {
 			_, err := Load(required(map[string]string{name: raw}))

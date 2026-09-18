@@ -3,7 +3,7 @@
 
 GO ?= go
 
-.PHONY: build build-stubs check check-all clean down fmt hooks openapi run run-down test-e2e test-store up
+.PHONY: build build-stubs check check-all clean down fmt hooks openapi rules run run-down test-e2e test-store up
 
 # The whole bar. Every gate lives in latere.ai/x/ci-gate, pinned as a tool
 # in go.mod and configured in .lateregate.yaml, so this target is a name for
@@ -208,6 +208,13 @@ run-down:
 # reach main.
 openapi:
 	@$(GO) run ./tools/apidoc
+
+# Regenerate deploy/base/prometheusrule.yaml from the alert table of
+# tools/rules (spec 018). A test fails when the file is not what a fresh run
+# produces, so an alert added to the table without running this does not
+# reach main.
+rules:
+	@$(GO) run ./tools/rules -write
 
 fmt:
 	gofmt -w $$(git ls-files '*.go')
