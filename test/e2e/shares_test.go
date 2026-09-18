@@ -211,6 +211,38 @@ func TestE2EAGrantIsCreatedReadAndRevoked(t *testing.T) {
 	if len(owned.Entries) != 1 {
 		t.Errorf("after the revoke the space holds %d grants", len(owned.Entries))
 	}
+
+	// Criterion 10 through the binary: every mutation above appended a row
+	// of spec 010's log inside its own transaction, and the tail of that
+	// spec reads them back. This is the one place the whole chain runs — the
+	// handler, the adapter the node binds, the log, and the real table — so a
+	// ledger that was left defaulted is caught here and nowhere else.
+	code, body, _ = i.sharesCall(t, http.MethodGet, "/v1/events", alice, nil)
+	if code != http.StatusOK {
+		t.Fatalf("GET /v1/events = %d: %s", code, body)
+	}
+	var log struct {
+		Entries []struct {
+			Action string `json:"action"`
+			Owner  string `json:"owner"`
+			Path   string `json:"path"`
+			Actor  string `json:"actor"`
+		} `json:"entries"`
+	}
+	sharesDecodeJSON(t, body, &log)
+	appended := map[string]int{}
+	for _, e := range log.Entries {
+		appended[e.Action]++
+		if e.Owner != i.sharesSubject(alice) || e.Actor != i.sharesSubject(alice) {
+			t.Errorf("a row of the log is %+v, and the space and the actor are alice's", e)
+		}
+		if e.Path != "files/reports" {
+			t.Errorf("a row of the log covers %q, and the grants covered files/reports", e.Path)
+		}
+	}
+	if appended["share_created"] != 2 || appended["share_revoked"] != 1 {
+		t.Errorf("the log holds %v; two grants were made and one was revoked", appended)
+	}
 }
 
 // TestE2EALinkThatWouldWriteIsRefused is criterion 4 against the binary, and
