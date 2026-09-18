@@ -3,7 +3,7 @@
 
 GO ?= go
 
-.PHONY: build check clean fmt hooks run
+.PHONY: build check clean fmt hooks openapi run
 
 # The whole bar. Every gate lives in latere.ai/x/ci-gate, pinned as a tool
 # in go.mod and configured in .lateregate.yaml, so this target is a name for
@@ -42,6 +42,13 @@ build:
 run: build
 	ARCA_PUBLIC_ADDR=127.0.0.1:8080 ARCA_INTERNAL_ADDR=127.0.0.1:8081 \
 		$(OUT_DIR)/$(SERVICE)
+
+# The committed OpenAPI description, written from the route table and the
+# error table of internal/api (spec 013). A test fails when the file is not
+# what a fresh run produces, so a route added without running this does not
+# reach main.
+openapi:
+	@$(GO) run ./tools/apidoc
 
 fmt:
 	gofmt -w $$(git ls-files '*.go')
