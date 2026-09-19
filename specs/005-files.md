@@ -1,6 +1,6 @@
 ---
 title: "Files: put, get, list, move, delete; versions, trash, stars"
-status: testing
+status: complete
 track: core
 depends_on:
   - specs/001-architecture.md
@@ -65,16 +65,16 @@ This spec writes no migration. `0001_files.up.sql` already creates
 `subjects`, `files`, `file_versions` and `stars`, which is every table this
 spec owns, and [[004-metadata-store]]'s ownership table says so.
 
-Criteria 1, 2, 3, 5, 6, 7, 8's bucket half, 9, 10, 11, 12, 13 and 14 have
-passing tests. Criterion 4 is proved at the store tier for the two answers
+Every criterion has a passing test; the Outcome below names each one and the
+tier it runs at. Criterion 4 is proved at the store tier for the two answers
 and for the loser's bytes. Criterion 15 is proved at the unit tier against a
 recording seam, one case per handler, and the surface those handlers serve
 is driven whole by the conformance rows of [[017-conformance-suite]], which
 run green against this build on 2026-09-19: the files, bytes, versions,
-trash, stars and conditional-write groups, nine cases. The one half still open
-is criterion 8's share: the grants table arrives with
-[[008-shares-and-links]], so a move carries versions and stars today and
-gains its fourth statement there.
+trash, stars and conditional-write groups, nine cases. Criterion 8's share
+half was the last one open. The grants table arrived with
+[[008-shares-and-links]], `store.Shares.Move` is the fourth statement of the
+move's transaction, and both tiers hold it.
 
 What the implementation decided, where this spec was silent or where the
 tree made another reading better:
@@ -478,3 +478,56 @@ wire details of every route here ([[013-api]]).
 | 14 | A row whose bytes are missing answers `500`, not `404` | handler test with `blob.Memory` emptied behind the row |
 | 15 | Every handler asks exactly one authorization question, with the action this spec names | the conformance rows of [[017-conformance-suite]] |
 | 16 | A listing of a plane root carries `space` with the ledger's bytes and the live paths, a listing below one carries none, and a counter that cannot be read is `storage_unavailable` | handler test over both planes; `test/conformance` `case005RootUsage` |
+
+
+## Outcome
+
+Complete on 2026-09-19. The object plane is `internal/files`: twelve
+handlers, the one write this spec and [[007-uploads]] both commit through,
+the path rules, and the four seams the node binds. `internal/store` carries
+the query sets over the tables [[004-metadata-store]] created,
+`internal/config` the three variables, `internal/api` the route rows, and
+`arcad` the mounting.
+
+The last criterion to close was 8's share half. A move now writes four
+statements in one transaction, the row, the history, the bookmarks and the
+grants, and `store.Shares.Move` carries a grant whose prefix is exactly the
+path the object left. A grant on an ancestor stays where it is: the object
+left that subtree or stayed inside it, and either way the ancestor still
+means what it meant. Leaving the exact grant behind would not merely lose
+it. The old path becomes free, and the next object written there would be
+covered by a grant its owner gave for something else, handing the grantee an
+object nobody shared with them.
+
+Where each criterion is proved:
+
+| # | Proved by |
+|---|---|
+| 1 | `TestStoreAPutRoundTripsAgainstBothStores` at the store tier, and `TestE2EAPutRoundTripsAndAReadAboveTheBoundaryRedirects` through the binary |
+| 2 | `TestAPutIsRefusedWithoutALengthAndAboveTheTwoSizes`, the arm that reads the refusal for the session API of [[007-uploads]] |
+| 3 | the same test, the `411` arm and the `ARCA_MAX_UPLOAD_BYTES` arm |
+| 4 | `TestStoreTwoConditionalWritersOfOnePathLeaveOneWinner`, two goroutines on one checksum against Postgres, holding one `200`, one `412`, and the loser's bytes gone |
+| 5 | `TestAWriteWithNeitherPreconditionSucceedsOnAnyPathUnderFiles`, which writes `files/memory/`, `files/agents/` and `files/public/` beside an ordinary path: the prefixes the predecessor read for meaning are ordinary paths here |
+| 6 | `TestIfMatchIsACompareAndSwapAndIfNoneMatchIsCreateOnly` and `TestACreateOnlyWriteRevivesATrashedPath` |
+| 7 | `TestAReadAtOrBelowTheInlineSizeStreamsAndOneAboveItRedirects`, both sides of the boundary and the `?inline=1` arm that does not override the redirect |
+| 8 | `TestAMoveTouchesNoBytesAndCarriesTheHistoryAndTheBookmarks` at the unit tier over `blob.Counting` and a recording grant seam, and `TestStoreAMoveMakesNoBucketCallAndCarriesWhatKeysOnThePath` at the store tier, which reads the history, the bookmarks, the grant on the exact path at the destination, and the grant on the parent prefix unchanged |
+| 9 | `TestAMoveOntoAnOccupiedPathIsAConflictAndChangesNothing` |
+| 10 | `TestADeleteUnderFilesIsSoftAndOneUnderWorkspacesIsHard`, with `TestAPermanentDeleteTakesTheHistoryAndTheBytesWithIt` for `?permanent=1` |
+| 11 | `TestTheTrashListsWhatIsRestorableAndRestoreReturnsTheBytes` and `TestARestoreOntoAReoccupiedPathIsAConflictAndOnePastTheWindowIsGone`; `TestE2EATrashedObjectIsRestorableAndAVersionRoundTrips` through the binary, and `TestStoreTheVersionsAndTheTrashRoundTripAgainstBothStores` against both stores |
+| 12 | `TestTwoOverwritesLeaveTwoVersionsAndARestoreSwapsTheIdentities`, with the store tier and the e2e case of row 11 |
+| 13 | `TestStoreAListingPagesStablyUnderConcurrentInserts`, a keyset walk with a row inserted per page |
+| 14 | `TestARowWhoseBytesAreMissingIsAFaultAndNeverAMissingObject` |
+| 15 | `TestEveryHandlerAsksExactlyOneActionBeforeItActs` at the unit tier, one case per handler against a recording seam, and the nine conformance cases of [[017-conformance-suite]] on the wire |
+| 16 | `TestARootListingCarriesWhatTheSpaceHolds` over both plane roots and a prefix below one, `TestARootListingWhoseLedgerCannotAnswerIsAnOutage`, and `test/conformance`'s `case005RootUsage` |
+
+Two provers are not the artefact the criteria table named, and each
+substitution is deliberate. Criterion 8's table assertion is at the store
+tier for the grants and at the unit tier for all four, because a recording
+seam sees the statement and Postgres sees the row, and neither alone answers
+the criterion. Criterion 15 named the conformance rows alone; the suite is
+black box and cannot see what was asked, so the one-question claim is held
+at the unit tier and the conformance cases drive the same routes on the
+wire.
+
+`internal/files` is at 91% of statements at the unit tier. The store tier
+runs green with `make test-store` and the e2e tier with `make test-e2e`.

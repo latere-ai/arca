@@ -139,6 +139,30 @@ func (s *tierStores) row(t *testing.T, owner, path string) (store.File, bool) {
 	return f, true
 }
 
+// grant writes one active subject grant on a prefix of a space and answers it
+// with the id the database assigned.
+func (s *tierStores) grant(t *testing.T, owner, prefix string) store.Grant {
+	t.Helper()
+	g, err := store.NewShares().Create(t.Context(), s.db.Querier(), store.Grant{
+		Owner: owner, PathPrefix: prefix, GranteeKind: store.GranteeSubject,
+		Grantee: "https://issuer.example|reader", Permission: "read", CreatedBy: owner,
+	})
+	if err != nil {
+		t.Fatalf("grant %q: %v", prefix, err)
+	}
+	return g
+}
+
+// readGrant reads one grant straight from the database.
+func (s *tierStores) readGrant(t *testing.T, id string) store.Grant {
+	t.Helper()
+	g, err := store.NewShares().Get(t.Context(), s.db.Querier(), id)
+	if err != nil {
+		t.Fatalf("read the grant %q: %v", id, err)
+	}
+	return g
+}
+
 // database opens a schema of its own, applies the migrations, and drops the
 // schema when the test ends.
 func database(t *testing.T, url string) *store.DB {
@@ -373,6 +397,15 @@ func TestStoreAMoveMakesNoBucketCallAndCarriesWhatKeysOnThePath(t *testing.T) {
 		api.HeaderContentType, api.JSONMediaType); w.Code != http.StatusNoContent {
 		t.Fatalf("the star answered %d: %s", w.Code, w.Body)
 	}
+	// A grant keys on a path the same way the history and the bookmarks do,
+	// and the two prefixes answer differently. The one on the exact path
+	// means "this object" and follows it; the one on a parent prefix covers
+	// a subtree and stays where it is. Left behind, the exact grant would
+	// not merely be lost: the old path becomes free, and the next object
+	// written there would be covered by a grant its owner gave for something
+	// else (criterion 8, spec 008's ladder).
+	exact := stores.grant(t, h.owner, "files/plan.md")
+	parent := stores.grant(t, h.owner, "files")
 	before := h.bucket.Total()
 	w := h.call(t, http.MethodPost, h.object("files/plan.md"),
 		strings.NewReader(`{"move_to":"files/archive/plan.md"}`), api.HeaderContentType, api.JSONMediaType)
@@ -389,6 +422,12 @@ func TestStoreAMoveMakesNoBucketCallAndCarriesWhatKeysOnThePath(t *testing.T) {
 	stars, err := store.NewStars().List(t.Context(), stores.db.Querier(), h.owner, store.StarCursor{}, 10)
 	if err != nil || len(stars) != 1 || stars[0].Path != "files/archive/plan.md" {
 		t.Fatalf("the bookmarks after a move are %v, %v", stars, err)
+	}
+	if held := stores.readGrant(t, exact.ID); held.PathPrefix != "files/archive/plan.md" {
+		t.Fatalf("the grant on the exact path is on %q after the move", held.PathPrefix)
+	}
+	if held := stores.readGrant(t, parent.ID); held.PathPrefix != "files" {
+		t.Fatalf("the grant on the parent prefix moved to %q", held.PathPrefix)
 	}
 	read := h.call(t, http.MethodGet, h.object("files/archive/plan.md"), nil)
 	if read.Code != http.StatusOK || read.Body.String() != "two" {
