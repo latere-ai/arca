@@ -6,6 +6,28 @@ refused before it is pushed.
 
 ## Unreleased
 
+- **The kind stack comes up.** `deploy/examples/kind` reaches its stub
+  issuer on 8081, its stub authorizer on 8082 and MinIO on 9000, and the
+  base's egress policy admits 53, 80, 443, 5432 and the two OTLP ports
+  and nothing else. The default CNI of a kind cluster enforces
+  NetworkPolicy, which the overlay and `docs/operations.md` both said it
+  does not, so every connection `arcad` opened to its issuer was dropped
+  and the replica crash-looped against a stub that was up and answering.
+  The overlay now carries the egress its own dependencies need, and a
+  test reads the ports each overlay is configured to dial out of its own
+  manifests and fails when no policy admits one. Point an installation at
+  a bucket, an issuer or an authorizer on a port other than 443 or 80 and
+  you must admit that port yourself; `docs/operations.md` says how.
+- **An issuer that is not up yet no longer crash-loops a replica.** The
+  discovery every issuer is warmed with at start is best-effort: a warm
+  that fails writes one line naming `ARCA_OIDC_ISSUERS`, the process
+  serves, the new `issuers` readiness check holds the replica out of
+  rotation, and a retry from one second doubling to thirty brings it in
+  as soon as the issuer answers. A request that arrives before the retry
+  pays for the discovery itself. An installation's start no longer
+  depends on the order its issuer and its API come up in, and a transient
+  issuer outage no longer restarts the pod.
+
 ## v0.1.1 - 2026-09-19
 
 The first release that publishes. `v0.1.0` was tagged with every note
