@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/md5" //nolint:gosec // the label a store reports for an object written in one piece, reproduced
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -58,17 +59,40 @@ func label(body []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// entry is one manifest line over a body: its size, its label, and whether
-// the rows call it public.
+// sha is the digest the predecessor stored for an object written in one
+// piece, which is what the byte check compares a destination against.
+func sha(body []byte) string {
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])
+}
+
+// entry is one manifest line whose checksum is the store's own label, which
+// is the rung below the byte check.
 func entry(key, id string, body []byte, public bool) manifest.Entry {
 	return manifest.Entry{Key: key, ID: object.ID(id), Size: int64(len(body)), Checksum: label(body), Public: public}
 }
 
-// run moves the entries against the store and answers the outcomes by source
-// key.
+// byteEntry is one manifest line whose checksum is a sha256, which is what
+// almost every row of the predecessor carries and what the byte check reads.
+func byteEntry(key, id string, body []byte, public bool) manifest.Entry {
+	e := entry(key, id, body, public)
+	e.Checksum = sha(body)
+	return e
+}
+
+// moved runs the move the way the command runs it, with the byte check on and
+// at its default bounds, and answers the outcomes by source key.
 func moved(t *testing.T, b *bucket, dryRun bool, entries ...manifest.Entry) map[string]Outcome {
 	t.Helper()
-	m := &Move{Bucket: b, Prefix: prefix, DryRun: dryRun, Concurrency: 4}
+	return movedBy(t, b, &Move{
+		Bucket: b, Prefix: prefix, DryRun: dryRun, Concurrency: 4,
+		VerifyBytes: true, VerifyMax: DefaultVerifyMax, VerifySample: DefaultVerifySample,
+	}, entries...)
+}
+
+// movedBy runs one move a case shaped itself.
+func movedBy(t *testing.T, b *bucket, m *Move, entries ...manifest.Entry) map[string]Outcome {
+	t.Helper()
 	byKey := map[string]Outcome{}
 	for _, o := range m.Run(t.Context(), entries) {
 		byKey[o.Entry.Key] = o
@@ -167,22 +191,20 @@ func TestADestinationOfTheRightSizeAndAnotherLabelIsAMismatch(t *testing.T) {
 	}
 }
 
-func TestALineWithNoComparableLabelIsVerifiedOnItsSize(t *testing.T) {
+func TestALineWithNeitherALabelNorADigestIsVerifiedOnItsSize(t *testing.T) {
 	notes := []byte("the bytes of one note")
 	b := newBucket(t, map[string][]byte{notesKey: notes})
-	// Drive stored a sha256 it computed for itself, which no store reports
-	// as a label. The size and the store's own copy are what hold, and the
-	// report says how many keys that was.
+	// The composite label of an object the predecessor assembled from parts.
+	// It is not a label a copy's destination carries and it is not a digest
+	// of the bytes, so neither rung above the size applies.
 	line := entry(notesKey, idNotes, notes, false)
-	line.Checksum = strings.Repeat("a", 64)
+	line.Checksum = strings.Repeat("a", 32) + "-3"
 
 	o := moved(t, b, false, line)[notesKey]
-	if o.State != Copied || !o.SizeOnly {
-		t.Fatalf("the run is %s, size only %v: %s", name(o.State), o.SizeOnly, o.Why)
+	if o.State != Copied || o.Verified != OnSize {
+		t.Fatalf("the run is %s, proved %v: %s", name(o.State), o.Verified, o.Why)
 	}
-	// A composite label is not comparable either: a copy relabels the
-	// destination as one piece.
-	if comparableLabel("0123456789abcdef0123456789abcdef-3") {
+	if comparableLabel(line.Checksum) {
 		t.Error("a composite label was read as comparable")
 	}
 	if !comparableLabel(label(notes)) {
@@ -215,8 +237,117 @@ func TestADestinationAssembledFromRangesIsVerifiedOnItsSize(t *testing.T) {
 	}
 
 	o := moved(t, b, false, entry(notesKey, idNotes, notes, false))[notesKey]
-	if o.State != Skipped || !o.SizeOnly {
-		t.Fatalf("the run is %s, size only %v: %s", name(o.State), o.SizeOnly, o.Why)
+	if o.State != Skipped || o.Verified != OnSize {
+		t.Fatalf("the run is %s, proved %v: %s", name(o.State), o.Verified, o.Why)
+	}
+}
+
+// TestTheByteCheckProvesWhatNoStoreLabelCan is criterion 4b of spec 019 at a
+// store that answers no checksum of its own, which is every store the family
+// runs: the destination is read back and digested against the row's sha256.
+func TestTheByteCheckProvesWhatNoStoreLabelCan(t *testing.T) {
+	notes := []byte("the bytes of one note")
+	b := newBucket(t, map[string][]byte{notesKey: notes})
+
+	o := moved(t, b, false, byteEntry(notesKey, idNotes, notes, false))[notesKey]
+	if o.State != Copied || o.Verified != OnBytes {
+		t.Fatalf("the run is %s, proved %v: %s", name(o.State), o.Verified, o.Why)
+	}
+	if n := b.Calls(blob.MethodGet); n != 1 {
+		t.Errorf("the byte check read the destination %d times", n)
+	}
+	// A resumed run proves what it skips, or the keys of a killed run would
+	// be the only ones nobody ever checked.
+	second := moved(t, b, false, byteEntry(notesKey, idNotes, notes, false))[notesKey]
+	if second.State != Skipped || second.Verified != OnBytes {
+		t.Fatalf("the resumed run is %s, proved %v: %s", name(second.State), second.Verified, second.Why)
+	}
+}
+
+// TestADestinationWhoseBytesAreWrongIsAMismatch is the check earning its
+// keep: the size and the store's own copy both hold, and the bytes do not.
+func TestADestinationWhoseBytesAreWrongIsAMismatch(t *testing.T) {
+	notes := []byte("the bytes of one note")
+	other := []byte("the bytes of one NOTE")
+	b := newBucket(t, map[string][]byte{notesKey: notes})
+	// The destination is there, the right length, and wrong. Only a read of
+	// the bytes tells them apart.
+	destination := object.ID(idNotes).Key(prefix)
+	if _, err := b.inner.Put(t.Context(), destination, bytes.NewReader(other), int64(len(other)), blob.PutOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	o := moved(t, b, false, byteEntry(notesKey, idNotes, notes, false))[notesKey]
+	if o.State != Mismatched || !strings.Contains(o.Why, "digest") {
+		t.Fatalf("the run is %s: %s", name(o.State), o.Why)
+	}
+	if !strings.Contains(o.Why, sha(notes)) {
+		t.Errorf("the reason does not name the checksum the manifest carries: %q", o.Why)
+	}
+	if got, _ := b.inner.Bytes(destination); !bytes.Equal(got, other) {
+		t.Error("the mismatch overwrote the destination")
+	}
+}
+
+func TestADestinationTheByteCheckCannotReadFails(t *testing.T) {
+	notes := []byte("the bytes of one note")
+	b := newBucket(t, map[string][]byte{notesKey: notes})
+	b.FailNth(blob.MethodGet, 1, errors.New("the store went away"))
+
+	o := moved(t, b, false, byteEntry(notesKey, idNotes, notes, false))[notesKey]
+	if o.State != Failed || !strings.Contains(o.Why, "read the destination's bytes back") {
+		t.Fatalf("the run is %s: %s", name(o.State), o.Why)
+	}
+}
+
+func TestTheByteCheckIsOptedOutOfAndNeverIntoAndBoundsItsReads(t *testing.T) {
+	notes := []byte("the bytes of one note")
+	line := byteEntry(notesKey, idNotes, notes, false)
+	for _, c := range []struct {
+		name  string
+		move  Move
+		proof Proof
+		reads int
+	}{
+		{"the default reads the bytes", Move{VerifyBytes: true, VerifyMax: DefaultVerifyMax, VerifySample: DefaultVerifySample}, OnBytes, 1},
+		{"-verify-bytes=false reads none", Move{}, OnSize, 0},
+		{"an object past the threshold is sampled out", Move{VerifyBytes: true, VerifyMax: 1, VerifySample: 0}, OnSize, 0},
+		{"an object past the threshold is sampled in", Move{VerifyBytes: true, VerifyMax: 1, VerifySample: 100}, OnBytes, 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			b := newBucket(t, map[string][]byte{notesKey: notes})
+			m := c.move
+			m.Bucket, m.Prefix, m.Concurrency = b, prefix, 1
+			o := movedBy(t, b, &m, line)[notesKey]
+			if o.State != Copied || o.Verified != c.proof {
+				t.Fatalf("the run is %s, proved %v: %s", name(o.State), o.Verified, o.Why)
+			}
+			if got := b.Calls(blob.MethodGet); got != c.reads {
+				t.Errorf("the run read %d destinations, want %d", got, c.reads)
+			}
+		})
+	}
+}
+
+// TestTheSampleIsTheSameOnEveryRun holds the choice to a digest of the key
+// rather than a draw, so a resumed run does not leave a hole where the first
+// one read.
+func TestTheSampleIsTheSameOnEveryRun(t *testing.T) {
+	m := &Move{VerifyBytes: true, VerifyMax: 1, VerifySample: 50}
+	chosen := 0
+	for i := range 200 {
+		e := manifest.Entry{Key: fmt.Sprintf("drive/u-1/files/%d", i), Size: 1 << 30, Checksum: sha([]byte{byte(i)})}
+		first := m.reads(e)
+		if first != m.reads(e) {
+			t.Fatalf("%q was chosen differently twice", e.Key)
+		}
+		if first {
+			chosen++
+		}
+	}
+	// Half of two hundred, give or take what a digest spreads to.
+	if chosen < 70 || chosen > 130 {
+		t.Errorf("a half sample chose %d of 200", chosen)
 	}
 }
 

@@ -56,8 +56,8 @@ func TestTheReportNamesEveryKeyAnOperatorHasToAnswerFor(t *testing.T) {
 func TestTheReportCountsWhatItCouldNotProveAndWhatTheStoreWouldNotDo(t *testing.T) {
 	r := NewReport("manifest.tsv", prefix, "arca-test", false)
 	r.Outcomes = []Outcome{
-		{Entry: manifest.Entry{Key: notesKey}, State: Copied, SizeOnly: true},
-		{Entry: manifest.Entry{Key: logoKey}, State: Skipped, SizeOnly: true, Unstamped: true},
+		{Entry: manifest.Entry{Key: notesKey}, State: Copied, Verified: OnBytes},
+		{Entry: manifest.Entry{Key: logoKey}, State: Skipped, Verified: OnSize, Unstamped: true},
 	}
 	if !r.OK() {
 		t.Fatal("a report of a copy and a skip does not read as clean")

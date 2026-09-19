@@ -34,10 +34,19 @@
 //   - Copies the source to the destination. A source above the API's single
 //     copy maximum goes range by range.
 //   - Reads the destination back and compares it against the line. Size
-//     always. The checksum where the line carries a label the store's own
-//     can be compared against; a sha256 the predecessor computed for itself
-//     is not one, and those keys are counted and named as verified on size
-//     alone.
+//     always. Then the bytes: the destination is streamed through a sha256
+//     and compared to the line's checksum. That is the one proof a store
+//     reporting no checksum of its own can give, and every store the family
+//     runs is such a store. A line whose checksum is a label the store
+//     reports takes that comparison instead, and one that is neither, which
+//     is the composite label of an object assembled from parts, is counted
+//     and named as verified on size alone.
+//   - The byte check is on by default and bounded: every object at or under
+//     -verify-bytes-max, and -verify-sample percent of the larger ones,
+//     chosen by a digest of the key so two runs choose the same keys and a
+//     resumed run leaves no hole. -verify-bytes=false turns it off, which is
+//     an opt out and never an opt in: a clean report nobody read a byte for
+//     is the failure this command exists to catch.
 //   - Stamps a public destination, because a copy carries no ACL. A store
 //     that holds no object ACLs and offers bucket policies instead is
 //     counted rather than failed, which is the rule of spec 003.

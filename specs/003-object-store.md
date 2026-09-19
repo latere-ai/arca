@@ -70,6 +70,14 @@ Divergences from the design as drafted, each a decision rather than a gap:
 - `object/` also carries the planes and the checksum kinds
   [[001-architecture]] names for it. The path rules beyond the plane prefix
   are [[005-files]]'s.
+- `Copy` joined the interface on 2026-09-19 for the object move of
+  [[019-migration-from-drive]], which is one server side copy per key from a
+  predecessor's key to the key an object id derives. It is the same write as
+  a put, with the same `If-None-Match: *` and the same degraded mode, and no
+  body: the bytes never leave the store. A source above the API's single copy
+  maximum moves range by range. It carries no ACL, because `CopyObject`
+  carries none, so a caller moving a public object re-stamps the destination
+  through `SetPublic`. Nothing that serves a request calls it.
 
 One question stays open for the maintainer, the one the Design already
 raises: whether the store tier should run MinIO behind TLS so both integrity
@@ -284,6 +292,7 @@ without failing the read.
 // here; object/ derives them.
 type Store interface {
 	Put(ctx context.Context, key string, body io.Reader, size int64, o PutOptions) (Written, error)
+	Copy(ctx context.Context, from, to string, o PutOptions) (Object, error)
 	Get(ctx context.Context, key string) (io.ReadCloser, Object, error)
 	Head(ctx context.Context, key string) (Object, error)
 	Delete(ctx context.Context, key string) error
