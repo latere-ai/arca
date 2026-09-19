@@ -6,6 +6,12 @@ refused before it is pushed.
 
 ## Unreleased
 
+- **`make run` checks the installation it just started, and prints requests
+  that write.** The one command from a clean clone now runs all seven of its
+  steps: once the server is ready it runs `arcad check` against it, so the
+  first thing a contributor reads is five `ok` lines naming the bucket, the
+  database, the issuer, the authorizer and the public URL, and the lines it
+  prints next put one object and read it back rather than fetching a probe.
 - **A grant on a moved path follows the object.** A move rewrote the file
   row, its history and its bookmarks, and left the share behind. That is
   not only a lost grant: the old path becomes free, and the next object

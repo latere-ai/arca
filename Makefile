@@ -199,28 +199,57 @@ define stubs-up
 	done
 endef
 
-# token waits for the server, mints a token for the dev subject at the
-# stub issuer, and prints what to export. The requests a token is for are
-# spec 013's; until then the line is what a reader checks the probes with.
-define token-line
+# wait-ready blocks until the server answers its readiness probe. The two
+# steps after it are asked of the running installation, so neither can
+# begin before the listeners are open and both stores answer.
+define wait-ready
 	for i in $$(seq 1 60); do \
 		if curl -sf -o /dev/null "http://127.0.0.1:$(DEV_INTERNAL_PORT)/readyz"; then break; fi; \
 		if [ $$i = 60 ]; then echo "arcad did not become ready" >&2; exit 1; fi; \
 		sleep 1; \
-	done; \
+	done
+endef
+
+# check-line asks the five requirements of spec 012 of the installation
+# that is now serving, so the first thing a contributor reads is five ok
+# lines rather than a silent log. A failed requirement does not stop the
+# run: the report names what is wrong and the server stays up to be fixed
+# against.
+define check-line
+	$(DEV_SERVICE_ENV) $(OUT_DIR)/$(SERVICE) check || true
+endef
+
+# The object the printed requests write and read. The owner is the dev
+# subject as spec 006 renders it, <issuer>|dev, escaped for one path
+# segment: the slashes first and then the colons, because the escape of a
+# slash carries no colon. It is derived from the issuer URL rather than
+# spelled again, so a run that moves the issuer moves the path with it. The
+# path itself sits under the files plane root of spec 013.
+DEV_OWNER_PATH = $(subst :,%3A,$(subst /,%2F,$(DEV_ISSUER_URL)))%7Cdev
+DEV_OBJECT_PATH = /v1/files/$(DEV_OWNER_PATH)/files/hello.txt
+
+# token-line mints a token for the dev subject at the stub issuer and
+# prints what to export, a request that puts one object and a request that
+# reads it back, which is the round trip of spec 013 through the running
+# stack.
+define token-line
 	token=$$(curl -sf -X POST "$(DEV_ISSUER_URL)/mint" -d '{"sub":"dev"}' | sed 's/.*"token":"\([^"]*\)".*/\1/'); \
 	echo; \
 	echo "export ARCA_URL=http://localhost:$(DEV_PUBLIC_PORT) ARCA_TOKEN=$$token"; \
-	echo 'curl -sS "$$ARCA_URL/readyz"'; \
+	echo 'curl -sS -X PUT -H "Authorization: Bearer $$ARCA_TOKEN" -H "Content-Type: text/plain" --data-binary "hello, arca" "$$ARCA_URL$(DEV_OBJECT_PATH)"'; \
+	echo 'curl -sS -H "Authorization: Bearer $$ARCA_TOKEN" "$$ARCA_URL$(DEV_OBJECT_PATH)"'; \
 	echo
 endef
 
-# One command from a clean clone to a serving installation: the stack,
-# the stubs, the migrations, then arcad in the foreground.
+# One command from a clean clone to a serving installation: the seven
+# steps of spec 014, in the order the installation forces. The build, the
+# stack, the stubs and the migration run first; the server takes the
+# foreground; the check and the token line are asked of it once readiness
+# passes, which is why they run beside it rather than after it.
 run: build build-stubs up
 	@$(stubs-up)
 	$(DEV_SERVICE_ENV) $(OUT_DIR)/$(SERVICE) migrate
-	@( $(token-line) ) &
+	@( $(wait-ready); $(check-line); $(token-line) ) &
 	$(DEV_SERVICE_ENV) $(OUT_DIR)/$(SERVICE)
 
 # run-down stops the server and the stubs and leaves the stack up, so a
