@@ -21,6 +21,7 @@ namespace: latere
 
 resources:
   - ../base
+  - networkpolicy-database.yaml
   # The Ingress is a resource and not a patch: the base holds none, because
   # an ingress class is an installation's choice (spec 016).
   - ingress.yaml

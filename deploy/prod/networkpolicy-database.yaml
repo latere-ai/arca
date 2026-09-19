@@ -1,0 +1,46 @@
+# The ports this installation's database listens on, which the base cannot
+# know.
+#
+# The base admits 5432, which is where a Postgres an operator runs listens.
+# This installation's database is DigitalOcean's managed Postgres, and that
+# listens on 25060 for a direct connection and 25061 for a connection pool.
+# Neither is 5432, and `arcad-egress` in the base names Egress in its
+# policyTypes, so a port it does not name is a connection dropped rather
+# than refused: the pool waits out its own timeout, the database readiness
+# check fails, the replica never joins rotation, and the release's rollout
+# times out with the image already built and signed.
+#
+# Nothing else in the namespace has met this, because every other policy
+# here names Ingress only and leaves egress unrestricted. Arca is the first
+# workload in it to confine its own egress, so it is the first that has to
+# name the database's real port.
+#
+# Policies are additive: a pod may go wherever any policy selecting it
+# allows, so this widens egress for the two workloads that carry the label
+# and leaves the confinement every other installation inherits exactly as
+# the base writes it. The reaper carries the same label as the server and
+# reads the same database, so one policy covers both.
+#
+# 25061 is admitted although nothing dials it yet. The pooled DSN is
+# written into `arcad-database` from the cutover and read by a later
+# Deployment change (specs/infrastructure/database-pooling.md); admitting
+# the port now means that change is a Deployment change and not a Deployment
+# change plus a policy nobody remembered.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: arcad-egress-database
+  labels:
+    app.kubernetes.io/name: arcad
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: arcad
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - port: 25060
+          protocol: TCP
+        - port: 25061
+          protocol: TCP

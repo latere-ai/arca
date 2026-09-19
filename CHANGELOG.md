@@ -6,6 +6,17 @@ refused before it is pushed.
 
 ## Unreleased
 
+- **A replica can reach the database it is configured with.** The base
+  confines egress and admits 5432, which is where a Postgres an operator
+  runs listens. A managed database listens elsewhere: this installation's
+  is on 25060, with its connection pool on 25061. A port no policy names
+  is a connection dropped rather than refused, so the pool would have
+  waited out its own timeout, the database readiness check would have
+  failed, and the rollout would have timed out with the image already
+  built and signed. The production overlay admits both ports, the way the
+  kind overlay admits its own stack's, and a test names the pairing
+  because the ports live in a Secret no manifest test can read.
+
 - **The production Ingress applies.** `/openapi.json` was routed with
   `pathType: Exact`, and the nginx admission webhook refuses a path
   holding a dot under `Exact` or `Prefix`. It rejects the whole document

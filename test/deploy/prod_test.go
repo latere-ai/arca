@@ -185,6 +185,39 @@ func smokeArgs(line string) []string {
 	}
 }
 
+// TestProdAdmitsTheDatabasePortsThisInstallationUses: the base confines
+// egress and admits 5432, which is where a Postgres an operator runs
+// listens. This installation's database is a managed one on 25060, with its
+// connection pool on 25061, and a port no policy names is a connection
+// dropped rather than refused. The pool would wait out its own timeout, the
+// database readiness check would fail, and the release's rollout would time
+// out with the image already built and signed.
+//
+// The ports cannot be read off the manifests, because the database URL is a
+// Secret this tree does not hold. They are written here instead, which is
+// the only place the pairing can be asserted at all.
+func TestProdAdmitsTheDatabasePortsThisInstallationUses(t *testing.T) {
+	admitted := map[string]bool{}
+	for _, d := range read(t, "deploy/prod") {
+		if d.kind() != "NetworkPolicy" {
+			continue
+		}
+		if !slices.Contains(d.at("spec").strings("policyTypes"), "Egress") {
+			continue
+		}
+		for _, rule := range d.at("spec").items("egress") {
+			for _, port := range rule.items("ports") {
+				admitted[port.text("port")] = true
+			}
+		}
+	}
+	for _, port := range []string{"25060", "25061"} {
+		if !admitted[port] {
+			t.Errorf("deploy/prod admits no egress to %s; the managed database listens there and the base names only 5432", port)
+		}
+	}
+}
+
 // TestProdKeepsCredentialsInSecrets is the gate's bearer rule over the
 // overlay the gate itself does not read. deploy/prod is declared under
 // identity.skip so the addresses it sets are allowed, and skipping it takes
