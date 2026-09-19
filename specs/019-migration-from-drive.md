@@ -345,12 +345,29 @@ the Secret its environment names.
 
 **Drive stops before Arca starts.** Both run against one Postgres server
 with a connection ceiling the cluster has already hit once. Arca arrives as
-three pods, two `arcad` and one reaper, each opening a pool whose default
-maximum is the CPU count. `store.Open` hands the whole URL to
+two pods, the same count Drive ran, because the overlay declares a reaper
+beside the server and holds it at zero replicas: the third pod is a
+manifest and not a connection until somebody turns it up. Each opens a pool
+whose default maximum is the CPU count. `store.Open` hands the whole URL to
 `pgxpool.ParseConfig`, so `pool_max_conns` written into the connection
-string bounds all three without a code change; scaling Drive to zero first
-frees the slots its own pods hold. The hard cut already accepted the write
-outage this opens.
+string bounds them without a code change; scaling Drive to zero first frees
+the slots its own pods hold. The hard cut already accepted the write outage
+this opens.
+
+**The installation's own ports are admitted.** The base confines egress and
+names 5432, 443, 80, 53 and the two OTLP ports, which is what an operator's
+Postgres and an operator's bucket and issuer use. This installation's
+database is a managed one on 25060 with a pool on 25061, and its telemetry
+collector is reached on 40318. A port no policy names is dropped rather
+than refused, so the database check would have failed and the rollout timed
+out, and the telemetry would have gone dark without a word. The production
+overlay admits all three, the way the kind overlay admits its stack's.
+
+**The route switch precedes the deploy.** The ingress controller's
+admission webhook refuses an Ingress whose host and path another already
+claims, and refuses the whole document rather than the one rule. The deploy
+job applies the overlay in a single apply, so Drive's api ingress is
+deleted before the release runs, not after it.
 
 **The grant field's name is one string in two repositories.** Arca renders
 it on a file and a workspace resource; the platform's decider reads it off
