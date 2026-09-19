@@ -324,6 +324,8 @@ and the owner policy is not consulted.
 | 10 | `arcad check` refuses an authorizer that allows the probe resource | `internal/check` test against the stub |
 | 11 | `pkg/authz/conformance` passes against the owner policy | `internal/auth` test |
 | 12 | No Go file outside `internal/auth` names `org_id`, `roles`, or `principal_type` | the `identity` gate's `claims` rule |
+| 13 | Every question about a file or a workspace that names a path carries the caller's rung as `grant`, absent where they hold none, in both modes, and a grants table that cannot answer is `authorizer_unavailable` | `internal/auth` grant test |
+| 14 | Under an external authorizer that admits the ladder's actions of `resource.grant`, a grantee reads a shared object and a caller with no grant on it reads a missing one | `test/conformance` `case006Grantee` |
 
 ## Not in this spec
 

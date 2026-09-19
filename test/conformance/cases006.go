@@ -40,6 +40,10 @@ func cases006() []testCase {
 			codes: []string{CodeAuthorizerUnavailable}, run: case006Outage},
 		{name: "PersonalKey", group: GroupAuthorizer, routes: named,
 			codes: []string{CodeForbidden}, run: case006PersonalKey},
+		{name: "Grantee", group: GroupAuthorizer, routes: []string{
+			"PUT /v1/files/{owner}/{path...}", "GET /v1/files/{owner}/{path...}",
+			"POST /v1/shares", "DELETE /v1/shares/{id}",
+		}, codes: []string{CodeNotFound}, run: case006Grantee},
 	}
 }
 
@@ -198,6 +202,70 @@ func case006PersonalKey(t *testing.T, s *session) {
 		"the refusal does not carry the reason grant in details.detail: %s", byGrant.body)
 	failIf(t, strings.Contains(byGrant.message(), "grant"),
 		"the fixed sentence carries the authorizer's reason: %q", byGrant.message())
+}
+
+// case006Grantee: a grantee reads a shared object under an external
+// authorizer, and a caller with no grant on it reads a missing object.
+//
+// This is the row that makes a grant mean anything to an installation that
+// configures ARCA_AUTHORIZER_URL. The owner policy is not consulted there,
+// so the question is the whole of what the endpoint sees, and spec 006 puts
+// the caller's rung on the resource for exactly this. The stub's grants mode
+// is the one row a decider adds to read it: a grant admits the ladder's
+// actions of its rung.
+//
+// The rule table is narrowed to the space's owner first, so the endpoint
+// allows the grantee nothing of its own and the grant is what admits the
+// read. A rung is not a key to the space: the same grantee reading an object
+// of the same space outside the granted subtree is answered as a missing
+// object, and writing to the object it may read is refused, because the rung
+// is read.
+//
+// Nothing here touches the anonymous link routes. No grant reaches
+// link.read, so the grants mode cannot admit one, and the table is put back
+// before the case returns.
+func case006Grantee(t *testing.T, s *session) {
+	if !s.grantsMode(t, true) {
+		s.unverifiable(t, "a grantee reads a shared object under an external authorizer",
+			"the target's authorizer does not serve the grants mode of spec 014, so no endpoint here decides by the resource's grant")
+		return
+	}
+	defer func() { s.grantsMode(t, false) }()
+
+	owner, grantee := s.subject(t, Alice), s.subject(t, Bob)
+	shared := s.grantPrefix("grantee") + "/report.txt"
+	private := s.filePath("grantee-private.txt")
+	const content = "a shared object\n"
+	expectStatus(t, s.put(t, Alice, shared, content, "text/plain"), http.StatusCreated)
+	expectStatus(t, s.put(t, Alice, private, "not shared\n", "text/plain"), http.StatusCreated)
+	s.grant(t, Alice, s.grantPrefix("grantee"), grantee, "read")
+
+	// The table is read from the last row back, so the deny goes first and
+	// the space's owner after it. The grantee matches neither and is left to
+	// the grant on the resource.
+	s.setRules(t,
+		stubRule{Subject: "*", Action: "*", Resource: "*", Allow: false, Reason: "denied by the conformance suite"},
+		stubRule{Subject: owner, Action: "*", Resource: "*", Allow: true, TTL: 1},
+	)
+	defer s.setRules(t)
+
+	read := s.await(t, func() response {
+		return s.call(t, Bob, http.MethodGet, s.fileRoute(owner, shared)+"?inline=1", "")
+	}, func(r response) bool { return r.status == http.StatusOK })
+	failIf(t, read.status != http.StatusOK,
+		"the grantee read the shared object as %d %s; the question carries the rung they hold and the endpoint admits it",
+		read.status, read.code())
+	failIf(t, string(read.body) != content, "the shared object read back as %q, want %q", read.body, content)
+
+	// A caller holding no grant on the object is a stranger to it, and a
+	// refusal at lookup is a missing object (invariant 6).
+	expectError(t, s.call(t, Bob, http.MethodGet, s.fileRoute(owner, private)+"?inline=1", ""), CodeNotFound)
+
+	// The rung is read, not merely present: a read grant does not write.
+	written := s.do(t, request{method: http.MethodPut, subject: Bob,
+		path: s.fileRoute(owner, shared), body: strings.NewReader("overwritten\n"), contentType: "text/plain"})
+	failIf(t, written.status == http.StatusOK || written.status == http.StatusCreated,
+		"a read grant admitted a write: %d %s", written.status, written.body)
 }
 
 // strangerToken is a bearer shaped like a JWT from an issuer no target

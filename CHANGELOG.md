@@ -6,6 +6,19 @@ refused before it is pushed.
 
 ## Unreleased
 
+- A grantee is reachable under an external authorizer. Every question
+  about a file or a workspace now carries `grant`, the highest live grant
+  the caller holds on a prefix of the resource's path, read from Arca's
+  own grants table before the question is asked and sent in both modes.
+  With `ARCA_AUTHORIZER_URL` set the endpoint saw an owner, a path, a
+  plane and a size and could not tell a grantee from a stranger, so every
+  read of a shared object was refused and `POST /v1/shares` wrote a row
+  no decision consulted. An endpoint consumes it by admitting the actions
+  of the rung's ladder: `read` admits `file.read`, `file.list`,
+  `workspace.read`, `workspace.list`; `write` adds the writes; `manage`
+  adds the `share.*` actions. The stub authorizer's new `-grants` flag is
+  that row, for a deployment to check its own endpoint against.
+
 ## v0.1.1 - 2026-09-19
 
 The first release that publishes. `v0.1.0` was tagged with every note
