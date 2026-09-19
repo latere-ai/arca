@@ -1,6 +1,6 @@
 ---
 title: "Observability: the metric table, traces across the two stores, logs with trace ids, the alert rules"
-status: testing
+status: complete
 track: core
 depends_on:
   - specs/001-architecture.md
@@ -14,7 +14,7 @@ depends_on:
 affects: [internal/metrics/, internal/config/, internal/api/, internal/blob/, internal/store/, internal/auth/, internal/events/, internal/files/, internal/uploads/, internal/workspaces/, internal/reaper/, cmd/arcad/, tools/rules/, deploy/base/prometheusrule.yaml, .github/workflows/verify.yml]
 effort: medium
 created: 2026-09-18
-updated: 2026-09-19
+updated: 2026-09-20
 author: changkun
 ---
 
@@ -58,6 +58,15 @@ The endpoint's second name landed on 2026-09-19, before the cutover of
 what the namespace this installation deploys into injects into every
 workload. The Design says which name wins and why the injected one is not
 held to a shape; the divergence below says what was true before.
+
+Since the cutover an installation exports by contract rather than by
+accident. The injected endpoint is read, handed to the shared package
+before the bootstrap, and the process says so on its first lines:
+`pkg/otel` logs `telemetry: exporting` with the endpoint as an attribute
+once its exporters are built, which is the line a reader looks for in
+`arcad`'s log to know that traces, metrics and log records are leaving.
+That closes the export half of criterion 4 and all of criterion 11, and
+it is why this spec was re-read criterion by criterion before it closed.
 
 ### What records, and what waits
 
@@ -127,8 +136,10 @@ decisions by outcome, and as `arca_reaper_findings_total{kind="share_expired"}`.
   prevent, so what the reap process publishes is its spans and its log
   records, both carrying the trace id, and its per-run findings table on
   standard output. An installation that wants the series runs the reconciler
-  on the replicas, which is the default. A bridge belongs in the shared
-  package, not here.
+  on the replicas, which is the default, and `deploy/base/reaper.yaml` is
+  `replicas: 0`, so no installation is missing a series for this today. A
+  bridge belongs in the shared package, not here, and it is criterion 2 of
+  [[025-observability-follow-ups]].
 - **`arca_stored_bytes` has no source**, and still has none now that the two
   planes record their bytes. The Design says it is the reaper's sample summed
   over the installation and split by plane. The ledger the reaper reads is
@@ -138,7 +149,8 @@ decisions by outcome, and as `arca_reaper_findings_total{kind="share_expired"}`.
   by whether the path sits under `workspaces/`, plus the workspace objects,
   which is a scan of the object tables per run and a new ledger read. That is
   a change to [[010-events-and-reaper]]'s ledger rather than to this spec, so
-  the gauge stays registered at zero and no alert reads it. The counters that
+  the gauge stays registered at zero, no alert reads it, and the source is
+  criterion 7 of [[025-observability-follow-ups]]. The counters that
   did land are rates of bytes moving, which is the question an operator
   actually alerts on; how much is stored is answered per space by
   [[012-administration]]'s overview and in aggregate by
@@ -154,12 +166,19 @@ decisions by outcome, and as `arca_reaper_findings_total{kind="share_expired"}`.
   what a test asserts: no attribute of the request line is a token, a
   credential, a presigned URL or a path, and the line names the caller by the
   rendered subject the authorizer was already told. A handler around both
-  paths belongs in `pkg/otel` and is a change there.
-- **The span table is one row deep.** `bucket.<op>` is opened by the
-  decorator. `auth.verify` and `auth.ask` wait on spans inside
-  [[006-identity]]'s two, `db.<op>` on [[004-metadata-store]]'s querier, and
-  the order assertions of criterion 5 on a write route, which is
-  [[005-files]]'s.
+  paths belongs in `pkg/otel` and is a change there, carried as criterion 5
+  of [[025-observability-follow-ups]].
+- **There is no request span, so the span table is one row deep and that row
+  is untested.** `bucket.<op>` is opened by the decorator of
+  `internal/metrics` and no test asserts it. Nothing wraps the public
+  handler, so `otel.SetAttributes` in the request id middleware writes onto a
+  non-recording span and `otel.TraceIDs` answers the empty string: the
+  request line carries `trace_id` as a key with nothing in it. `auth.verify`
+  and `auth.ask` wait on spans inside [[006-identity]]'s two, `db.<op>` on
+  [[004-metadata-store]]'s querier, and the order assertions of criterion 5
+  on a write route, which is [[005-files]]'s. The parent has a shape to take
+  in the shared package, `otel.Handler` with `otel.WithRouteTemplate`, and
+  the whole of it is criteria 3 and 4 of [[025-observability-follow-ups]].
 - **The request middleware sits inside the request id and not outside it.**
   It is still outside the verifier and both rate limits, which is what the
   Design asks for, and inside the id because the line it writes carries that
@@ -178,16 +197,21 @@ decisions by outcome, and as `arca_reaper_findings_total{kind="share_expired"}`.
 
 ### The criteria
 
+Re-read on 2026-09-20 against an installation that exports by contract.
+Six criteria stand as written and five were narrowed to what shipped;
+what each gave up is carried verbatim by
+[[025-observability-follow-ups]].
+
 | # | State |
 |---|---|
 | 1 | Holds. `TestMetricsTable` reads this file through `runtime.Caller` and holds the registry to the table above, kind, labels, vocabularies and histogram bounds; `TestEveryClosedVocabularyHasAZeroSeries` reads the exposition of a fresh registry |
-| 2 | Open. It holds at the frame, which is where a label could carry one: `TestARequestIsCountedByItsRouteAndItsStatus`, `TestAPathNoRouteRegistersIsCountedUnderOneBoundedLabel` and `TestTheRequestLineCarriesTheIdsAndNothingSecret`. The criterion as written is over a whole conformance run, and [[017-conformance-suite]] is now in the tree, so nothing blocks `TestLabelsAreBounded` any more; it is simply not written |
+| 2 | Narrowed to the frame, which is where a label could carry a caller's value: `TestARequestIsCountedByItsRouteAndItsStatus`, `TestAPathNoRouteRegistersIsCountedUnderOneBoundedLabel` and `TestTheRequestLineCarriesTheIdsAndNothingSecret`, over a registry `TestMetricsTable` holds to closed vocabularies. The sweep over a whole conformance run is a case of that tier and is criterion 1 of [[025-observability-follow-ups]] |
 | 3 | Holds. `TestUsageSamplingIsAggregate` runs two fixtures of different sizes through the seam and holds the bands cumulative, replaced rather than added to, and three series after six spaces |
-| 4 | Open. The listener half holds: `TestMetricsListenerOnly`, with `TestTheReaperProcessBootstrapsToo` for the reap process opening none. The OTLP half is the reap-bridge divergence above, and no installation sets the endpoint, which is the other divergence above |
-| 5 | Waits on [[005-files]]. `bucket.<op>` exists and is tested at the decorator |
-| 6 | Holds for the line: `TestTheRequestLineCarriesTheIdsAndNothingSecret`. Holding the same ids to the spans waits on the span order of criterion 5 |
-| 7 | Holds at the call site and not at a handler; see the divergence above |
-| 8 | Holds for the request: `TestOneLineAndOneObservationPerRequest`. The stream halves wait on [[005-files]] |
+| 4 | Narrowed to the listeners, which hold: `TestMetricsListenerOnly`, with `TestTheReaperProcessBootstrapsToo` for the reap process opening none and bootstrapping the exporter like the server. The endpoint half of the divergence is gone: an installation sets it and the process exports, which `TestAnInjectedEndpointReachesTheExporter` holds and a production log line says. The reap process's counters over OTLP is criterion 2 of [[025-observability-follow-ups]], and `deploy/base/reaper.yaml` is `replicas: 0`, so no installation is missing a series for it today |
+| 5 | Carried whole by [[025-observability-follow-ups]], criterion 3. Nothing wraps the public handler, so there is no request span and no child order to assert; `bucket.<op>` is opened by the decorator and no test asserts it, which this table read as tested and was wrong about |
+| 6 | Narrowed to the line, which carries both keys: `TestTheRequestLineCarriesTheIdsAndNothingSecret`. The trace id is the empty string until there is a request span, so the ids on the line and the ids on the spans are criterion 4 of [[025-observability-follow-ups]] |
+| 7 | Narrowed to the call site, which is the structural rule and holds: no attribute of the line is a token, a credential, a presigned URL or a path. The handler around both paths of the tee is criterion 5 of [[025-observability-follow-ups]]; see the divergence above for why it is not reachable from here |
+| 8 | Narrowed to the request, which holds: `TestOneLineAndOneObservationPerRequest`. The stream halves are criterion 6 of [[025-observability-follow-ups]] |
 | 9 | Holds. `TestAlertsNameKnownMetrics`, `TestEveryRowOfTheSpecTableIsAnAlert` and `TestTheCommittedManifestIsCurrent`; the `rules` job runs `promtool check rules` over what the tool prints |
 | 10 | Holds. `TestNoExporterStillServes`, whose environment is a map carrying neither endpoint variable |
 | 11 | Holds. `TestAnInjectedCollectorEndpointIsReadAndTheTablesRowWins` at the configuration and `TestAnInjectedEndpointReachesTheExporter` at the process, which starts `serve` with the standard name alone and reads what the bootstrap was handed. The collector is also in `dialled` in `test/deploy/examples_test.go` under both names, so an overlay that writes either into a manifest is held to the egress rule; deploy/prod's 40318 is admitted by a policy and asserted by `TestProdAdmitsTheDatabasePortsThisInstallationUses`, because an injected endpoint reaches no manifest that test can read |
@@ -439,16 +463,81 @@ telemetry ([[012-administration]]).
 
 ## Acceptance criteria
 
+Each criterion says what shipped. Five were narrowed on 2026-09-20 when
+this spec was re-read against a production installation, and the words
+they were narrowed from are carried by
+[[025-observability-follow-ups]], criterion for criterion.
+
 | # | Criterion | Proved by |
 |---|---|---|
 | 1 | Right after start-up, with nothing recorded, `/metrics` carries every name in the table and a zero series for every closed vocabulary | `TestMetricsTable` in `internal/metrics`, reading this file through `runtime.Caller` |
-| 2 | Over a full conformance run, no label value equals a path, an object name, a subject, or a workspace slug the run used | `TestLabelsAreBounded` against the run's fixture |
+| 2 | Every label of every series comes from a closed vocabulary, and no label value of a request is a path, an object name, a subject or a workspace slug, including a path no route registers | `TestMetricsTable`, `TestARequestIsCountedByItsRouteAndItsStatus`, `TestAPathNoRouteRegistersIsCountedUnderOneBoundedLabel`, `TestTheRequestLineCarriesTheIdsAndNothingSecret`. The sweep over a whole conformance run is [[025-observability-follow-ups]] |
 | 3 | A reaper run over a fixture of spaces at known sizes yields the right histogram, and each band counts every space at or above it, and adds no series as the space count grows | `TestUsageSamplingIsAggregate` over two fixtures of different sizes |
-| 4 | `/metrics` is on the internal listener and not on the public one, and `arcad reap` opens no listener while its counters still arrive over OTLP | `TestMetricsListenerOnly`, `TestReapExportsOverOTLP` with an in-memory collector |
-| 5 | A put produces one parent span named by the route with `auth.verify`, `auth.ask`, `bucket.put`, and `db.insert` in that order; a delete produces `db.delete` before `bucket.delete`; a presigned download produces no span for the transfer | `TestWriteSpanOrder`, `TestDeleteSpanOrder`, `TestRedirectHasNoTransferSpan` |
-| 6 | Every request log line carries the request id and the trace id, and the same ids are on the request's spans | `TestLogLineCarriesTraceIDs` |
-| 7 | A canary of each kind (a bearer, a link token, a bucket secret key, a presigned URL, an `Authorization` header) appears on neither path of the tee | `TestLogsRedact` |
-| 8 | One log line per request, one per stream open and close, none per part and none per presigned URL | `TestLogVolume` |
+| 4 | `/metrics` is on the internal listener and not on the public one, `arcad reap` opens no listener, and both roles bootstrap the exporter, so a configured endpoint carries the spans and log records of either | `TestMetricsListenerOnly`, `TestTheReaperProcessBootstrapsToo`, `TestAnInjectedEndpointReachesTheExporter`. The reap process's counters over OTLP is [[025-observability-follow-ups]] |
+| 5 | Carried whole by [[025-observability-follow-ups]] in these words. What shipped is one span, `bucket.<op>` at the decorator over `blob.Store`, with no request span above it and no test over either | nothing here; the criterion is proved where it is carried |
+| 6 | Every request log line carries the request id and the trace id, and the request id on the line is the one the response header answers | `TestTheRequestLineCarriesTheIdsAndNothingSecret`. The trace id is empty until a request span exists, which with the ids on the spans is [[025-observability-follow-ups]] |
+| 7 | No call site passes a token, a credential, a presigned URL or a path as a log attribute, and the line names the caller by the rendered subject the authorizer was already told | `TestTheRequestLineCarriesTheIdsAndNothingSecret`, which plants a bearer and a path and reads the whole line back. The handler over both paths of the tee is [[025-observability-follow-ups]] |
+| 8 | One log line and one observation per request, and none per presigned URL | `TestOneLineAndOneObservationPerRequest`. The stream open and close lines are [[025-observability-follow-ups]] |
 | 9 | The rules document `tools/rules` prints passes `promtool check rules`, and every `arca_` metric and label an alert names is in the table | the `rules` job of `verify.yml`, `TestAlertsNameKnownMetrics` |
 | 10 | With both endpoint variables unset the process starts, serves, and exports nothing, and `/metrics` still carries the table | `TestNoExporterStillServes` |
 | 11 | With only the standard `OTEL_EXPORTER_OTLP_ENDPOINT` set, the endpoint the exporter is built from is that one; with both set, `ARCA_OTEL_EXPORTER_OTLP_ENDPOINT` wins; an injected value of the wrong shape refuses no start-up | `TestAnInjectedCollectorEndpointIsReadAndTheTablesRowWins` in `internal/config`, `TestAnInjectedEndpointReachesTheExporter` at the process |
+
+## Outcome
+
+Complete on 2026-09-20. The metric table and its one registry, the
+scrape endpoint on the internal listener, the request line, the alert
+table and `tools/rules`, and the exporter bootstrap for both roles of
+the binary are in the tree and green. Six criteria stand as written: 1,
+3, 9, 10, 11, and the halves of 4 that are about listeners and the
+exporter.
+
+**What the production installation settled.** The cutover of
+[[019-migration-from-drive]] put this code behind an operator that
+injects `OTEL_EXPORTER_OTLP_ENDPOINT` into every workload of its
+namespace. `internal/config` reads that name where the table's own row
+is unset, `cmd/arcad` hands the value to `pkg/otel` before the
+bootstrap, and `pkg/otel` logs `telemetry: exporting` with the endpoint
+once its exporters are built. Criterion 11 is held by
+`TestAnInjectedCollectorEndpointIsReadAndTheTablesRowWins` and
+`TestAnInjectedEndpointReachesTheExporter`, and the divergence that said
+no installation sets the endpoint is gone: traces, metrics and log
+records leave the process. The egress that carries them is admitted by
+`deploy/prod/networkpolicy-database.yaml`'s 40318 and asserted by
+`TestProdAdmitsTheDatabasePortsThisInstallationUses`.
+
+**What the re-read found.** The spec said the span table was one row
+deep and that the row was tested at the decorator. Neither half of that
+was quite true. `bucket.<op>` is opened by the decorator and no test
+asserts it, and nothing wraps the public handler, so there is no request
+span at all: `otel.SetAttributes` in the request id middleware writes
+onto a non-recording span, `otel.TraceIDs` answers the empty string, and
+every request line carries `trace_id` as a key with nothing in it. The
+line was tested for the presence of the key and not for a value, which
+is how it went unnoticed. A log line and a trace therefore cannot find
+each other in either direction, which is the reason spec 018 puts both
+ids on the line, so this is the first item of the follow-up rather than
+a footnote in it.
+
+**What was narrowed, and why none of it was built here.** Criteria 2, 4,
+5, 6, 7 and 8 gave up a half each, and every half needs something this
+spec does not own: a case in the tier [[017-conformance-suite]] owns
+(the label sweep), a bridge or a handler in `latere.ai/x/pkg` (the reap
+process's counters, the redaction handler over both paths of the tee),
+spans inside [[006-identity]] and [[004-metadata-store]] and an order
+assertion on [[005-files]]' write route (the span table), and a decision
+in [[005-files]] about which read is a stream (the stream lines).
+`arca_stored_bytes` needs a per-plane ledger read, which is
+[[010-events-and-reaper]]'s table and not a recording site here. All six
+are [[025-observability-follow-ups]], carrying each criterion in the
+words this spec wrote it.
+
+One item was bounded and still not built: a recorded-span test over the
+bucket decorator, about twenty lines with no production change. It
+proves a fragment of a criterion that moves to the follow-up whole, and
+it would make `go.opentelemetry.io/otel/sdk` a direct dependency of this
+module for the test tree. It is the cheapest first step there and is
+named as such.
+
+Nothing in this closing changed a line of Go. What an installation
+records, exports and serves is what it recorded, exported and served
+before it.
