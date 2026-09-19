@@ -214,7 +214,7 @@ func (s *Service) RevokeLink(w http.ResponseWriter, r *http.Request) {
 	}
 	res := authorizer.Link{ID: g.ID, Owner: g.Owner, Path: g.PathPrefix}.Resource()
 	if _, err := s.authorizer.Lookup(r.Context(), authorizer.ActionLinkRevoke, res); err != nil {
-		api.WriteError(w, r, api.FromAuth(err))
+		api.WriteError(w, r, api.Refused(err, noLink(r.PathValue("id"))))
 		return
 	}
 	if err := s.withdraw(r.Context(), g); err != nil {
@@ -264,6 +264,13 @@ func (c Counter) Counts(ctx context.Context, q store.Querier, owners []string) (
 	return c.store.CountLinks(ctx, q, owners)
 }
 
+// noLink is the one answer a link that is not there and a link this caller
+// may not see share, which is what keeps a denied revoke from saying that the
+// id resolves (spec 015, criterion 25).
+func noLink(id string) error {
+	return api.Refuse(api.CodeNotFound, "there is no link %q", id)
+}
+
 // tokenGrant reads the grant a link route's {id} names, and refuses a
 // subject grant with the answer a missing one gets: the two kinds ask two
 // actions, and a grant reached through the wrong route is not one that route
@@ -272,7 +279,7 @@ func (s *Service) tokenGrant(r *http.Request) (store.Grant, error) {
 	g, err := s.store.Get(r.Context(), s.db.Querier(), r.PathValue("id"))
 	switch {
 	case missing(err):
-		return store.Grant{}, api.Refuse(api.CodeNotFound, "there is no link %q", r.PathValue("id"))
+		return store.Grant{}, noLink(r.PathValue("id"))
 	case err != nil:
 		return store.Grant{}, fmt.Errorf("shares: read the link: %w", err)
 	case g.GranteeKind == store.GranteeSubject:

@@ -399,11 +399,13 @@ func (s *Service) find(r *http.Request, see visibility) (store.Workspace, error)
 }
 
 // ask puts the one question a route asks about a workspace it has read. A
-// deny is the not-found every other refusal here is.
+// deny is the not-found every other refusal here is, developer detail
+// included: the row was read by the id the route names, so the absence that
+// id would have given is what a deny answers (spec 015, criterion 25).
 func (s *Service) ask(r *http.Request, action string, ws store.Workspace) error {
 	ctx := r.Context()
 	if _, err := s.authorizer.Lookup(ctx, action, resource(ws).Resource()); err != nil {
-		return api.FromAuth(err)
+		return api.Refused(err, notFound(r.PathValue("id")))
 	}
 	return nil
 }
