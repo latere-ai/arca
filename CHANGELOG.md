@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.1.2 - 2026-09-19
+
 - **`make run` checks the installation it just started, and prints requests
   that write.** The one command from a clean clone now runs all seven of its
   steps: once the server is ready it runs `arcad check` against it, so the
