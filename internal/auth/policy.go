@@ -90,6 +90,13 @@ func Granted(action string) (Permission, bool) {
 	return p, ok
 }
 
+// Admits reports whether a caller holding one rung may perform an action
+// that needs another, which is the whole of what the ladder says. It is
+// exported because an authorizer decides the same way off the grant the
+// question of spec 006 carries, and a second copy of the comparison is a
+// second answer waiting to disagree with this one.
+func Admits(held, need Permission) bool { return rung(held) >= rung(need) }
+
 // GrantLookup answers the grant step of spec 006's flowchart: the highest
 // live permission subject holds on a prefix of path in owner's space.
 // [PermissionNone] is no grant at all.
