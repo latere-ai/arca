@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.1.8 - 2026-09-20
+
 - **The administration routes answer at the production origin.** The
   overlay's Ingress enumerates the path prefixes Arca claims, because the
   origin is shared and a catch-all would take the whole host, and `/v1/admin`
