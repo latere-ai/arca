@@ -225,6 +225,45 @@ func TestTheBucketVariablesAreCheckedForShape(t *testing.T) {
 	}
 }
 
+// TestAnInjectedCollectorEndpointIsReadAndTheTablesRowWins is spec 018's
+// export under an operator that instruments a whole namespace: such an
+// operator injects the OpenTelemetry standard variables into every workload,
+// and OTEL_EXPORTER_OTLP_ENDPOINT is the name it injects. The table's own row
+// wins wherever it is set, and with it unset the standard name is what the
+// server reads, because a core that ignored the standard name would be the
+// one workload in the namespace looking healthy while exporting nothing.
+//
+// The shape is held against the table's row alone. A value that arrived by
+// injection is the platform's and is parsed by the exporter that owns the
+// standard name, and a namespace-wide telemetry variable is not a reason this
+// replica refuses to serve bytes.
+func TestAnInjectedCollectorEndpointIsReadAndTheTablesRowWins(t *testing.T) {
+	const injected = "http://10.0.0.7:40318"
+	c, err := Load(required(map[string]string{"OTEL_EXPORTER_OTLP_ENDPOINT": injected}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.OTelEndpoint != injected {
+		t.Errorf("with only the standard variable set, OTelEndpoint = %q, want %q", c.OTelEndpoint, injected)
+	}
+
+	const own = "https://collector.example:4318"
+	c, err = Load(required(map[string]string{
+		"ARCA_OTEL_EXPORTER_OTLP_ENDPOINT": own,
+		"OTEL_EXPORTER_OTLP_ENDPOINT":      injected,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.OTelEndpoint != own {
+		t.Errorf("with both set, OTelEndpoint = %q, want the table's row %q", c.OTelEndpoint, own)
+	}
+
+	if _, err := Load(required(map[string]string{"OTEL_EXPORTER_OTLP_ENDPOINT": "collector.example"})); err != nil {
+		t.Errorf("an injected endpoint of %q refused the start-up: %v", "collector.example", err)
+	}
+}
+
 func TestTheDatabaseURLIsOneTheMigratorCanReadToo(t *testing.T) {
 	for _, raw := range []string{"host=db user=arca dbname=arca", "mysql://db/arca", "db:5432/arca"} {
 		_, err := Database(env(map[string]string{"ARCA_DATABASE_URL": raw}))

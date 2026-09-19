@@ -11,7 +11,7 @@ depends_on:
   - specs/009-workspaces.md
   - specs/010-events-and-reaper.md
   - specs/013-api.md
-affects: [internal/metrics/, internal/api/, internal/blob/, internal/store/, internal/auth/, internal/events/, internal/files/, internal/uploads/, internal/workspaces/, internal/reaper/, cmd/arcad/, tools/rules/, deploy/base/prometheusrule.yaml, .github/workflows/verify.yml]
+affects: [internal/metrics/, internal/config/, internal/api/, internal/blob/, internal/store/, internal/auth/, internal/events/, internal/files/, internal/uploads/, internal/workspaces/, internal/reaper/, cmd/arcad/, tools/rules/, deploy/base/prometheusrule.yaml, .github/workflows/verify.yml]
 effort: medium
 created: 2026-09-18
 updated: 2026-09-19
@@ -51,6 +51,13 @@ table and renders `deploy/base/prometheusrule.yaml`. The commits are `f502744` (
 the registry), `e884c2f` (the exporter and the listener), `0b0e9e5` (the
 instrumentation), `2c8e9f3` (the alerts and the tool) and `91542ac` (the
 documentation). The gate passes at each of them.
+
+The endpoint's second name landed on 2026-09-19, before the cutover of
+[[019-migration-from-drive]]: `internal/config` reads the standard
+`OTEL_EXPORTER_OTLP_ENDPOINT` where the table's own row is unset, which is
+what the namespace this installation deploys into injects into every
+workload. The Design says which name wins and why the injected one is not
+held to a shape; the divergence below says what was true before.
 
 ### What records, and what waits
 
@@ -95,12 +102,22 @@ decisions by outcome, and as `arca_reaper_findings_total{kind="share_expired"}`.
   own.
 - **The endpoint reaches `pkg/otel` through the process environment.** That
   package reads `OTEL_EXPORTER_OTLP_ENDPOINT` as it builds its exporters and
-  takes no endpoint field, so `cmd/arcad` sets that variable from
-  `ARCA_OTEL_EXPORTER_OTLP_ENDPOINT` before the bootstrap. The table of
-  [[002-repository-scaffold]] still owns one prefix and one lookup, and a
-  collector's operator injecting the standard name still works. The write is
-  a function variable, so a test drives the translation without touching the
-  environment of the test binary.
+  takes no endpoint field, so `cmd/arcad` sets that variable from the
+  endpoint `internal/config` resolved, before the bootstrap. The write is a
+  function variable, so a test drives the translation without touching the
+  environment of the test binary. Where the endpoint came from the standard
+  name the write puts the same value back, so the exporter reads it whether
+  or not the write lands, and the warning a failed write logs names the row
+  an operator would edit.
+
+  Until 2026-09-19 the standard name worked by accident rather than by
+  contract: `internal/config` read the prefixed name alone, and export under
+  an injecting operator happened only because `pkg/otel` reads the process
+  environment itself. Nothing in this repository said so, no test held it,
+  and criterion 10 said the opposite, so a change that handed `pkg/otel` an
+  endpoint instead of leaking the environment would have taken export with
+  it and failed nothing. `internal/config` reads both names now, and the
+  Design above says which wins.
 - **`arcad reap`'s counters do not leave over OTLP**, which is half of
   criterion 4. The scrape endpoint is `latere.ai/x/pkg/metrics`, a registry
   that writes the Prometheus text format and reaches no exporter, and the
@@ -172,7 +189,8 @@ decisions by outcome, and as `arca_reaper_findings_total{kind="share_expired"}`.
 | 7 | Holds at the call site and not at a handler; see the divergence above |
 | 8 | Holds for the request: `TestOneLineAndOneObservationPerRequest`. The stream halves wait on [[005-files]] |
 | 9 | Holds. `TestAlertsNameKnownMetrics`, `TestEveryRowOfTheSpecTableIsAnAlert` and `TestTheCommittedManifestIsCurrent`; the `rules` job runs `promtool check rules` over what the tool prints |
-| 10 | Holds. `TestNoExporterStillServes` |
+| 10 | Holds. `TestNoExporterStillServes`, whose environment is a map carrying neither endpoint variable |
+| 11 | Holds. `TestAnInjectedCollectorEndpointIsReadAndTheTablesRowWins` at the configuration and `TestAnInjectedEndpointReachesTheExporter` at the process, which starts `serve` with the standard name alone and reads what the bootstrap was handed. The collector is also in `dialled` in `test/deploy/examples_test.go` under both names, so an overlay that writes either into a manifest is held to the egress rule; deploy/prod's 40318 is admitted by a policy and asserted by `TestProdAdmitsTheDatabasePortsThisInstallationUses`, because an injected endpoint reaches no manifest that test can read |
 
 ## Design
 
@@ -186,17 +204,30 @@ runs the reaper on the API replicas scrapes the same counters from
 `/metrics`.
 
 `cmd/arcad` calls `otel.Bootstrap` with the service name `arcad`, the
-version of `internal/version`, and the endpoint from
-`ARCA_OTEL_EXPORTER_OTLP_ENDPOINT` ([[002-repository-scaffold]]'s
-table). The variable carries the `ARCA_` prefix rather than the
-standard `OTEL_` name because that table owns every variable the server
-reads and every one is read through one lookup function, so an operator
-configures one prefix and a test passes one map; `pkg/otel` receives
-the value as its endpoint. Unset exports nothing: spans are still
-created and discarded, and `/metrics` still serves, so a self-hoster
-with no collector loses no local signal. Sampling is `pkg/otel`'s
-default of 0.2, which `arcad` does not override and the conformance run
-sets to always-on.
+version of `internal/version`, and the endpoint `internal/config`
+resolved. Unset exports nothing: spans are still created and discarded,
+and `/metrics` still serves, so a self-hoster with no collector loses
+no local signal. Sampling is `pkg/otel`'s default of 0.2, which `arcad`
+does not override and the conformance run sets to always-on.
+
+**Two variables carry the endpoint, and the prefixed one wins.**
+`ARCA_OTEL_EXPORTER_OTLP_ENDPOINT` is [[002-repository-scaffold]]'s
+row, and it is what an installation that configures Arca sets. With
+that row unset the server reads the standard
+`OTEL_EXPORTER_OTLP_ENDPOINT`. The reason is first-principles rather
+than convenience: those are the OpenTelemetry standard's own names, an
+operator that injects them into every workload of a namespace is
+following that standard, and a core that read only its own name would
+be the one workload there looking healthy while exporting nothing. The
+table's rule is untouched, because both names are read through the one
+lookup function it names, so a test still passes one map.
+
+The shape is checked against the prefixed row alone. An injected value
+was written for every workload of a namespace rather than for this
+installation, and the exporter that owns the standard name is what
+parses it; a telemetry variable Arca did not ask for is not a reason a
+replica refuses to serve bytes, which is the same rule the failed
+handover below already follows.
 
 ### Metrics
 
@@ -419,4 +450,5 @@ telemetry ([[012-administration]]).
 | 7 | A canary of each kind (a bearer, a link token, a bucket secret key, a presigned URL, an `Authorization` header) appears on neither path of the tee | `TestLogsRedact` |
 | 8 | One log line per request, one per stream open and close, none per part and none per presigned URL | `TestLogVolume` |
 | 9 | The rules document `tools/rules` prints passes `promtool check rules`, and every `arca_` metric and label an alert names is in the table | the `rules` job of `verify.yml`, `TestAlertsNameKnownMetrics` |
-| 10 | With `ARCA_OTEL_EXPORTER_OTLP_ENDPOINT` unset the process starts, serves, and exports nothing, and `/metrics` still carries the table | `TestNoExporterStillServes` |
+| 10 | With both endpoint variables unset the process starts, serves, and exports nothing, and `/metrics` still carries the table | `TestNoExporterStillServes` |
+| 11 | With only the standard `OTEL_EXPORTER_OTLP_ENDPOINT` set, the endpoint the exporter is built from is that one; with both set, `ARCA_OTEL_EXPORTER_OTLP_ENDPOINT` wins; an injected value of the wrong shape refuses no start-up | `TestAnInjectedCollectorEndpointIsReadAndTheTablesRowWins` in `internal/config`, `TestAnInjectedEndpointReachesTheExporter` at the process |

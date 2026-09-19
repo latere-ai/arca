@@ -8,6 +8,7 @@
 package config
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"net"
@@ -124,16 +125,19 @@ type Config struct {
 	// TrashRetention is how long a trashed object stays restorable (spec
 	// 005) before the reconciler purges it from both stores (spec 010).
 	TrashRetention time.Duration
-	// OTelEndpoint is ARCA_OTEL_EXPORTER_OTLP_ENDPOINT, where traces, logs
-	// and metrics go (spec 018). Empty exports nothing: spans are created
-	// and discarded, and /metrics still serves, so a self-hoster with no
-	// collector loses no local signal.
+	// OTelEndpoint is where traces, logs and metrics go (spec 018). Empty
+	// exports nothing: spans are created and discarded, and /metrics still
+	// serves, so a self-hoster with no collector loses no local signal.
 	//
-	// The variable carries the ARCA_ prefix rather than the standard OTEL_
-	// name because spec 002's table owns every variable the server reads and
-	// every one is read through this function, so an operator configures one
-	// prefix and a test passes one map. cmd/arcad hands the value to
-	// pkg/otel, which reads the standard name.
+	// Two variables carry it. ARCA_OTEL_EXPORTER_OTLP_ENDPOINT is spec 002's
+	// row and wins wherever it is set, so an operator configures one prefix
+	// and a test passes one map. With that row unset the standard
+	// OTEL_EXPORTER_OTLP_ENDPOINT is read, because an operator that injects
+	// it into every workload of a namespace is following the OpenTelemetry
+	// standard, and a core that read only its own name would be the one
+	// workload there looking healthy while exporting nothing. Both are read
+	// through this function, so the rule holds whatever cmd/arcad later does
+	// with the value.
 	OTelEndpoint string
 	// TestDrift names one way this build is to answer the contract wrong,
 	// so the conformance suite of spec 017 is proved to catch a server that
@@ -184,6 +188,11 @@ func Load(getenv Getenv) (Config, error) {
 	// sorted message below.
 	note := func(format string, args ...any) { problems = append(problems, fmt.Sprintf(format, args...)) }
 
+	// The two spellings of the exporter's endpoint, read here because the
+	// shape below is held against one of them and not the other.
+	ownEndpoint := value(getenv("ARCA_OTEL_EXPORTER_OTLP_ENDPOINT"))
+	injectedEndpoint := value(getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
+
 	c := Config{
 		PublicAddr:      withDefault(getenv("ARCA_PUBLIC_ADDR"), DefaultPublicAddr),
 		InternalAddr:    withDefault(getenv("ARCA_INTERNAL_ADDR"), DefaultInternalAddr),
@@ -203,7 +212,7 @@ func Load(getenv Getenv) (Config, error) {
 		AuthorizerURL:       value(getenv("ARCA_AUTHORIZER_URL")),
 		AuthorizerToken:     value(getenv("ARCA_AUTHORIZER_TOKEN")),
 		AdminSubjects:       authz.ParseSubjects(getenv("ARCA_ADMIN_SUBJECTS")),
-		OTelEndpoint:        value(getenv("ARCA_OTEL_EXPORTER_OTLP_ENDPOINT")),
+		OTelEndpoint:        cmp.Or(ownEndpoint, injectedEndpoint),
 		RequestsPerMinute: count(getenv("ARCA_REQUESTS_PER_MINUTE"),
 			DefaultRequestsPerMinute, "ARCA_REQUESTS_PER_MINUTE", note),
 		UnauthenticatedRequestsPerMinute: count(getenv("ARCA_UNAUTHENTICATED_REQUESTS_PER_MINUTE"),
@@ -260,8 +269,13 @@ func Load(getenv Getenv) (Config, error) {
 	if problem := checkDatabaseURL(c.DatabaseURL); problem != "" {
 		problems = append(problems, problem)
 	}
-	if c.OTelEndpoint != "" {
-		if err := checkURL(c.OTelEndpoint); err != nil {
+	// The shape is held against the table's own row alone. A value that
+	// arrived by injection was set for every workload of the namespace and is
+	// parsed by the exporter that owns the standard name; a telemetry
+	// variable this installation did not write is not a reason a replica
+	// refuses to serve bytes.
+	if ownEndpoint != "" {
+		if err := checkURL(ownEndpoint); err != nil {
 			note("ARCA_OTEL_EXPORTER_OTLP_ENDPOINT %s", err)
 		}
 	}

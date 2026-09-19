@@ -219,11 +219,24 @@ func TestTheStackScriptsAreExecutable(t *testing.T) {
 // dialled are the variables whose value is an address arcad opens a
 // connection to. ARCA_PUBLIC_URL is not one of them: it is the origin
 // clients reach this installation at, and nothing in the process dials it.
+//
+// The collector is here under both of its spellings, because internal/config
+// reads both: the table's own row, and the standard name an operator that
+// instruments a whole namespace injects. An overlay that writes either into a
+// manifest is held to the same egress rule as the bucket and the database.
+//
+// An injected endpoint reaches no manifest, so this test cannot see it and
+// nothing here holds deploy/prod's collector port: 40318 is asserted by
+// TestProdAdmitsTheDatabasePortsThisInstallationUses in prod_test.go, beside
+// the database ports, which is the only place the pairing of a port with an
+// endpoint no file in this tree carries can be asserted at all.
 var dialled = []string{
 	"ARCA_OIDC_ISSUERS",
 	"ARCA_AUTHORIZER_URL",
 	"ARCA_BUCKET_ENDPOINT",
 	"ARCA_DATABASE_URL",
+	"ARCA_OTEL_EXPORTER_OTLP_ENDPOINT",
+	"OTEL_EXPORTER_OTLP_ENDPOINT",
 }
 
 // endpoints is every address an overlay configures arcad to dial, mapped to

@@ -30,8 +30,12 @@ const ServiceName = "arcad"
 // otelEndpointVariable is the name pkg/otel reads the endpoint from.
 // ARCA_OTEL_EXPORTER_OTLP_ENDPOINT is the name spec 002's table owns, and
 // this is where the one becomes the other: the table stays one prefix an
-// operator sets and one map a test passes, and the shared package keeps
-// reading the standard name a collector's operator injects.
+// operator sets and one map a test passes.
+//
+// internal/config reads this name too, as the fallback an injecting operator
+// supplies, so an endpoint that arrived that way is written back unchanged
+// and the exporter reads it whether or not the write lands. The line below
+// therefore names the row an operator would edit.
 const otelEndpointVariable = "OTEL_EXPORTER_OTLP_ENDPOINT"
 
 // setenv is how the value reaches the shared package, which reads the
