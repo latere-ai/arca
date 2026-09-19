@@ -172,6 +172,26 @@ func FromAuth(err error) *Refusal {
 	return &Refusal{Code: code, Detail: detail}
 }
 
+// Refused renders the deny of one question about a row the caller named.
+//
+// A deny at lookup carries the whole answer an absence carries, developer
+// detail included, so a caller reading every byte of the envelope cannot
+// tell a refusal from a missing row: absent is the refusal the same handler
+// writes when the row is not there, and answering with it here is what keeps
+// the two one answer. Any other deny keeps the reason the authorizer gave,
+// because the caller may see the row the question was about.
+//
+// The collapse is here rather than beside one package's handlers because it
+// is the sentence spec 013 makes about every 404 and criterion 2 of spec 015
+// holds to: one implementation per package is how four routes were left out
+// of it (spec 015, criterion 25).
+func Refused(err, absent error) error {
+	if auth.CodeOf(err) == auth.CodeNotFound {
+		return absent
+	}
+	return FromAuth(err)
+}
+
 // WriteError sends a refusal in the family envelope: the code, the fixed
 // user sentence of its row, and the developer detail beside the request id
 // in details. An error that is not a refusal is an internal one, and its

@@ -248,7 +248,7 @@ func (s *Service) ReadGrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := s.authorizer.Lookup(r.Context(), authorizer.ActionShareRead, resourceOf(g)); err != nil {
-		api.WriteError(w, r, api.FromAuth(err))
+		api.WriteError(w, r, api.Refused(err, noGrant(r.PathValue("id"))))
 		return
 	}
 	httpjson.Write(w, http.StatusOK, view(g))
@@ -267,7 +267,7 @@ func (s *Service) RevokeGrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := s.authorizer.Lookup(r.Context(), authorizer.ActionShareRevoke, resourceOf(g)); err != nil {
-		api.WriteError(w, r, api.FromAuth(err))
+		api.WriteError(w, r, api.Refused(err, noGrant(r.PathValue("id"))))
 		return
 	}
 	if err := s.revoke(r.Context(), g); err != nil {
@@ -308,13 +308,20 @@ func (s *Service) subjectGrant(r *http.Request) (store.Grant, error) {
 	g, err := s.store.Get(r.Context(), s.db.Querier(), r.PathValue("id"))
 	switch {
 	case missing(err):
-		return store.Grant{}, api.Refuse(api.CodeNotFound, "there is no grant %q", r.PathValue("id"))
+		return store.Grant{}, noGrant(r.PathValue("id"))
 	case err != nil:
 		return store.Grant{}, fmt.Errorf("shares: read the grant: %w", err)
 	case g.GranteeKind != store.GranteeSubject:
 		return store.Grant{}, api.Refuse(api.CodeNotFound, "the grant %q is a link, and a link is read at its own route", g.ID)
 	}
 	return g, nil
+}
+
+// noGrant is the one answer a grant that is not there and a grant this
+// caller may not see share, which is what keeps a denied read from saying
+// that the id resolves (spec 015, criterion 25).
+func noGrant(id string) error {
+	return api.Refuse(api.CodeNotFound, "there is no grant %q", id)
 }
 
 // resourceOf is the question a grant is asked about: every field spec 008's

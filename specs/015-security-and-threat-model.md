@@ -1,6 +1,6 @@
 ---
 title: "Security and threat model: assets, actors, boundaries, every threat with its control and its test"
-status: testing
+status: complete
 track: core
 depends_on:
   - specs/001-architecture.md
@@ -45,10 +45,10 @@ first draft of
 this file named thirty-eight test functions, of which three existed.
 The controls were real and tested throughout; the names in the table
 were invented at drafting time and never reconciled with the tree. A
-threat model whose proofs cannot be looked up is a claim, so criterion
-23 asks for that reconciliation to be mechanical rather than manual.
-Building it is the work this spec still names, and it is why the spec
-stands at `testing` rather than `complete`.
+threat model whose proofs cannot be looked up is a claim, so the
+reconciliation is mechanical rather than manual: `test/threatmodel`
+reads this file and holds every `Test` cell to what the toolchain lists
+and every commitment of `SECURITY.md` to a row of the controls table.
 
 It is also the source of `SECURITY.md`, so a reviewer who arrives at the
 repository reads a handful of commitments and one document rather than
@@ -299,30 +299,41 @@ several of the controls above are shaped the way they are.
 | a usage check failed open: the predecessor recomputed usage outside the write and admitted the write when the query failed, so enforcement stopped exactly when the database was under pressure | the charge and the check are one statement inside the write's own transaction. A failure refuses the write and records no charge | `internal/events/usage.go`, `internal/files/write.go` |
 | `If-None-Match` admitted a matching write | every put and every copy destination carries `If-None-Match: *`, and a store that refuses the condition degrades loudly and fails `arcad check` rather than silently writing unconditionally | `internal/blob/s3.go`, `memory.go` |
 
-### What the collapse does not cover
+### What the collapse covers, and where it lives
 
-The eight sites above are the paths a caller names. Four lookup sites
-still render the authorizer's reason into `details.detail` where an
-absence would render the handler's own sentence: `share.read` and
+The eight sites of the row above are the paths a caller names. Four more
+lookup sites rendered the authorizer's reason into `details.detail`
+where an absence rendered the handler's own sentence: `share.read` and
 `share.revoke` (`internal/shares/grants.go`), `link.revoke`
 (`internal/shares/links.go`), and every workspace route that reads a row
-before it asks (`internal/workspaces/lifecycle.go`, `ask`).
+before it asks (`internal/workspaces/lifecycle.go`, `ask`). They now
+answer through the collapse too.
 
-The status line, the error code and the user sentence are identical in
-all four cases, which is what [[017-conformance-suite]] compares and
-what a caller reads. Only the developer detail differs. The
-discriminator is the identifier: those four are addressed by a
-`gen_random_uuid()` primary key, so there is nothing to enumerate over,
-and to use the oracle at all a caller must already hold an id that was
-disclosed to it. The eight that were fixed are addressed by a path the
-caller chooses, where enumeration is the whole attack.
+Nothing about the exposure forced it. The status line, the error code
+and the user sentence were identical in all four cases, which is what
+[[017-conformance-suite]] compares and what a caller reads; only the
+developer detail differed. The discriminator is the identifier: those
+four are addressed by a `gen_random_uuid()` primary key, so there is
+nothing to enumerate over, and to use the oracle at all a caller must
+already hold an id that was disclosed to it. The eight that were fixed first are
+addressed by a path the caller chooses, where enumeration is the whole
+attack.
 
-This is stated rather than left implicit because [[013-api]] says a 404
-from a deny is byte for byte a 404 from an absence, and on those four
-routes it is not. The gap is worth an explicit narrowing of that
-sentence or four more calls through `Refused`; it is named in the
-acceptance criteria as outstanding, and it is not a leak of any space's
-contents.
+What forced it is that [[013-api]] says a 404 from a deny is byte for
+byte a 404 from an absence, with no route excepted. A sentence with four
+exceptions is a sentence a reader has to check route by route, and the
+next route somebody adds is the one where the identifier is
+caller-chosen. So the sentence stands as written and the code was made
+to match it, rather than the sentence being narrowed to the routes where
+enumeration is the attack.
+
+The collapse itself is `api.Refused`, one function: it answers a deny
+whose code is `not_found` with the refusal the handler writes for an
+absence, and keeps the authorizer's reason on every other deny.
+`files.Service.Refused` is that function with the object's sentence
+formatted for it, `shares` passes `noGrant` and `noLink`, and
+`workspaces` passes its own `notFound`. One implementation per package
+is how four routes were left out of the rule to begin with.
 
 ### Controls
 
@@ -331,7 +342,7 @@ it. Names are as they appear in the tree.
 
 | Threat | Control | Spec | Test |
 |---|---|---|---|
-| a caller reaching another subject's space | every handler reads, asks, then acts; a deny on the caller's own action is 403, a deny while resolving a reference is the answer an absence gives | 006, 013 | `TestEveryHandlerAsksExactlyOneActionBeforeItActs`, `TestEveryLookupDenyIsTheAnswerAnAbsenceGives`, `TestADenyOnAnotherSpaceIsAMissingObject` |
+| a caller reaching another subject's space | every handler reads, asks, then acts; a deny on the caller's own action is 403, a deny while resolving a reference is the answer an absence gives, on every route that reads a row before it asks | 006, 013 | `TestEveryHandlerAsksExactlyOneActionBeforeItActs`, `TestEveryLookupDenyIsTheAnswerAnAbsenceGives`, `TestEveryShareLookupDenyIsTheAnswerAnAbsenceGives`, `TestEveryWorkspaceLookupDenyIsTheAnswerAnAbsenceGives`, `TestADenyOnAnotherSpaceIsAMissingObject` |
 | a route that acts before it asks, or asks twice | every registered route declares one action and is held to it | 013 | `TestEveryRouteAsksExactlyOneAction`, `TestARouteThatIsDeniedDoesNotAct` |
 | a revoked permission still honoured | an allow is cached per replica for the answer's `ttl`, a deny briefly, unavailability never; the key is subject, action and resource id. The window is the accepted staleness and the authorizer sets it per answer | 006 | `TestAnAllowIsCachedPerSubjectActionAndResource`, `TestAnExpiredAnswerIsAskedAgain` |
 | an allow that was never decided | the client fails closed on anything but a 200 carrying `allow` | 006 | `TestUnavailableIsNeverAnAllow`, `TestAnAuthorizerThatAnswersNothingIsNeverAnAllow` |
@@ -375,6 +386,7 @@ it. Names are as they appear in the tree.
 | a consumer of the module deriving another's key | `object.ID.Key` takes a prefix and an id and derives nothing from a path or an owner, and an id that is not one has no key at all | 003 | `TestAnIDThatIsNoIDHasNoShardAndNoKey`, `TestParseIDRefusesEverySpellingButTheCanonicalOne` |
 | a dependency with a known vulnerability | the `vuln` gate on every push, and a dependency list held to invariant 9 of [[001-architecture]] | 002 | the gate |
 | an image that is not what was released | keyless cosign signatures, an SBOM attestation, and a build provenance attestation on both images, verified from a clean runner before the release exists | 016 | `TestTheReleaseImageCopiesWhatThePipelineBuilt`, `TestReleasePublishesUnderTheOwnersNamespace`, and the `release-verify` job |
+| this table drifting from the tree, so a control's proof cannot be looked up | every `Test` cell is held to what `go test -list` finds across the repository, every commitment of `SECURITY.md` to a row of this table, and every spec a row cites to this spec's `depends_on` | this spec | `TestEveryControlNamesATestTheTreeHas`, `TestEveryCommitmentOfTheRootFileIsAControl`, `TestEverySpecAControlNamesIsADependency` |
 
 ### Configuration this spec needs
 
@@ -425,22 +437,34 @@ the subject it names, for the answer's `ttl` ([[006-identity]]).
 ### The root file
 
 `SECURITY.md` carries the reporting address, the response times, and the
-commitments, each of which is a row above:
+commitments. It is prose, because the reader is somebody who arrived at
+the repository and wants five sentences rather than a table, and each of
+its commitments is a row of the controls table above. This is the
+mapping, one row per commitment and per control that answers it, and the
+commitment cell is the clause `SECURITY.md` writes, word for word.
+`TestEveryCommitmentOfTheRootFileIsAControl` holds the three sides
+together: a commitment the root file adds and this table does not answer
+fails, and so does a row naming a control the table above does not have.
 
-1. Every `/v1` request carries a token from an issuer the operator
-   listed, and nothing reads or writes an object before the authorizer
-   has decided. A decision the authorizer cannot give is a refusal,
-   never an allow.
-2. A byte leaves Arca through an authorized read, a presigned URL that
-   names one object and one method and five minutes, or a public grant
-   the space's own holder minted, and through nothing else.
-3. A public link is a 256 bit capability that grants reading one
-   subtree, is revoked by one row with no grace window, and can never
-   grant a write.
-4. Arca reads no claim for meaning. Nothing about a token but its
-   issuer, subject, audience, and validity changes what Arca does, so an
-   installation's access policy lives in its authorizer and nowhere in
-   this code.
+| Commitment, as `SECURITY.md` words it | The control that answers it |
+|---|---|
+| every `/v1` request carries a token from an issuer the operator listed, and nothing reads or writes an object before the authorizer has decided, with a refused object answering exactly as a missing one | a token minted for another service replayed at Arca |
+| every `/v1` request carries a token from an issuer the operator listed, and nothing reads or writes an object before the authorizer has decided, with a refused object answering exactly as a missing one | a route that acts before it asks, or asks twice |
+| every `/v1` request carries a token from an issuer the operator listed, and nothing reads or writes an object before the authorizer has decided, with a refused object answering exactly as a missing one | a caller reaching another subject's space |
+| a decision the authorizer cannot give is a refusal, never an allow | an allow that was never decided |
+| a decision the authorizer cannot give is a refusal, never an allow | a grants table that cannot answer admitting a stranger |
+| a presigned URL names one object, one method, and one expiry, and is never logged | a presigned URL leaking from a redirect, a log, or a history |
+| a public link resolves to the object its token names and to nothing beside it | a link read outside the subtree it names |
+| a workspace has one writer at a time and a lease that expires | two writers in one workspace |
+| a workspace has one writer at a time and a lease that expires | a workspace lease held by a sandbox that died |
+
+Two commitments the first draft of this section carried are not in the
+root file and are not in this table: that Arca reads no claim for
+meaning, and the list of the three ways a byte leaves. Both are true and
+both are rows of the controls table; neither is a sentence `SECURITY.md`
+makes, and this section said it was from the day it was drafted. That is
+the drift the harness ends: the section and the file it describes are
+now read by a test rather than by whoever last edited one of them.
 
 ### What arrives from Drive
 
@@ -469,13 +493,14 @@ installation must pass ([[017-conformance-suite]]).
 
 ## Acceptance criteria
 
-Criteria 1 to 22 are met by tests in the tree. Criteria 23 to 25 name
-work that does not exist yet and are what holds this spec at `testing`.
+Every criterion is met by tests in the tree. The unit tier is green over
+them; the cells naming a store, e2e or conformance test are green in
+their own tier.
 
 | # | Criterion | Proved by |
 |---|---|---|
 | 1 | Every handler asks exactly one action of the vocabulary before it acts, and a denied route acts on nothing | `TestEveryHandlerAsksExactlyOneActionBeforeItActs`, `TestEveryRouteAsksExactlyOneAction`, `TestARouteThatIsDeniedDoesNotAct` |
-| 2 | A deny at lookup is the answer an absence gives, status, code, sentence and developer detail alike, on every route whose identifier the caller chooses. Criterion 25 carries the routes where it does not | `TestEveryLookupDenyIsTheAnswerAnAbsenceGives`, `TestADenyOnAnotherSpaceIsAMissingObject` |
+| 2 | A deny at lookup is the answer an absence gives, status, code, sentence and developer detail alike, on every route that reads a row before it asks, whether the caller chose the identifier or this service minted it | `TestEveryLookupDenyIsTheAnswerAnAbsenceGives`, `TestEveryShareLookupDenyIsTheAnswerAnAbsenceGives`, `TestEveryWorkspaceLookupDenyIsTheAnswerAnAbsenceGives`, `TestADenyOnAnotherSpaceIsAMissingObject` |
 | 3 | An authorizer that answers nothing, answers malformed, or answers without `allow` refuses every request and never allows one; so does a grants table that cannot answer | `TestUnavailableIsNeverAnAllow`, `TestAnAuthorizerThatAnswersNothingIsNeverAnAllow`, `TestAGrantsTableThatCannotAnswerIsNoDecision`, `TestAGrantsTableThatCannotAnswerStopsTheQuestion` |
 | 4 | An authorizer that allows the probe resource is reported and fails the check, and one that cannot be reached fails it too | `TestTheProbeIsDeniedAndAnEndpointThatAllowsItIsReported`, `TestAnUnavailableEndpointFailsTheCheck` |
 | 5 | A token for another audience, from an unlisted issuer, past its age bound, or with no subject is refused, and an `http://` issuer off loopback fails start-up | `TestServiceConformance`, `TestATokenWithNoSubjectIsRefused`, `TestTheAudienceDefaults`, `TestAnHTTPIssuerOffLoopbackNeedsTheVariable` |
@@ -496,6 +521,72 @@ work that does not exist yet and are what holds this spec at `testing`.
 | 20 | An `event.read` answer carrying a `filter` narrows the tail, a deny refuses it, and an authorizer that answers nothing never opens it | `TestEventFilter`, `TestTheTailRefusesADeny`, `TestTheTailFailsClosedOnAnAuthorizerThatAnswersNothing` |
 | 21 | The subject bucket limits per subject and the address bucket limits what has no subject, a refused bearer is still charged, and a rate of zero limits nothing | `TestTheSubjectRateLimitIsPerSubject`, `TestTheAddressRateLimitBoundsWhatHasNoSubject`, `TestARefusedBearerIsStillCounted`, `TestARateOfZeroLimitsNothing` |
 | 22 | The pod is non-root, read-only, capability-free and holds no service account token; every overlay admits the egress its own endpoints need and no more; every credential is mounted from a Secret | `TestBaseIsConfined`, `TestEveryOverlayAdmitsTheEgressItsEndpointsNeed`, `TestProdAdmitsTheDatabasePortsThisInstallationUses`, `TestTheBaseKeepsCredentialsInSecrets`, `TestProdKeepsCredentialsInSecrets` |
-| 23 | Every `Test` cell in the controls table names a function `go test -list ./...` finds | not built. A harness reading this file and the test list is what would have caught the thirty-five names this spec carried before 2026-09-19 |
-| 24 | Every commitment in `SECURITY.md` maps to a row of the controls table, and every row's spec is in this file's `depends_on` | not built |
-| 25 | The four lookup sites addressed by a server-minted id answer a deny exactly as an absence, or [[013-api]] narrows its sentence to the routes where the identifier is caller-chosen | not done. Named under "What the collapse does not cover" |
+| 23 | Every `Test` cell in the controls table names a function `go test -tags=tiers -list ./...` finds, and every row names something that proves it | `TestEveryControlNamesATestTheTreeHas` in `test/threatmodel`, which reads this file and runs that listing |
+| 24 | Every commitment in `SECURITY.md` is a row of this spec's commitment mapping and every row of that mapping is a control of the table, and every spec a control cites is in this file's `depends_on` | `TestEveryCommitmentOfTheRootFileIsAControl`, `TestEverySpecAControlNamesIsADependency` |
+| 25 | The four lookup sites addressed by a server-minted id answer a deny exactly as an absence, developer detail included, so [[013-api]]'s sentence holds with no route excepted | `TestEveryShareLookupDenyIsTheAnswerAnAbsenceGives`, `TestEveryWorkspaceLookupDenyIsTheAnswerAnAbsenceGives` |
+
+## Outcome
+
+Complete on 2026-09-19. Criteria 1 to 22 were already proved by tests in
+the tree when this spec reached `testing`; the three that held it there
+are built, and none of them was split into a follow-up.
+
+**Criterion 23 is `test/threatmodel`**, a test-only package beside
+`test/deploy`. `TestEveryControlNamesATestTheTreeHas` parses the
+controls table out of this file through `runtime.Caller`, runs `go test
+-tags=tiers -list '.*' ./...` from the repository root, and holds every
+`Test` cell to that listing. All 118 names in the cells resolve today,
+114 of them distinct. The listing
+carries the tiers tag because eleven of the cells name a store, e2e or
+conformance test, which a bare listing does not see; a tagged listing is
+a superset of the untagged one, so one run answers for both. That has a
+consequence a reader should find written down: the unit run now compiles
+the tier files too, so a tier that stops compiling reds `go test ./...`
+rather than waiting for the next `make test-e2e`. It costs the suite
+about twenty seconds per invocation.
+
+**Criterion 24 is the commitment mapping** under "The root file" and
+`TestEveryCommitmentOfTheRootFileIsAControl`. The test reads the
+commitments out of `SECURITY.md` as clauses of the paragraph that file
+writes them in, reads the mapping table here, and holds the two equal in
+both directions, then holds every control the mapping names to the
+controls table. It found the drift it was written for on its first run:
+`SECURITY.md` makes five commitments and this section listed four, of
+which one, that Arca reads no claim for meaning, is not in that file at
+all. The section is now the mapping and says what is not in the root
+file. `TestEverySpecAControlNamesIsADependency` is the criterion's
+second half, every spec number a control cites against this file's
+`depends_on`; it passed on arrival and never failed, so it is a guard
+rather than a repair.
+
+**Criterion 25 routed the four sites through the collapse** rather than
+narrowing [[013-api]]'s sentence. The earlier verifier's argument holds
+on the exposure: `share.read`, `share.revoke`, `link.revoke` and the
+workspace routes are addressed by a `gen_random_uuid()` primary key, so
+the oracle was never walkable and no space's contents were reachable
+through it. It does not hold on the rule. A sentence in the API contract
+with four exceptions is one a reader has to check route by route, so the
+code was made to match the sentence: `api.Refused` is the collapse as
+one function, `files.Service.Refused` now delegates to it, and the four
+sites answer a `not_found` deny with the refusal their own absence
+writes. `TestEveryShareLookupDenyIsTheAnswerAnAbsenceGives` and
+`TestEveryWorkspaceLookupDenyIsTheAnswerAnAbsenceGives` drive seven
+routes twice each, once denied at lookup and once against a service
+holding nothing, and compare the envelopes byte for byte with the
+request id removed. Both failed on the authorizer's reason before the
+change and pass after it.
+
+Seven routes and not nine. The workspace renew, release, sync and
+materialize reach the same `ask` through `attachment` rather than
+through `lookup`, so the change covers them and a test cannot drive them
+the same way: opening the attachment they need asks the very action the
+attachment's mode names and is allowed, and [[006-identity]] caches an
+allow per subject, action and resource, so a deny set afterwards is not
+the answer the route reads. A case for them would measure the cache
+rather than the collapse, and the test says so where a reader looks.
+
+What the four sites answer differs only in `details.detail`, so no
+status, code or user sentence moved and [[017-conformance-suite]]'s
+comparisons are unchanged. The two new tests and the three of
+`test/threatmodel` are named in the controls table, which its own
+harness then checks.

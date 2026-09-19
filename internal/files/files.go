@@ -339,18 +339,14 @@ func (s *Service) Ask(ctx context.Context, owner, action string, res authz.Resou
 	return s.decide.Lookup(ctx, action, res)
 }
 
-// Refused renders the deny of one question about a named object. A deny at
-// lookup carries the whole answer an absence carries, developer detail
-// included, so a caller reading every byte of the envelope cannot tell a
-// refusal from a missing object: absent is the sentence the same handler
-// writes when the path is not there, and repeating it here is what keeps
-// the two one answer. Any other deny keeps the reason the authorizer gave,
-// because the caller may see the object the question was about.
+// Refused renders the deny of one question about a named object: absent is
+// the sentence the same handler writes when the path is not there, so a
+// deny and an absence are one answer, developer detail included.
+//
+// The collapse itself is [api.Refused], which every package that reads a row
+// before it asks answers a deny through.
 func (s *Service) Refused(err error, absent string, args ...any) error {
-	if auth.CodeOf(err) == auth.CodeNotFound {
-		return api.Refuse(api.CodeNotFound, absent, args...)
-	}
-	return api.FromAuth(err)
+	return api.Refused(err, api.Refuse(api.CodeNotFound, absent, args...))
 }
 
 // noLedger counts nothing and records nothing, which is a build whose spec
