@@ -166,6 +166,42 @@ func TestTheFlagsReachTheStubs(t *testing.T) {
 	}
 }
 
+// grantQuestion is a grantee's question over somebody else's object, with
+// the rung spec 006's resource carries.
+const grantQuestion = `{"subject":"https://issuer.example|dev","action":"file.read",` +
+	`"resource":{"kind":"File","id":"01J8R4","owner":"https://issuer.example|owner",` +
+	`"path":"files/reports/q3.pdf","plane":"files","grant":"read"}}`
+
+// TestTheGrantsFlagAdmitsAGrantee is the -grants mode of spec 014 through
+// the binary a tier runs: with no subject allowed by default, the grant on
+// the resource is the whole of what admits the read, and an action the rung
+// does not reach stays denied.
+func TestTheGrantsFlagAdmitsAGrantee(t *testing.T) {
+	addresses, stop := start(t, "-grants", "-allow", "")
+	defer stop()
+
+	bearer := map[string]string{"Authorization": "Bearer " + authorizer.DefaultToken}
+	if status, answer := post(t, addresses["authorizer"], grantQuestion, bearer); status != http.StatusOK || answer["allow"] != true {
+		t.Fatalf("a read grant did not admit file.read: %d %v", status, answer)
+	}
+	write := strings.Replace(grantQuestion, "file.read", "file.write", 1)
+	if _, answer := post(t, addresses["authorizer"], write, bearer); answer["allow"] != false {
+		t.Fatalf("a read grant admitted file.write: %v", answer)
+	}
+}
+
+// TestWithoutTheGrantsFlagAGranteeIsAStranger: the mode is off by default,
+// which is the endpoint a platform runs before it adds the row.
+func TestWithoutTheGrantsFlagAGranteeIsAStranger(t *testing.T) {
+	addresses, stop := start(t, "-allow", "")
+	defer stop()
+
+	bearer := map[string]string{"Authorization": "Bearer " + authorizer.DefaultToken}
+	if _, answer := post(t, addresses["authorizer"], grantQuestion, bearer); answer["allow"] != false {
+		t.Fatalf("a grantee was admitted with the mode off: %v", answer)
+	}
+}
+
 func TestEveryOutageModeReachesTheAuthorizer(t *testing.T) {
 	for _, mode := range []string{"malformed", "no-allow", "status:502"} {
 		t.Run(mode, func(t *testing.T) {

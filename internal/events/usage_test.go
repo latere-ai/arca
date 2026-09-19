@@ -103,6 +103,46 @@ func TestChargeAppliesTheDeltaInOneStatement(t *testing.T) {
 	}
 }
 
+// TestUsageReadsTheCounterAndTheRowsInOneStatement: the bytes come off the
+// ledger's own row and the paths off the file rows, which is spec 012's
+// split, and a root listing of spec 005 pays one round trip for both.
+func TestUsageReadsTheCounterAndTheRowsInOneStatement(t *testing.T) {
+	q := &fakeQuerier{row: values(int64(48213), int64(7))}
+	held, err := NewLedger().Usage(t.Context(), q, aSpace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if held.Bytes != 48213 || held.Files != 7 {
+		t.Fatalf("the read answered %+v", held)
+	}
+	if len(q.statements) != 1 {
+		t.Fatalf("the read sent %d statements", len(q.statements))
+	}
+	sent := q.statements[0]
+	for _, want := range []string{"FROM space_usage", "COUNT(*) FROM files", "deleted_at IS NULL"} {
+		if !strings.Contains(sent, want) {
+			t.Fatalf("the read sent %q, which does not hold %q", sent, want)
+		}
+	}
+	if q.args[0][0] != aSpace {
+		t.Fatalf("the read bound %v", q.args[0])
+	}
+}
+
+// TestUsageThatCannotBeReadIsAFailure: the number is part of a listing's
+// answer, so a counter that cannot be read is an error and never a zero a
+// caller would read as an empty space.
+func TestUsageThatCannotBeReadIsAFailure(t *testing.T) {
+	boom := errors.New("the connection went away")
+	held, err := NewLedger().Usage(t.Context(), &fakeQuerier{row: failing(boom)}, aSpace)
+	if err == nil {
+		t.Fatalf("a counter that cannot be read answered %+v", held)
+	}
+	if !errors.Is(err, boom) {
+		t.Fatalf("the failure is %v, and it does not carry the store's own", err)
+	}
+}
+
 // Criterion 6 of spec 010 at the seam: a ledger write that fails is a
 // failure the caller hears about, so the write it was charging for fails
 // with it. Nothing is admitted on a number that could not be written.

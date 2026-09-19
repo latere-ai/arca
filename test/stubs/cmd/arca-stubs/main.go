@@ -45,6 +45,7 @@ type options struct {
 	alg, allow, deny, failMode     string
 	limits, filter                 string
 	ttl                            int
+	grants                         bool
 }
 
 // run parses the flags, starts both stubs, prints one line per listener on
@@ -88,6 +89,7 @@ func parse(args []string, stderr io.Writer) (options, error) {
 	fs.StringVar(&o.limits, "limits", "", "a JSON object every allow carries as its limits")
 	fs.StringVar(&o.filter, "filter", "", "a JSON object every allow carries as its filter")
 	fs.IntVar(&o.ttl, "ttl", 0, "the seconds every allow is cacheable for")
+	fs.BoolVar(&o.grants, "grants", false, "answer a request the rule table denied by the grant on its resource: a grant admits the ladder's actions of its rung (spec 006)")
 	if err := fs.Parse(args); err != nil {
 		return o, err
 	}
@@ -129,6 +131,7 @@ func build(o options) (*stubs, error) {
 	if err := rules(s.authz, o); err != nil {
 		return nil, err
 	}
+	s.authz.Grants(o.grants)
 	if err := failMode(s.authz, o.failMode); err != nil {
 		return nil, err
 	}

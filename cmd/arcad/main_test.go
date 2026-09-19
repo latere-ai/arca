@@ -869,6 +869,13 @@ func (l *recordingLedger) Charge(_ context.Context, _ store.Querier, owner strin
 
 func (*recordingLedger) Read(context.Context, store.Querier, string) (int64, error) { return 0, nil }
 
+func (l *recordingLedger) Usage(_ context.Context, _ store.Querier, owner string) (events.Usage, error) {
+	if l.err != nil {
+		return events.Usage{}, l.err
+	}
+	return events.Usage{Bytes: l.charged[owner], Files: int64(len(l.charged))}, nil
+}
+
 func (*recordingLedger) Recompute(context.Context, store.Querier, string) (int64, error) {
 	return 0, nil
 }

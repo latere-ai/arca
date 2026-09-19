@@ -296,6 +296,13 @@ func (l fileLedger) Release(ctx context.Context, q store.Querier, owner string, 
 	return l.usage.Release(ctx, q, owner, bytes)
 }
 
+// Usage answers what a space holds, which a root listing of spec 005
+// reports beside its page.
+func (l fileLedger) Usage(ctx context.Context, q store.Querier, owner string) (files.Usage, error) {
+	held, err := l.usage.Usage(ctx, q, owner)
+	return files.Usage{Bytes: held.Bytes, Files: held.Files}, err
+}
+
 // Append records what happened to an object. It is the log's best-effort
 // append: the mutation has already happened when the row is written, so a
 // failed insert is a warning and never a refusal to the caller. The action

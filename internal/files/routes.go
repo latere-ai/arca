@@ -29,7 +29,7 @@ func Table() []api.Route {
 		{
 			Method: http.MethodGet, Path: "/v1/files/{owner}/{path...}",
 			Action: authorizer.ActionFileRead, Status: http.StatusOK,
-			Summary: "Read one object, its subtree with ?list=1, or its versions with ?versions=1.",
+			Summary: "Read one object, its subtree with ?list=1, which carries the space's usage at a plane root, or its versions with ?versions=1.",
 		},
 		{
 			Method: http.MethodHead, Path: "/v1/files/{owner}/{path...}",

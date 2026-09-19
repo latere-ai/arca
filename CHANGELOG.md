@@ -6,6 +6,33 @@ refused before it is pushed.
 
 ## Unreleased
 
+- A grantee is reachable under an external authorizer. Every question
+  about a file, an upload session or a workspace now carries `grant`, the highest live grant
+  the caller holds on a prefix of the resource's path, read from Arca's
+  own grants table before the question is asked and sent in both modes.
+  With `ARCA_AUTHORIZER_URL` set the endpoint saw an owner, a path, a
+  plane and a size and could not tell a grantee from a stranger, so every
+  read of a shared object was refused and `POST /v1/shares` wrote a row
+  no decision consulted. An endpoint consumes it by admitting the actions
+  of the rung's ladder: `read` admits `file.read`, `file.list`,
+  `workspace.read`, `workspace.list`; `write` adds the writes, including
+  the `upload.write` a multipart session asks, so a grantee's large write
+  is admitted on the same rung as a small one; `manage` adds the
+  `share.*` actions. A question about the caller's own space
+  carries no `grant`, because ownership is not a grant. The stub
+  authorizer's new `-grants` flag is that row, for a deployment to check
+  its own endpoint against.
+
+- An owner can read their own usage. A listing of a plane root, `GET
+  /v1/files/{owner}/files?list=1` or the same for `workspaces`, now
+  carries `space` beside `entries`: `{"bytes": N, "files": N}`, the bytes
+  the usage ledger counts and the live paths of the space, trash
+  excluded. It was only on `GET /v1/admin/overview` before, which takes
+  `space.admin`, so a console could not show a person what they hold
+  without an administrator's credential. There is no new route and no new
+  action: the question is the `file.list` the listing already asks. A
+  listing below a plane root carries no `space`.
+
 - **The production overlay routes everything the release smoke reads.**
   The Ingress claimed `/readyz` and `/version` at the origin, and the
   smoke the deploy job runs after the rollout asks for `/livez` and

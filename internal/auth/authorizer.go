@@ -74,6 +74,9 @@ type Authorizer struct {
 	// the two decides is a property of the deployment and not of a request.
 	// Nil records nothing.
 	decided func(outcome string)
+	// grants is the table the resource's grant is resolved through, bound by
+	// [Authorizer.WithGrants] and read by both modes. Nil resolves none.
+	grants GrantLookup
 }
 
 // NewAuthorizer wraps whichever authorizer this deployment runs.
@@ -135,6 +138,14 @@ func (a *Authorizer) Lookup(ctx context.Context, action string, res authz.Resour
 }
 
 func (a *Authorizer) decide(ctx context.Context, action string, res authz.Resource, deny Code) (Decision, error) {
+	// The grant the caller holds on the resource rides on the question, so
+	// an endpoint reads a grantee as one (spec 006). A table that cannot
+	// answer is no decision, and no decision is never an allow.
+	res, err := a.granted(ctx, res)
+	if err != nil {
+		a.record(OutcomeUnavailable)
+		return Decision{}, refuse(CodeAuthorizerUnavailable, "%s: %v", action, err)
+	}
 	req := Envelope(CallerFrom(ctx), RequestFrom(ctx), action, res)
 	d, err := a.inner.Authorize(ctx, req)
 	if err != nil {

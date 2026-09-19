@@ -4,6 +4,7 @@
 package files
 
 import (
+	"errors"
 	"net/http"
 	"slices"
 	"strings"
@@ -79,6 +80,63 @@ func TestAListingPagesOnThePathAndSynthesisesTheDirectoriesBelowIt(t *testing.T)
 	}
 	if got := h.listing(t, h.object("files/notes")+"?list=1"); len(got.Entries) != 3 {
 		t.Fatalf("a trashed row is still listed: %+v", got.Entries)
+	}
+}
+
+// TestARootListingCarriesWhatTheSpaceHolds is spec 005's usage on the
+// listing: an owner reads the bytes and the paths of its own space off the
+// root of a plane, at the file.list it already asked, with no new route and
+// no administrator's action.
+func TestARootListingCarriesWhatTheSpaceHolds(t *testing.T) {
+	h := newHarness(t)
+	h.seed(t, "files/a.md", "hello")
+	h.seed(t, "files/notes/b.md", "world!")
+	h.seed(t, "workspaces/build/main.go", "package main")
+
+	for _, plane := range []string{"files", "workspaces"} {
+		page := h.listing(t, h.object(plane)+"?list=1")
+		if page.Space == nil {
+			t.Fatalf("the root of the %s plane carries no space: %+v", plane, page)
+		}
+		// The ledger counts a space and not a plane, so both roots answer
+		// the whole of what the space holds.
+		if page.Space.Files != 3 {
+			t.Errorf("the %s root reports %d files, and the space holds three", plane, page.Space.Files)
+		}
+		if want := int64(len("hello") + len("world!") + len("package main")); page.Space.Bytes != want {
+			t.Errorf("the %s root reports %d bytes, want %d", plane, page.Space.Bytes, want)
+		}
+	}
+
+	// A listing deeper in the tree carries none. The ledger counts a space,
+	// so a number beside a subtree would answer a question nobody asked.
+	if page := h.listing(t, h.object("files/notes")+"?list=1"); page.Space != nil {
+		t.Errorf("a subtree listing carries a space: %+v", page.Space)
+	}
+	// A trashed path leaves the count, as it leaves the listing.
+	if w := h.call(t, http.MethodDelete, h.object("files/a.md"), nil); w.Code != http.StatusNoContent {
+		t.Fatalf("the trash answered %d", w.Code)
+	}
+	if page := h.listing(t, h.object("files")+"?list=1"); page.Space.Files != 2 {
+		t.Errorf("a trashed path is still counted: %+v", page.Space)
+	}
+}
+
+// TestARootListingWhoseLedgerCannotAnswerIsAnOutage: the number is part of
+// the answer, so a counter that cannot be read is storage unavailable and
+// never a page reporting nothing, which a caller would read as an empty
+// space.
+func TestARootListingWhoseLedgerCannotAnswerIsAnOutage(t *testing.T) {
+	h := newHarness(t)
+	h.seed(t, "files/a.md", "hello")
+	h.ledger.refuse = errors.New("the counter cannot be read")
+
+	w := h.call(t, http.MethodGet, h.object("files")+"?list=1", nil)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("a ledger that cannot answer gave %d: %s", w.Code, w.Body)
+	}
+	if got := code(t, w); got != api.CodeStorageUnavailable {
+		t.Errorf("the refusal is %q, want %q", got, api.CodeStorageUnavailable)
 	}
 }
 

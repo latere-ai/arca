@@ -67,6 +67,23 @@ func (s *session) failAuthorizer(t testing.TB, mode string) {
 	}
 }
 
+// grantsMode turns the stub's grants mode on and off and reports whether the
+// stub understood the call. It is the one route here outside the shared
+// control API: a decider that reads the `grant` of spec 006 is a property of
+// the endpoint and not of the contract, so a target running a stub without
+// the mode answers false and the case records what it could not verify
+// rather than failing a target that conforms.
+func (s *session) grantsMode(t testing.TB, on bool) bool {
+	t.Helper()
+	r := s.do(t, request{
+		method:      http.MethodPut,
+		path:        strings.TrimRight(s.options.AuthorizerControl, "/") + "/grants",
+		body:        strings.NewReader(body(fields{"enabled": on})),
+		contentType: "application/json",
+	})
+	return r.status < 300
+}
+
 // quota puts a byte limit on every allow the stub answers, which is the one
 // way a limit reaches Arca: the core stores none. An empty limit takes it
 // off again.

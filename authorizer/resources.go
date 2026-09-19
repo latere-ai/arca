@@ -15,6 +15,11 @@ import "latere.ai/x/pkg/authz"
 // sent empty, so an authorizer that reads one can tell "no source path" from
 // "a source path this version does not send". Owner is the rendered subject
 // of spec 006, "<issuer>|<sub>", and never a bare sub.
+//
+// Grant is the one field no handler sets. A file and a workspace carry the
+// rung the caller holds on the resource's own subtree, which internal/auth
+// resolves from Arca's grants table before it asks; the four kinds that
+// carry none are the ones no grant reaches (spec 006).
 
 // Bytes is a size an object carries, for the Size field of a question that
 // knows one. It exists so a zero-byte object sends a zero and a question
@@ -39,13 +44,19 @@ type File struct {
 	Size *int64
 	// From is the source path of a move, absent on every other question.
 	From string
+	// Grant is the rung the caller holds on a prefix of Path in Owner's
+	// space: read, write, or manage, absent where the caller holds none.
+	// internal/auth reads it off Arca's own grants table and puts it here
+	// before the question goes out, so a caller building a File leaves it
+	// empty.
+	Grant string
 }
 
 // Resource renders the file as the envelope carries it.
 func (f File) Resource() authz.Resource {
 	return authz.NewResource(KindFile, f.ID, fields(
 		field{"owner", f.Owner}, field{"path", f.Path}, field{"plane", f.Plane},
-		size(f.Size), field{"from", f.From},
+		size(f.Size), field{"from", f.From}, field{"grant", f.Grant},
 	))
 }
 
@@ -110,12 +121,16 @@ type Workspace struct {
 	ID    string
 	Owner string
 	Slug  string
+	// Grant is the rung the caller holds on the workspace's own subtree,
+	// workspaces/<slug>, which is the prefix a grant on a workspace covers
+	// (spec 001). It is filled and left empty on the same terms as a file's.
+	Grant string
 }
 
 // Resource renders the workspace as the envelope carries it.
 func (w Workspace) Resource() authz.Resource {
 	return authz.NewResource(KindWorkspace, w.ID, fields(
-		field{"owner", w.Owner}, field{"slug", w.Slug},
+		field{"owner", w.Owner}, field{"slug", w.Slug}, field{"grant", w.Grant},
 	))
 }
 
