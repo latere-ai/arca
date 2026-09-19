@@ -115,10 +115,14 @@ down:
 # The store tier: every package that reaches a store, against the real
 # MinIO and the real Postgres. Without the stack's variables every test
 # in it skips itself with the remediation in its message.
+#
+# tools/migrate-drive is here too. The row copy of spec 019 runs between two
+# databases and reaches no bucket, and where its rewrite rules are proved
+# against a fake, what Drive's schema and Arca's admit is proved only here.
 test-store: up
 	$(TIER_ENV) $(GO) test -tags=tiers -race -count=1 -run '^TestStore' \
 		./internal/blob/... ./internal/store/... ./internal/events/... ./internal/reaper/... \
-		./internal/files/... ./internal/uploads/...
+		./internal/files/... ./internal/uploads/... ./tools/migrate-drive/...
 
 # The e2e tier: arcad as a process against the stack and the stubs.
 test-e2e: up build build-stubs
