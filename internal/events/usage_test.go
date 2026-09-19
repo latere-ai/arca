@@ -213,7 +213,13 @@ func TestRecomputeSumsTheRowsThatHoldTheBytes(t *testing.T) {
 	if err != nil || bytes != 48213 {
 		t.Fatalf("the recomputation answered %d, %v", bytes, err)
 	}
-	for _, table := range []string{"files", "file_versions"} {
+	// upload_sessions is the third table and not an optional one. A session
+	// is charged its declared bytes the moment it opens, so a recomputation
+	// that leaves the table out answers less than the ledger holds, and the
+	// reaper's correction then writes that lower number over a live charge.
+	// Repeat it and a space's usage never reflects what its open sessions
+	// hold.
+	for _, table := range []string{"files", "file_versions", "upload_sessions"} {
 		if !strings.Contains(q.statements[0], "FROM "+table) {
 			t.Fatalf("the recomputation reads %q and leaves out %s", q.statements[0], table)
 		}

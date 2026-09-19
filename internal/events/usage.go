@@ -237,15 +237,23 @@ func (ledger) Usage(ctx context.Context, q store.Querier, owner string) (Usage, 
 
 // Recompute sums the rows that hold the space's bytes.
 //
-// Two tables today. The third of spec 010's sum is upload_sessions, whose
-// declared bytes count from the moment a session opens; it joins this
-// statement with spec 007, which creates the table, and a space with an open
-// session reconciles low until it does.
+// Three tables, and the third is not optional. An upload session is charged
+// its declared bytes the moment it opens, so that a caller cannot hold a
+// thousand sessions and fit them all under one limit (spec 010). A
+// recomputation that summed only the two settled tables would answer less
+// than the ledger holds, and the reaper's reconciliation would then write
+// that lower number over the live charge: open a session, wait one reap
+// interval, and the charge is gone. Repeat it and a space's usage never
+// reflects what its sessions hold.
+//
+// This statement was written when spec 007's table did not exist yet and
+// said so. It exists.
 func (ledger) Recompute(ctx context.Context, q store.Querier, owner string) (int64, error) {
 	var bytes int64
 	err := q.QueryRow(ctx, `
-		SELECT (SELECT COALESCE(SUM(size_bytes), 0) FROM files         WHERE owner = $1)
-		     + (SELECT COALESCE(SUM(size_bytes), 0) FROM file_versions WHERE owner = $1)`,
+		SELECT (SELECT COALESCE(SUM(size_bytes), 0)     FROM files           WHERE owner = $1)
+		     + (SELECT COALESCE(SUM(size_bytes), 0)     FROM file_versions   WHERE owner = $1)
+		     + (SELECT COALESCE(SUM(declared_size), 0)  FROM upload_sessions WHERE owner = $1)`,
 		owner).Scan(&bytes)
 	if err != nil {
 		return 0, fmt.Errorf("events: recompute the usage of %q: %w", owner, err)

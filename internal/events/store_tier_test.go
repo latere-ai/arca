@@ -109,6 +109,55 @@ func TestStoreTheLedgerAndTheLogApplyOverTheNumbersTheirSpecsHaveNotFilled(t *te
 // on the answer's limit is admitted, the next byte over is refused with the
 // used and limit figures, and a delete on a space over the limit is
 // admitted.
+// TestStoreRecomputeCountsAnOpenSessionsDeclaredBytes is spec 010's
+// reconciliation criterion, against the three tables that actually hold a
+// space's bytes.
+//
+// An upload session is charged its declared size the moment it opens, so
+// that a caller cannot hold a thousand open and fit them all under one
+// limit. A recomputation that summed only the settled tables would answer
+// less than the ledger holds, and the reaper writes a recomputation over the
+// counter: the charge for every open session would be erased once per reap
+// interval, and a caller who opened one, waited, and repeated would never be
+// charged for any of them.
+//
+// It is a store-tier test because it is a claim about one SQL statement over
+// three real tables, which is exactly what a fake querier cannot answer.
+func TestStoreRecomputeCountsAnOpenSessionsDeclaredBytes(t *testing.T) {
+	db, ledger := tier(t), NewLedger()
+	q := db.Querier()
+	ctx := t.Context()
+
+	if _, err := q.Exec(ctx, `
+		INSERT INTO files (owner, path, object_id, size_bytes, checksum, created_by)
+		VALUES ($1, 'files/settled.bin', gen_random_uuid(), 100, 'sha256:x', 'tester')`,
+		aSpace); err != nil {
+		t.Fatalf("insert the settled file: %v", err)
+	}
+	settled, err := ledger.Recompute(ctx, q, aSpace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settled != 100 {
+		t.Fatalf("the recomputation answered %d with one settled file of 100 bytes", settled)
+	}
+
+	if _, err := q.Exec(ctx, `
+		INSERT INTO upload_sessions (owner, path, object_id, upload_id, declared_size, created_by, expires_at)
+		VALUES ($1, 'files/open.bin', gen_random_uuid(), 'upload-1', 40, 'tester', now() + interval '1 hour')`,
+		aSpace); err != nil {
+		t.Fatalf("open the session: %v", err)
+	}
+	withOpen, err := ledger.Recompute(ctx, q, aSpace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withOpen != 140 {
+		t.Fatalf("the recomputation answered %d with an open session of 40 bytes beside it, want 140; "+
+			"a reconciliation that misses the session erases its charge", withOpen)
+	}
+}
+
 func TestStoreUsageAdmitsTheLimitAndRefusesTheByteAfterIt(t *testing.T) {
 	db, ledger := tier(t), NewLedger()
 	q := db.Querier()
