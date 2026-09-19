@@ -175,9 +175,13 @@ Rules of the table:
 
 A `File` and a `Workspace` carry `grant`: the highest live grant the
 caller holds on a prefix of the resource's path in the caller's favour,
-`read`, `write` or `manage`, absent where they hold none. `internal/auth`
-resolves it through the same `GrantLookup` seam the owner policy reads,
-before the question goes out, in both modes. It is here because an
+`read`, `write` or `manage`, absent where they hold none and absent on a
+question about the caller's own space, because ownership is not a grant
+and is more than any grant on a subtree of that space could confer.
+`internal/auth` resolves it through the same `GrantLookup` seam the owner
+policy reads, before the question goes out, in both modes; the table is
+not read at all for the cases where the field would be absent, which is
+what keeps a read of one's own object at the cost it had. It is here because an
 authorizer that is handed an owner, a path, a plane and a size cannot
 tell a grantee from a stranger, so every read of a shared object is a
 deny and the grants of [[008-shares-and-links]] reach nothing: `POST
@@ -189,6 +193,14 @@ authorizer's: an endpoint that admits the ladder's actions of the rung
 answers as the owner policy does, and one with rules of its own may
 admit less. A `Share`, a `Link`, an `Event` and a `Space` carry no
 `grant`, because no grant reaches their actions.
+
+The member is spelled `grant` on the wire and nowhere else, and that
+spelling is the whole of the pairing between this core and an endpoint:
+Arca renders it from `authorizer.File.Grant` and
+`authorizer.Workspace.Grant`, and an endpoint reads
+`resource.grant` off the envelope. No test spans the two, because they
+are two modules; what holds them together is this row of the table, so a
+rename here is a rename of the contract.
 
 Every label the console shows for these actions comes from the
 vocabulary's `WithLabels`, so a platform's key picker reads the words
@@ -324,7 +336,7 @@ and the owner policy is not consulted.
 | 10 | `arcad check` refuses an authorizer that allows the probe resource | `internal/check` test against the stub |
 | 11 | `pkg/authz/conformance` passes against the owner policy | `internal/auth` test |
 | 12 | No Go file outside `internal/auth` names `org_id`, `roles`, or `principal_type` | the `identity` gate's `claims` rule |
-| 13 | Every question about a file or a workspace that names a path carries the caller's rung as `grant`, absent where they hold none, in both modes, and a grants table that cannot answer is `authorizer_unavailable` | `internal/auth` grant test |
+| 13 | Every question about a file or a workspace that names a path carries the caller's rung as `grant`, absent where they hold none and absent on the caller's own space, in both modes, and a grants table that cannot answer is `authorizer_unavailable` | `internal/auth` grant test |
 | 14 | Under an external authorizer that admits the ladder's actions of `resource.grant`, a grantee reads a shared object and a caller with no grant on it reads a missing one | `test/conformance` `case006Grantee` |
 
 ## Not in this spec

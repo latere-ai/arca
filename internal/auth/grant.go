@@ -46,8 +46,15 @@ func (a *Authorizer) WithGrants(g GrantLookup) *Authorizer {
 
 // granted answers the resource with the caller's rung on it, and the
 // resource unchanged where there is no rung to add: a kind no grant reaches,
-// a question that names no path, an anonymous caller, or a caller who holds
-// nothing here.
+// a question that names no path, an anonymous caller, a caller asking about
+// its own space, or a caller who holds nothing here.
+//
+// A caller's own space is settled without reading the table, which is spec
+// 006's sentence that ownership is not a grant. It is also the question this
+// core is asked most: an owner holds the whole space, which is strictly more
+// than any grant on a subtree of it could confer, so the field would carry
+// nothing an endpoint could act on and the query would be pure cost on the
+// hot read path.
 //
 // A table that cannot answer is no decision. The failure reaches the caller
 // as authorizer_unavailable and never as a deny, which is the rule spec 006
@@ -60,7 +67,7 @@ func (a *Authorizer) granted(ctx context.Context, res authz.Resource) (authz.Res
 	}
 	subject := CallerFrom(ctx).Subject
 	owner, path := res.String("owner"), grantPath(res)
-	if subject == "" || owner == "" || path == "" {
+	if subject == "" || owner == "" || path == "" || subject == owner {
 		return res, nil
 	}
 	held, err := a.grants.Permission(ctx, owner, subject, path)

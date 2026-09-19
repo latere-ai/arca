@@ -16,8 +16,10 @@ refused before it is pushed.
   no decision consulted. An endpoint consumes it by admitting the actions
   of the rung's ladder: `read` admits `file.read`, `file.list`,
   `workspace.read`, `workspace.list`; `write` adds the writes; `manage`
-  adds the `share.*` actions. The stub authorizer's new `-grants` flag is
-  that row, for a deployment to check its own endpoint against.
+  adds the `share.*` actions. A question about the caller's own space
+  carries no `grant`, because ownership is not a grant. The stub
+  authorizer's new `-grants` flag is that row, for a deployment to check
+  its own endpoint against.
 
 - An owner can read their own usage. A listing of a plane root, `GET
   /v1/files/{owner}/files?list=1` or the same for `workspaces`, now

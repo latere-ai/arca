@@ -90,6 +90,12 @@ func TestTheQuestionCarriesTheCallersGrant(t *testing.T) {
 		// The three public link routes carry no caller, and a table read for
 		// nobody would answer for nobody.
 		{"an anonymous caller", auth.PermissionRead, aFile("01J8R4"), "", "", ""},
+		// Ownership is not a grant, and it is strictly more than any grant on
+		// a subtree of the space could confer, so the space's own owner is
+		// settled without reading the table at all. That is also the question
+		// this core is asked most, and the read it saves is on the hot path.
+		{"the space's own owner", auth.PermissionManage, aFile("01J8R4"), alice, "", ""},
+		{"the owner of a workspace", auth.PermissionManage, aWorkspace("01J8R7"), alice, "", ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			s := endpoint(t)
@@ -209,9 +215,11 @@ func TestBothModesResolveTheGrant(t *testing.T) {
 	}
 
 	// The owner policy answers in process, so what proves the field was
-	// resolved is the table being read for it: the policy's own grant step
-	// is reached only once the frame has refused, and the owner's question
-	// below is one the frame allows.
+	// resolved is the table being read twice: once here for the field an
+	// endpoint would read, and once by the policy's own grant step, which is
+	// the step the policy decides on. The two are deliberately not folded
+	// together: a policy deciding on a field it filled in itself would be
+	// deciding on its own answer.
 	policyTable := &lookup{held: auth.PermissionRead}
 	own, err := auth.Start(t.Context(), auth.Options{
 		Issuers: []string{iss.URL()}, Audience: audience, Grants: policyTable,
@@ -222,10 +230,26 @@ func TestBothModesResolveTheGrant(t *testing.T) {
 	if own.Mode != auth.ModeOwnerPolicy {
 		t.Fatalf("the mode is %q, want %q", own.Mode, auth.ModeOwnerPolicy)
 	}
-	if _, err := own.Authorizer.Decide(serving(alice), authorizer.ActionFileRead, aFile("01J8R4")); err != nil {
+	if _, err := own.Authorizer.Decide(serving(carol), authorizer.ActionFileRead, aFile("01J8R4")); err != nil {
+		t.Fatalf("the grantee's question was refused: %v", err)
+	}
+	if len(policyTable.asked) != 2 {
+		t.Errorf("the owner policy read the grants table %d times, want twice: the field and its own grant step", len(policyTable.asked))
+	}
+
+	// And the owner's own question reads it for neither, because the frame
+	// allows an owner before the grant step and ownership is not a grant.
+	ownerTable := &lookup{held: auth.PermissionManage}
+	plain, err := auth.Start(t.Context(), auth.Options{
+		Issuers: []string{iss.URL()}, Audience: audience, Grants: ownerTable,
+	})
+	if err != nil {
+		t.Fatalf("the node would not start: %v", err)
+	}
+	if _, err := plain.Authorizer.Decide(serving(alice), authorizer.ActionFileRead, aFile("01J8R4")); err != nil {
 		t.Fatalf("the owner's own question was refused: %v", err)
 	}
-	if len(policyTable.asked) != 1 {
-		t.Errorf("the owner policy read the grants table %d times for the field, want once", len(policyTable.asked))
+	if len(ownerTable.asked) != 0 {
+		t.Errorf("an owner's own question read the grants table %d times, want none", len(ownerTable.asked))
 	}
 }
