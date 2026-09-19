@@ -1,6 +1,6 @@
 ---
 title: "Administration: the overview across spaces, moderation, restore, the record of what was done, the check command"
-status: testing
+status: complete
 track: core
 depends_on:
   - specs/001-architecture.md
@@ -11,10 +11,10 @@ depends_on:
   - specs/008-shares-and-links.md
   - specs/009-workspaces.md
   - specs/010-events-and-reaper.md
-affects: [internal/admin/, internal/check/, internal/api/, internal/store/, cmd/arcad/, docs/]
+affects: [internal/admin/, internal/check/, internal/api/, internal/auth/, internal/events/, internal/store/, cmd/arcad/, docs/]
 effort: medium
 created: 2026-09-18
-updated: 2026-09-19
+updated: 2026-09-20
 author: changkun
 ---
 
@@ -62,15 +62,39 @@ adapter over [[005-files]]' `Service.RestoreTrashed` and
 links a space actually holds, and the restore restores; the surface is
 forty-one of [[013-api]]'s forty-one routes with these two in it.
 
-Criteria 1, 2, 3, 4, 5, 6, 7, 12, 13 and 14 have passing tests. Criteria
-8, 9, 10 and 11 belong to the mutations and the log, so they land with
-[[005-files]] and [[008-shares-and-links]]; nothing here deletes from the
-log, and this spec's own mutation is the restore. The spec stays at
-`testing` until they close.
+Criteria 1 through 7 and 9 through 14 have passing tests. Criterion 8's
+transactional half is [[021-transactional-audit-events]], split out on
+2026-09-20.
+
+The mark of criterion 9 landed on 2026-09-20 as one seam. `auth.WithMarks`
+puts a record on every request in the API's first middleware, before the
+verifier; `Authorizer.mark` writes into it after an allow whose resource
+names a space the caller does not own and whose grant step added no rung;
+`events.Append` reads it and puts `admin: true` on the row. No handler
+touches any of the three, which is the property the Design asks for: a
+route added later is recorded without being told to be, and no writer can
+put the key on an event that did not earn it.
 
 What the implementation decided, where this spec was silent or where the
 tree made another reading better:
 
+- **The mark's grant test is the resource's and not a second lookup.**
+  This spec says the test is mechanical: the caller's subject is not the
+  space's owner, and `shares.Covering` returns nothing for the path. The
+  decision path already resolves the caller's rung before every question
+  about a file, an upload or a workspace, so the mark reads the rung off
+  the resource rather than asking again, and the cost this spec priced at
+  one extra indexed lookup is zero. The rung is the caller's own subject
+  grant, which is narrower than `Covering` reads: a token or a public
+  grant covering the path does not suppress the mark. That difference
+  reaches no row while `shares_token_is_read_only` keeps both of those
+  read only and no read appends an event, and it is written down here
+  rather than left for whichever release lifts one of the two. For a kind
+  no grant reaches, a space or a share or a link or an event, there is no
+  subtree for a grant to cover and no lookup happens at all:
+  `space.admin` on somebody else's space marks on the ownership test
+  alone, which is the right answer for a question no grant can explain.
+  The overview names no space, so it marks nothing.
 - **The owner policy does not admit a space's own owner for
   `space.admin`.** The policy of [[006-identity]] handed the shared frame
   an owned object for every action, so the frame's owner step admitted an
@@ -281,12 +305,21 @@ recorded the same facts a second time and answered them from a second
 surface with its own filters, its own cursor, and its own way of falling
 behind.
 
-An administrative mutation appends its event inside the same transaction
-as the mutation. Either both commit or neither does, so the log cannot
-miss a moderation and cannot record one that was rolled back. That is
-the one exception to the best-effort append of [[010-events-and-reaper]],
-and it exists because a notification that may be dropped and a record
-that may not are different things.
+An administrative mutation should append its event inside the same
+transaction as the mutation, so that either both commit or neither does
+and the log cannot miss a moderation or record one that was rolled back.
+That is the one exception to the best-effort append of
+[[010-events-and-reaper]], and it exists because a notification that may
+be dropped and a record that may not are different things.
+
+The tree does not do that yet, and this paragraph said it did until
+2026-09-20. Every append runs after its mutation, on the pool's querier
+rather than the transaction's, through a seam whose `Append` answers
+nothing and whose implementation swallows a failure into a warning: a
+crash between the two leaves a moderation nothing recorded. Making the
+two one commit is a change to every write path in the tree and to three
+ledger seams, so it is [[021-transactional-audit-events]] and not a line
+here.
 
 What marks an event as administrative is the actor. Every event carries
 the subject that caused it, so an event whose `actor` is not the space's
@@ -383,7 +416,7 @@ dependency and holds no connection open.
 | `drive/internal/handler/admin.go` | `internal/admin/` | the gate becomes the `space.admin` question; the `principal_type` gate on mutations goes; a deny is 403, not a hidden 404 |
 | the same file's `handleAdminOverview` | the overview | `pending_approvals` goes with the approval queue; `active_locks` becomes `leases`; `trashed_bytes` and `links` are added; the installation-wide totals become the metrics of [[018-observability]] and the route answers one row per space |
 | the same file's `/v1/admin/deleted` and `DELETE /v1/admin/files/{id}` | `GET /v1/trash?owner=`, `GET /v1/workspaces/deleted?owner=`, and `DELETE /v1/files/{owner}/{path...}` | no administrative copy of a listing or a delete; an administrator asks the owner's own route about somebody else's space |
-| migration `000006_admin_audit` | nothing | the `admin_audit` table does not arrive. The record is the event log of [[010-events-and-reaper]], written in the mutation's transaction |
+| migration `000006_admin_audit` | nothing | the `admin_audit` table does not arrive. The record is the event log of [[010-events-and-reaper]]; writing it in the mutation's transaction is [[021-transactional-audit-events]] |
 | `drive/specs/.archive/009-admin-governance.md` | this spec | the surface and the transactional record survive; the separate audit table and its routes go; the live `/tokeninfo` re-check on mutations goes, because Arca calls an issuer for a key set and nothing else |
 | `drive/internal/handler/directory.go`, `principal_directory` | nothing | display data built from the `email` claim; a console resolves names against its identity provider |
 | nothing | `internal/check/`, `arcad check` | new; the service Arca replaces had one deployment and no installer, so it had nothing to check |
@@ -409,10 +442,81 @@ does not emit ([[018-observability]]).
 | 5 | The overview's seven counters per space equal a direct count of the fixtures, `bytes` equals the ledger, and no counter reads the approvals table, which does not exist | e2e against Postgres |
 | 6 | The overview pages by `cursor` across more spaces than one page holds, and lists no space that holds nothing | e2e |
 | 7 | A restore across owners returns the object to its path and a soft-deleted workspace to its slug; an id past the retention window is 404 with the window named in the developer detail | e2e, with the two arms and the order the node tries them in held by `TestTheRestoreAcrossOwnersTriesTheTrashThenTheTombstones` |
-| 8 | A moderation delete and its event commit together: a forced failure after the delete leaves neither | `internal/admin` test on a transaction that is made to fail at commit |
-| 9 | An allow on a space the caller neither owns nor holds a covering grant on marks its event `admin` wherever it happened; a read of the caller's own space and a read through a grant mark none | e2e: a moderation delete on `/v1/files/...` appears on `/v1/events?owner=` marked `admin`, and a grantee's read of the same path does not |
-| 10 | `GET /v1/events` serves that record to an administrator for any space and to an owner for its own, and no route in this spec deletes from the log | e2e |
+| 8 | The record is the event log and no table of its own, and an administrative mutation's event is appended by the same request that made it. Appending it inside the mutation's transaction, so that either both commit or neither does, is [[021-transactional-audit-events]] | criterion 9's tests for the append; the Design above says what is not yet one commit |
+| 9 | An allow on a space the caller neither owns nor holds a covering grant on marks its event `admin` wherever it happened; a mutation in the caller's own space and one a grant covers mark none | `TestAnAllowNeitherOwnershipNorAGrantExplainsIsAdministrative` over six cases at the decision, `TestAnAdministrativeAllowMarksTheEventTheMutationAppends` at the append, and `TestE2ETheAdministrativeRecordIsTheEventLog` through the binary |
+| 10 | `GET /v1/events` serves that record to an administrator for any space and to an owner for its own, and no route in this spec deletes from the log | `TestE2ETheAdministrativeRecordIsTheEventLog` for the two readers and `TestE2ENoRouteDeletesFromTheLog` over the served document |
 | 11 | No event `detail` carries object content or a link token | `TestEventDetailIsMetadataOnly` over the shapes the writers pass |
 | 12 | `arcad check` prints one line per requirement in table order, exits 0 when all pass and 1 when any fails, and two runs against a healthy installation print identical output | `internal/check` test against the stubs of [[014-test-stubs-and-tiers]] |
 | 13 | `check` fails on an unreachable bucket, a bucket it cannot write under the prefix, an unreachable database, a schema behind the embedded migrations, an issuer whose discovery does not answer, and an authorizer that allows the probe | `internal/check` table test, one case per failure |
 | 14 | `check` deletes the object it wrote, and a bucket listing after a run holds nothing under `_check/` | `internal/check` over the in-process store, and the e2e tier of [[014-test-stubs-and-tiers]] against MinIO |
+
+## Outcome
+
+Complete on 2026-09-20. The two routes under `/v1/admin`, `arcad check`,
+the restore across owners and the overview across spaces are in the tree
+and serving in `v0.1.7`. Thirteen of the fourteen criteria are met by
+tests that run; criterion 8's transactional half is
+[[021-transactional-audit-events]].
+
+### What shipped against what was written
+
+| Criterion | Outcome |
+|---|---|
+| 1, 2, 3, 4 | met: the two routes ask `space.admin`, a deny is 403 and not a hidden 404, an installation with no authorizer and no listed subjects has no administrator, and no handler reads `principal_type` |
+| 5, 6, 7 | met at the e2e tier against Postgres: the seven counters, the paging that lists no empty space, and the restore that returns either table's row with `kind` saying which |
+| 8 | the record is the log and no table of its own, which shipped; one commit for the mutation and its event is [[021-transactional-audit-events]] |
+| 9 | met, as one seam: the decision marks, the append reads, no handler touches either |
+| 10 | met: the same route serves an administrator any space and an owner its own, and no route of this spec removes a row |
+| 11 | met, by a vocabulary every detail key has to be declared in |
+| 12, 13, 14 | met: `arcad check` prints one line per requirement in table order, fails on each of six misconfigurations, and leaves nothing under `_check/` |
+
+### The mark, and why it is where it is
+
+Criterion 9 asked for `detail: {"admin": true}` set where the decision is
+made and not in a handler. The two ends are far apart: what makes an
+event administrative is a property of the answer, and the event is
+written a package away by a writer that knows nothing about it. A context
+value cannot be added from inside a call, so the request carries a
+holder, the decision writes into it and the append reads it.
+
+That gives the property the paragraph was written for. A route added
+later is recorded without being told to be, and the mark cannot be put on
+an event that did not earn it, because no writer can reach the setter.
+What Arca records is honest about its own limits: it cannot see why its
+authorizer said yes, so it records that neither of the two explanations
+it can check, ownership and a covering grant, is the reason.
+
+Six cases hold the boundary at the decision, three at the append, and one
+e2e case holds the whole chain through the binary, where a moderation
+delete on somebody else's space appears on `/v1/events?owner=` marked and
+the same space's own delete does not.
+
+### Why criterion 8 was split
+
+The property is one sentence and the change is every write path in the
+tree. `files.Ledger.Append` is declared as spec 010's `Note` rather than
+its `Append`: it answers nothing, so no caller inside a transaction can
+fail on it, and `internal/files/delete.go` trashes on the pool's querier
+and appends afterwards. Making the two one commit means the seam answers
+an error, `trash` grows a transaction, four more write paths move their
+append inside the one they have, three adapters in `cmd/arcad` choose
+between the two rules per request, and [[010-events-and-reaper]]'s
+best-effort rule gains its stated exception. That is a restructure across
+[[005-files]], [[008-shares-and-links]], [[009-workspaces]] and
+[[010-events-and-reaper]], not an hour.
+
+What the split bought immediately is that this spec no longer claims it.
+The Design paragraph said "Either both commit or neither does" while the
+code appended after the commit and swallowed the failure, which is the
+one kind of error a spec deck cannot afford: a reader who trusts it
+writes the next feature on a guarantee that is not there.
+
+### Criterion 11's mechanism
+
+`TestEventDetailIsMetadataOnly` reads every `Event` literal in the tree,
+whatever package's `Event` it is, and holds each detail key to a
+vocabulary that says what the key is. A key with no entry fails the gate,
+so adding one is a review rather than a commit. The three adapters of
+`cmd/arcad` carry a seam's detail through unchanged and write no key of
+their own, and the reaper builds its detail out of its own closed kind
+vocabulary; both are read as what they are rather than waved past.
