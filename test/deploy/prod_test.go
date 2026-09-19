@@ -103,11 +103,21 @@ func TestProdRoutesWhatTheSmokeReads(t *testing.T) {
 	}
 	for _, path := range smoked {
 		got, ok := routed[path]
-		switch {
-		case !ok:
+		if !ok {
 			t.Errorf("deploy/prod routes no %s, which the release smoke reads through the origin", path)
-		case got != "Exact":
-			t.Errorf("deploy/prod routes %s as %q, want Exact so it claims nothing beyond itself", path, got)
+			continue
+		}
+		// Exact claims nothing beyond the path itself and is what these
+		// rules want. The exception is a path holding a dot: the nginx
+		// admission webhook refuses those under Exact or Prefix and
+		// rejects the whole document, so the apply fails rather than the
+		// rule, and ImplementationSpecific is the one type left.
+		want := "Exact"
+		if strings.Contains(path, ".") {
+			want = "ImplementationSpecific"
+		}
+		if got != want {
+			t.Errorf("deploy/prod routes %s as %q, want %q", path, got, want)
 		}
 	}
 	if _, ok := routed["/"]; ok {

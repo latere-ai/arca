@@ -6,6 +6,15 @@ refused before it is pushed.
 
 ## Unreleased
 
+- **The production Ingress applies.** `/openapi.json` was routed with
+  `pathType: Exact`, and the nginx admission webhook refuses a path
+  holding a dot under `Exact` or `Prefix`. It rejects the whole document
+  rather than the one rule, so the deploy job's `kubectl apply -k` would
+  have failed outright, after the image was built and signed and the
+  approval given. The path is `ImplementationSpecific`, which matches the
+  same requests here because nothing else on the origin begins with it,
+  and the test that reads the smoke's paths now knows the webhook's rule.
+
 - **A public object still redirects to the CDN after the cutover.** The
   production overlay sets `ARCA_PUBLIC_CDN_URL`, which the service it
   replaces served public objects from. An installation that leaves the

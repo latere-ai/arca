@@ -128,8 +128,14 @@ spec:
                 name: arcad
                 port:
                   name: http
+          # ImplementationSpecific and not Exact: the nginx admission
+          # webhook refuses a path holding a dot under Exact or Prefix,
+          # and rejects the whole document rather than the one rule, so
+          # the deploy job's apply would fail outright. Nothing else on
+          # this origin begins with it, so the prefix match this gives is
+          # the same set of requests.
           - path: /openapi.json
-            pathType: Exact
+            pathType: ImplementationSpecific
             backend:
               service:
                 name: arcad
