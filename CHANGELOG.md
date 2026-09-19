@@ -6,6 +6,19 @@ refused before it is pushed.
 
 ## Unreleased
 
+- **The conformance suite reaches the bucket from outside the cluster.** A
+  read above the inline threshold answers a redirect to a presigned URL and
+  a multipart part goes to a presigned PUT, both signed for the bucket
+  address the installation was configured with. On the kind stack that is a
+  name only the cluster resolves, so a suite run on a CI runner failed
+  `005/Bytes` and `007/Complete` on the dial. A presigned URL is signed over
+  its host, so rewriting the URL would be refused by the store. The suite
+  now takes `-s3-endpoint`, defaulting from `ARCA_TEST_S3_ENDPOINT`, and
+  `Options.BucketDial` behind it: the address the bucket is reached at from
+  where the suite runs. It dials that address and sends the signed host, so
+  the store verifies the signature it made. The e2e tier never met this
+  because its store is at one address for both sides.
+
 ## v0.1.5 - 2026-09-19
 
 - **The kind stack's arcad becomes ready.** Its overlay gave arcad an

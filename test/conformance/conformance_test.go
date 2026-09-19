@@ -571,6 +571,60 @@ func TestSubjectsAreEscapedForAPathAndAQuery(t *testing.T) {
 	}
 }
 
+// TestBucketDialSendsTheSignedHost: a presigned URL is signed over the host
+// it names, so the suite cannot rewrite one to reach the store from
+// somewhere else. With [Options.BucketDial] set it dials that address
+// instead and sends the signed host, and the path and the query, which the
+// signature also covers, arrive as the target wrote them. With it empty the
+// URL is dialed as it is.
+func TestBucketDialSendsTheSignedHost(t *testing.T) {
+	type arrived struct{ host, target string }
+	seen := make(chan arrived, 2)
+	store := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen <- arrived{host: r.Host, target: r.URL.RequestURI()}
+		_, _ = w.Write([]byte("bytes\n"))
+	}))
+	defer store.Close()
+
+	const signedPath = "/arca-test/arca/49/01J8XYZ"
+	const signedQuery = "?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=minioadmin%2F20260919%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Signature=deadbeef"
+
+	t.Run("override", func(t *testing.T) {
+		// A name no resolver answers, which is what a cluster-internal host
+		// is from a runner: without the override the dial itself fails.
+		s := newSession(Options{URL: "http://target.example", BucketDial: store.URL})
+		r := s.bucket(t, request{method: http.MethodGet, path: "http://bucket.invalid:9000" + signedPath + signedQuery})
+		if r.status != http.StatusOK || string(r.body) != "bytes\n" {
+			t.Fatalf("the override answered %d %q", r.status, r.body)
+		}
+		if !r.foreign {
+			t.Error("an answer from the store is not marked foreign, and spec 013 binds the installation's answers alone")
+		}
+		got := <-seen
+		if got.host != "bucket.invalid:9000" {
+			t.Errorf("the store saw Host %q, and the signature is over bucket.invalid:9000", got.host)
+		}
+		if got.target != signedPath+signedQuery {
+			t.Errorf("the store saw %q, and the signature is over %q", got.target, signedPath+signedQuery)
+		}
+	})
+
+	t.Run("none", func(t *testing.T) {
+		s := newSession(Options{URL: "http://target.example"})
+		r := s.bucket(t, request{method: http.MethodGet, path: store.URL + signedPath + signedQuery})
+		if r.status != http.StatusOK {
+			t.Fatalf("a URL dialed as given answered %d %q", r.status, r.body)
+		}
+		got := <-seen
+		if want := strings.TrimPrefix(store.URL, "http://"); got.host != want {
+			t.Errorf("the store saw Host %q, want %q: with no override the URL is dialed as given", got.host, want)
+		}
+		if got.target != signedPath+signedQuery {
+			t.Errorf("the store saw %q, want %q", got.target, signedPath+signedQuery)
+		}
+	})
+}
+
 // TestStrangerTokenIsAJWTFromNoListedIssuer: the bearer the identity group
 // sends is shaped like a token and signed by nobody, so a target refusing it
 // is refusing an issuer it does not list rather than a string that is not a

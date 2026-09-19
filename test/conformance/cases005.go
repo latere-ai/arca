@@ -258,20 +258,20 @@ func case005Bytes(t *testing.T, s *session) {
 	url := redirected.header.Get("Location")
 	failIf(t, url == "", "the redirect names no Location")
 
-	fetched := s.do(t, request{method: http.MethodGet, path: url})
+	fetched := s.bucket(t, request{method: http.MethodGet, path: url})
 	expectStatus(t, fetched, http.StatusOK)
 	failIf(t, string(fetched.body) != "small\n", "the presigned URL served %q", fetched.body)
 
 	// The URL is for one method. A write through it is refused by the store,
 	// which is what one method means.
-	written := s.do(t, request{method: http.MethodPut, path: url, body: strings.NewReader("overwritten\n")})
+	written := s.bucket(t, request{method: http.MethodPut, path: url, body: strings.NewReader("overwritten\n")})
 	failIf(t, written.status < 400, "a presigned read URL accepted a write: %d", written.status)
 
 	// And for one object: the same signature over another key does not
 	// serve it.
 	other := strings.Replace(url, small, small+".other", 1)
 	if other != url {
-		r := s.do(t, request{method: http.MethodGet, path: other})
+		r := s.bucket(t, request{method: http.MethodGet, path: other})
 		failIf(t, r.status == http.StatusOK, "a presigned URL served a second object")
 	}
 }

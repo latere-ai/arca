@@ -248,6 +248,7 @@ type Config struct {
 
 	AuthorizerControl string // the stub authorizer's control URL; empty skips the deny, outage, and byte-limit cases
 	Anonymous         bool   // the target serves public links to an unauthenticated caller
+	BucketDial        string // the address the bucket is reached at from where the suite runs; empty dials presigned URLs as given
 
 	Skip []string // group or case names to skip, each reported as skipped by request
 }
@@ -368,8 +369,19 @@ release that is green on one and not the other does not publish.
 
 `TestContract`, under the `e2e` build tag, wraps `Run`. It reads
 `-url`, either `-issuer` (a stub issuer to mint every subject from) or
-`-token`, `-token-bob` and `-admin`, plus `-authorizer`, and skips
-whole with the reason when `-url` is empty.
+`-token`, `-token-bob` and `-admin`, plus `-authorizer` and
+`-s3-endpoint`, and skips whole with the reason when `-url` is empty.
+
+`-s3-endpoint` (`ARCA_TEST_S3_ENDPOINT`) is `BucketDial`, and it exists
+because a presigned URL is signed over the host it names. A target on a
+cluster signs for the bucket address it was configured with, which is a
+name the cluster resolves and the runner does not, so the two cases that
+follow one, `005/Bytes` and `007/Complete`, cannot dial it. Rewriting the
+URL's host would break the signature at the store, so the suite dials the
+address named here and sends the signed host in the request's `Host`
+header, leaving the path and the query the signature also covers alone. A
+run beside the target, where one address serves both sides, leaves it
+empty.
 
 | Target | Command | Groups that skip |
 |---|---|---|

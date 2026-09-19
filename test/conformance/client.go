@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -33,6 +34,11 @@ type request struct {
 	// need.
 	subject string
 	header  map[string]string
+	// bucket reports that path is a presigned URL of the store, which is
+	// the one kind of request [Options.BucketDial] moves. It is set by
+	// [session.bucket] and by nothing else, so a case reaches the store
+	// through that one door.
+	bucket bool
 }
 
 // response is one HTTP answer with its body decoded when it is JSON.
@@ -72,6 +78,18 @@ func (s *session) with(t testing.TB, subject, method, path, body string, header 
 	return s.do(t, r)
 }
 
+// bucket sends one request to a presigned URL the target answered. It is the
+// only way the suite reaches the store, and the one place
+// [Options.BucketDial] applies: a run from outside the network the target
+// signs for cannot resolve the host the URL names, so the request is dialed
+// at the address the bucket is reached at from here and carries the signed
+// host.
+func (s *session) bucket(t testing.TB, r request) response {
+	t.Helper()
+	r.bucket = true
+	return s.do(t, r)
+}
+
 // do sends one request and reads the whole answer. A path that is already a
 // URL is sent as it is, which is how a presigned URL and a stub's control
 // API go through the same client.
@@ -83,6 +101,9 @@ func (s *session) do(t testing.TB, r request) response {
 	}
 	req, err := http.NewRequestWithContext(s.context(), r.method, url, r.body)
 	failIf(t, err != nil, "build %s %s: %v", r.method, r.path, err)
+	if r.bucket && s.options.BucketDial != "" {
+		dialAt(t, req, s.options.BucketDial)
+	}
 	if r.subject != "" {
 		req.Header.Set("Authorization", "Bearer "+s.bearer(t, r.subject))
 	}
@@ -102,6 +123,21 @@ func (s *session) do(t testing.TB, r request) response {
 		_ = json.Unmarshal(raw, &out.json)
 	}
 	return out
+}
+
+// dialAt points a request at another address and leaves everything a
+// signature covers alone: the method, the path, the query and the host the
+// URL named. req.URL.Host is what the client dials and req.Host is what it
+// sends as the Host header, so the two differ exactly here and nowhere else.
+// The original host is read before the URL is written, because it is the
+// URL that holds it.
+func dialAt(t testing.TB, req *http.Request, address string) {
+	t.Helper()
+	at, err := url.Parse(address)
+	failIf(t, err != nil || at.Scheme == "" || at.Host == "",
+		"the bucket address %q is not a scheme and a host: %v", address, err)
+	req.Host = req.URL.Host
+	req.URL.Scheme, req.URL.Host = at.Scheme, at.Host
 }
 
 // bearer answers the subject's token, minted once per run: a target whose
