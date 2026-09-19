@@ -15,6 +15,13 @@
 // means, and an alternative implementation runs it to claim it serves the
 // Arca API.
 //
+// A presigned URL is signed over the host it names, so a run from outside
+// the network the target signs for cannot dial one: the name resolves there
+// and not here. [Options.BucketDial] is the address the bucket is reached at
+// from where the suite runs. The suite dials that address and sends the
+// signed host, rather than rewriting the URL, which would hand the store a
+// signature over a host it never saw.
+//
 // Every path, workspace slug, share and link a run creates carries the
 // prefix arca-conformance-<run>-, where <run> is drawn at start. The run
 // records the id of everything it creates and deletes exactly those ids at
@@ -66,6 +73,15 @@ type Options struct {
 	// unauthenticated caller. Empty skips the anonymous half of the links
 	// group.
 	Anonymous bool
+
+	// BucketDial is the address the bucket is reached at from where the
+	// suite runs, when that differs from the address the target signs a
+	// presigned URL for: a target on a cluster signs for a name only the
+	// cluster resolves, and a suite on a runner reaches the same store at
+	// a node port. The suite dials this address and sends the signed host,
+	// so the store verifies the signature it made. Empty dials every URL
+	// as it was given.
+	BucketDial string
 
 	// Skip names group or case names to skip, each reported as skipped by
 	// request. A case name is <NNN>/<Name>; a group name skips every case

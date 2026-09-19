@@ -78,7 +78,7 @@ func case007Complete(t *testing.T, s *session) {
 	if int64(len(content)) > num(opened.json, "size") && num(opened.json, "size") > 0 {
 		content = content[:num(opened.json, "size")]
 	}
-	sent := s.do(t, request{method: http.MethodPut, path: urls[0], body: strings.NewReader(content)})
+	sent := s.bucket(t, request{method: http.MethodPut, path: urls[0], body: strings.NewReader(content)})
 	expectStatus(t, sent, http.StatusOK)
 	label := unquote(sent.header.Get("ETag"))
 	failIf(t, label == "", "the bucket answered no ETag for the part")

@@ -54,6 +54,11 @@ var (
 	flagAdmin      = flag.String("admin", os.Getenv("ARCA_TEST_ADMIN"), "the subject the target treats as an administrator; empty skips the administration group")
 	flagAuthorizer = flag.String("authorizer", os.Getenv("ARCA_TEST_AUTHORIZER_URL"), "the stub authorizer's control URL; empty skips the deny, outage and byte limit cases")
 	flagAnonymous  = flag.Bool("anonymous", os.Getenv("ARCA_TEST_ANONYMOUS") != "", "the target serves public links to an unauthenticated caller")
+	// The bucket is the one host the suite reaches that the target names
+	// rather than serves, and a presigned URL is signed over that name. A
+	// run from outside the target's network sets this to where the same
+	// store is reached from here; a run beside the target leaves it empty.
+	flagS3Endpoint = flag.String("s3-endpoint", os.Getenv("ARCA_TEST_S3_ENDPOINT"), "the address the bucket is reached at from here, when the target signs presigned URLs for another; empty dials them as given")
 )
 
 // skipWithoutATarget is the remediation the tier prints when nothing was
@@ -134,6 +139,7 @@ func options(t *testing.T) conformance.Options {
 		Admin:             *flagAdmin,
 		AuthorizerControl: *flagAuthorizer,
 		Anonymous:         *flagAnonymous,
+		BucketDial:        *flagS3Endpoint,
 	}
 	switch {
 	case *flagIssuer != "":
