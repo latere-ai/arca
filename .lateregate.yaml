@@ -166,3 +166,21 @@ identity:
 postgres:
   # Direct until this repository's cutover release reads ARCA_DB_POOL_URL.
   role: direct
+
+# Staying on the direct endpoint is an exception, so it carries a reason and
+# a date. The gate fails the direct role without this entry, and fails it
+# again the day after the date, which is when somebody decides whether the
+# reason still holds.
+waive:
+  postgres:
+    reason: >-
+      arcad serves on the direct endpoint by decision at its cutover: the
+      pooled route was one no service had exercised yet, and putting it on
+      the critical path of the storage migration would have risked the
+      migration for a connection budget that already fit. The pooled
+      connection string is provisioned and already reaches the deployment,
+      so the move is a deployment change and not a code change. This stops
+      holding the moment the server reads ARCA_DB_POOL_URL and falls back to
+      ARCA_DB_URL, and the reaper beside it is a third claim on the direct
+      endpoint whenever it is turned up.
+    until: 2026-12-19
