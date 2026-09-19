@@ -42,35 +42,47 @@ until it is deleted.
 
 ## Current state
 
-Phases 0 through 8 are done: v0.1.0 is cut and the deck's specs are at
-`testing` or `complete`. Phase 9's two commands are built and the
-cutover has not run.
+The migration executed on 2026-09-19. Phases 1 through 8 were built and
+merged during the day; the cutover, phase 9, ran that night; the sunset,
+phase 10, is held to the following day by design so Drive can be brought
+back by recreating its ingress and scaling up if the first hours find
+anything.
 
-`tools/migrate-drive` is in the tree on 2026-09-19, the row copy step 3
-of the cutover names. It reads Drive's database, applies every rewrite
-"The data" names, writes Arca's one transaction per table, refuses
-before it writes anything it cannot decide, and verifies counts and a
-sample of checksums afterwards. Criterion 3 holds, proved by
-`TestStoreMigrateDrive*` in `tools/migrate-drive/store_tier_test.go`,
-which runs the tool between two Postgres databases in the store tier of
-[[014-test-stubs-and-tiers]] (`make test-store`). The operator's
-procedure is the "Migrating from Drive" section of `docs/operations.md`.
+The window, from the runbook in the family's specs repository
+(`infrastructure/arca-cutover.md`):
 
-Building it found one thing this spec had wrong. **Drive's bucket keys
-are not derivable from an id**, so the bytes row of "The data" below did
-not hold and the cutover needs an object move the spec did not plan. The
-finding is written into that row, and `tools/move-objects` is the answer
-to it, in the tree on 2026-09-19: it reads the manifest `migrate-drive
--manifest` writes and copies each object to its id's key, server side,
-inside one bucket. Criterion 4 is two criteria now, the rows and the
-bytes, and `TestStoreTheTwoCommandsOfStepThreeLeaveEveryByteAtItsObjectIDsKey`
-in `tools/move-objects/store_tier_test.go` runs both commands in order
-against Postgres and MinIO. The bytes half is proved by reading every
-destination back and digesting it, not by a label: no store the family
-runs reports a checksum of its own for an object, which the build
-measured against MinIO and which Spaces answers no better. The
-operator's procedure for both is the "Migrating from Drive" section of
-`docs/operations.md`.
+| time | step | result |
+|---|---|---|
+| 22:25:44 | Drive scaled to zero, its api ingress deleted | done |
+| 22:25:49 | the production overlay applied; Arca's ingress claims the prefixes | `arcad` 2 of 2 ready |
+| 22:25:54 | row copy | every table's counts hold; 3 link tokens noted as minted for grants that carried none |
+| 22:26:02 | object move | 3 keys copied to their object ids, 3 verified on bytes, 0 mismatched, 0 failed |
+| 22:26:08 | `arcad check` and the release smoke at the origin | 5 of 5, smoke passed, served v0.1.6 |
+
+Storage at the origin was unreachable for twenty-four seconds.
+
+Seven tags were spent before it, every one on a value the stack held in two
+places that no tier ran across, and each is now held by a test that
+executes the pairing rather than by a second copy of the value: the build
+argument's scope (v0.1.0); a NetworkPolicy the kind overlay did not carry
+(v0.1.1); the stub authorizer's bearer, named in the overlay and in the
+binary's default (v0.1.2); the authorizer URL carrying a path the stub never
+served (v0.1.3, v0.1.4); the suite fetching presigned URLs at a host only
+pods resolve (v0.1.5); and in production, platformd's ingress policy not
+admitting arcad, and arcad's egress admitting the Service port where policy
+is evaluated on the pod port after translation (v0.1.6, whose deploy also
+met Drive's ingress still standing). v0.1.7 carries the manifests that match
+the cluster and publishes the first release.
+
+The consumers: platform v0.12.0 carries the decider and v0.13.0 the console
+onto Arca, both cut from the last green commit of a main that failed
+another feature's e2e all evening; auth's avatar upload rides v0.38.0; the
+CLI, the agents plane and the sandbox plane carry deletions only and ride
+their next releases.
+
+Open until the sunset: delete the source keys the manifest names, drop
+Drive's database and `drive-pool`, delete Drive's deployment, service and
+host ingress, archive `latere-ai/drive`, and write this spec's Outcome.
 
 ## Design
 
