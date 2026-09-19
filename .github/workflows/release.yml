@@ -393,6 +393,15 @@ jobs:
           done
           echo "===== describe arcad ====="
           kubectl describe pods -n arca -l app.kubernetes.io/name=arcad
+          # The one line that names the failing check. A 503 from the
+          # readiness probe reaches the events as a status code and nothing
+          # else; the body is where arcad says which requirement it is
+          # waiting on, and v0.1.2's run was lost for want of it.
+          for p in $(kubectl get pods -n arca -l app.kubernetes.io/name=arcad -o name); do
+            echo "== ${p#pod/} /readyz"
+            kubectl get --raw "/api/v1/namespaces/arca/pods/${p#pod/}:8081/proxy/readyz" || echo "(readyz unreachable through the API proxy)"
+            echo
+          done
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

@@ -6,6 +6,18 @@ refused before it is pushed.
 
 ## Unreleased
 
+- **The kind stack's authorizer accepts the bearer arcad sends.** The stub
+  authorizer requires a bearer and was started with none named, so it
+  expected the package default while the overlay's Secret told arcad to
+  send another. Every probe was refused, the client reported the authorizer
+  unavailable, `/readyz` answered 503 for as long as the pod lived, and
+  nothing logged: the v0.1.2 release run was lost in its conformance job
+  exactly so, and the e2e tier never saw it because its harness hands both
+  sides one value. The stub now reads the same Secret key arcad reads, a
+  test holds the two to one value, and the release's failure dump prints
+  `/readyz`'s body, which names the check that failed and would have made
+  this a one-minute diagnosis.
+
 ## v0.1.2 - 2026-09-19
 
 - **`make run` checks the installation it just started, and prints requests

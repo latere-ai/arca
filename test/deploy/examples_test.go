@@ -345,3 +345,61 @@ func TestEveryOverlayAdmitsTheEgressItsEndpointsNeed(t *testing.T) {
 		}
 	}
 }
+
+// TestTheKindStubExpectsTheBearerArcadSends: the stub authorizer refuses
+// every question whose bearer is not the one it was started with, and an
+// authorizer that refuses the probe is one arcad's readiness reports as
+// unavailable, silently, for as long as the pod lives. v0.1.2's release run
+// was lost exactly so: arcad sent the Secret's ARCA_AUTHORIZER_TOKEN, the
+// stub had been started with no -authorizer-token and so expected the
+// package default, and /readyz answered 503 for five minutes with nothing
+// in any log. The e2e tier passes because its harness hands both sides one
+// value; the overlay had two.
+//
+// The assertion reads both out of the manifests. The stub's expectation is
+// its -authorizer-token argument, or the package default when the argument
+// is absent; arcad's is the Secret key its deployment reads. They must be
+// one value, and the way the overlay makes them one is by having the stub
+// read the same Secret key, so this test also accepts a $(VAR) expansion
+// whose env entry points at that key.
+func TestTheKindStubExpectsTheBearerArcadSends(t *testing.T) {
+	var arcadToken, stubToken string
+	var stubEnvFromSecretKey string
+	for _, d := range read(t, "deploy/examples/kind") {
+		switch {
+		case d.kind() == "Secret" && d.named() == "arcad-auth":
+			arcadToken = d.at("stringData").text("ARCA_AUTHORIZER_TOKEN")
+		case d.kind() == "Deployment" && d.named() == "arca-stubs":
+			for _, c := range d.containers() {
+				args := c.strings("args")
+				for i, a := range args {
+					switch {
+					case strings.HasPrefix(a, "-authorizer-token="):
+						stubToken = strings.TrimPrefix(a, "-authorizer-token=")
+					case a == "-authorizer-token" && i+1 < len(args):
+						stubToken = args[i+1]
+					}
+				}
+				for _, e := range c.items("env") {
+					if ref := e.at("valueFrom", "secretKeyRef"); ref.text("name") == "arcad-auth" && ref.text("key") == "ARCA_AUTHORIZER_TOKEN" {
+						stubEnvFromSecretKey = "$(" + e.text("name") + ")"
+					}
+				}
+			}
+		}
+	}
+	if arcadToken == "" {
+		t.Fatal("deploy/examples/kind gives arcad no ARCA_AUTHORIZER_TOKEN")
+	}
+	const packageDefault = "stub-authorizer-token"
+	switch {
+	case stubToken == "":
+		if arcadToken != packageDefault {
+			t.Fatalf("the stub is started with no -authorizer-token and so expects %q; arcad sends %q; every probe is refused and readiness never passes", packageDefault, arcadToken)
+		}
+	case stubEnvFromSecretKey != "" && stubToken == stubEnvFromSecretKey:
+		// One source: the stub reads the Secret key arcad reads.
+	case stubToken != arcadToken:
+		t.Fatalf("the stub expects %q and arcad sends %q", stubToken, arcadToken)
+	}
+}

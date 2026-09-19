@@ -47,7 +47,25 @@ spec:
           # on the runner mints through the node port and the token still
           # names the in-cluster address, which is where arcad fetches the
           # key set: one process, reached two ways (spec 017).
-          args: [-issuer-url, http://arca-stubs:8081]
+          #
+          # The bearer the authorizer requires is read from the same Secret
+          # key arcad sends, so the two cannot disagree. They did: the stub
+          # ran with the package default and arcad sent the Secret's value,
+          # every probe was refused with a 401 the client reports as the
+          # authorizer being unavailable, and /readyz answered 503 for as
+          # long as the pod lived with nothing in any log. That is how the
+          # v0.1.2 release run was lost. test/deploy holds the two to one
+          # value.
+          args:
+            - -issuer-url
+            - http://arca-stubs:8081
+            - -authorizer-token=$(STUB_AUTHORIZER_TOKEN)
+          env:
+            - name: STUB_AUTHORIZER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: arcad-auth
+                  key: ARCA_AUTHORIZER_TOKEN
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
