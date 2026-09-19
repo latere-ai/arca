@@ -215,6 +215,7 @@ func TestProdAdmitsTheDatabasePortsThisInstallationUses(t *testing.T) {
 		{"25060", "the managed database listens there and the base names only 5432"},
 		{"25061", "the database's connection pool listens there"},
 		{"40318", "the telemetry collector injected into this namespace is reached there, not on the 4317 and 4318 the base admits"},
+		{"8081", "platformd's internal container port answers the Arca decider; policy is evaluated on the pod port after the Service translation, so the base's 80 does not cover it"},
 	} {
 		if !admitted[c.port] {
 			t.Errorf("deploy/prod admits no egress to %s; %s", c.port, c.why)

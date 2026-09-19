@@ -1,6 +1,6 @@
 # The ports this installation's own dependencies listen on, which the base
-# cannot know: its database, and the telemetry collector injected into the
-# namespace.
+# cannot know: its database, the telemetry collector injected into the
+# namespace, and the pod port behind the authorizer's Service.
 #
 # The base admits 5432, which is where a Postgres an operator runs listens.
 # This installation's database is DigitalOcean's managed Postgres, and that
@@ -53,4 +53,14 @@ spec:
         - port: 25061
           protocol: TCP
         - port: 40318
+          protocol: TCP
+        # 8081 is platformd's internal container port, where the Arca
+        # decider answers. arcad dials the Service on port 80, but a
+        # NetworkPolicy is evaluated after the Service's address
+        # translation, on the pod's own port, so the base's 80 does not
+        # cover it: the probe was a dropped packet, the client reported the
+        # authorizer unavailable, and both replicas held at 503 in
+        # production until this port was admitted. The kind stack never
+        # showed it because its stub's port was admitted by name.
+        - port: 8081
           protocol: TCP

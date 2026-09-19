@@ -6,6 +6,16 @@ refused before it is pushed.
 
 ## Unreleased
 
+- **A production replica reaches the decider.** arcad dials platformd's
+  internal Service on port 80, and a NetworkPolicy is evaluated after the
+  Service's address translation, on the pod's own port, 8081. The base
+  admits 80 and the overlay did not admit 8081, so the authorizer probe
+  was a dropped packet, the client reported the authorizer unavailable,
+  and both replicas of the first production deploy held at 503. The
+  overlay admits the pod port, with the test naming why. The platform's
+  own policy also had to admit arcad on that port, which is its
+  repository's change.
+
 ## v0.1.6 - 2026-09-19
 
 - **The conformance suite reaches the bucket from outside the cluster.** A
