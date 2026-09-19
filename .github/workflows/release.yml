@@ -252,9 +252,25 @@ jobs:
           COSIGN_YES: 'true'
         run: |
           set -euo pipefail
-          cosign sign "${ARCAD_IMAGE}@${{ steps.arcad.outputs.digest }}"
-          cosign sign "${STUBS_IMAGE}@${{ steps.stubs.outputs.digest }}"
-          cd out/release && cosign sign-blob --bundle checksums.txt.cosign.bundle checksums.txt
+          # Each signature reaches Sigstore's certificate authority and its
+          # timestamp authority over the network, and a connection reset
+          # from either fails the whole release after the images are built
+          # and pushed; v0.1.3's first run was lost to exactly one reset
+          # from timestamp.sigstore.dev. Signing is idempotent, so a retry
+          # costs nothing and three attempts with a pause cover the
+          # transient case. A failure that survives three is reported.
+          retry() {
+            local n
+            for n in 1 2 3; do
+              "$@" && return 0
+              echo "attempt $n of 3 failed: $*" >&2
+              sleep $((n * 10))
+            done
+            return 1
+          }
+          retry cosign sign "${ARCAD_IMAGE}@${{ steps.arcad.outputs.digest }}"
+          retry cosign sign "${STUBS_IMAGE}@${{ steps.stubs.outputs.digest }}"
+          cd out/release && retry cosign sign-blob --bundle checksums.txt.cosign.bundle checksums.txt
 
       # Every overlay of the tree rendered by the kustomize kubectl embeds.
       # The gate's own test proves that every path a render reads exists;

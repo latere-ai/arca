@@ -6,6 +6,13 @@ refused before it is pushed.
 
 ## Unreleased
 
+- **A signature that meets a connection reset is retried.** Each signature
+  reaches Sigstore's certificate and timestamp authorities over the
+  network, and one reset from the timestamp authority failed the whole
+  v0.1.3 release after its images were built and pushed. Signing is
+  idempotent, so the release signs each artifact up to three times with a
+  pause between, and reports a failure only when it survives all three.
+
 ## v0.1.3 - 2026-09-19
 
 - **The kind stack's authorizer accepts the bearer arcad sends.** The stub
