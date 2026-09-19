@@ -60,7 +60,10 @@ spec:
             # installation.
             - name: ARCA_OIDC_AUDIENCE
               value: arca
-            - name: ARCA_DATABASE_URL
+            # ARCA_DB_URL is the variable arcad reads; ARCA_DATABASE_URL
+            # is the key inside arcad-database, which is the contract with
+            # whoever writes that Secret and does not follow the variable.
+            - name: ARCA_DB_URL
               valueFrom:
                 secretKeyRef:
                   name: arcad-database

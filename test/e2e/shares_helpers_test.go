@@ -83,7 +83,7 @@ func (i *installation) sharesCall(t *testing.T, method, path, sub string, body a
 func (i *installation) sharesDatabaseURL(t *testing.T) string {
 	t.Helper()
 	for _, row := range i.env {
-		if url, ok := strings.CutPrefix(row, "ARCA_DATABASE_URL="); ok {
+		if url, ok := strings.CutPrefix(row, "ARCA_DB_URL="); ok {
 			return url
 		}
 	}

@@ -63,7 +63,7 @@ func stores(t *testing.T, overrides map[string]string) func(string) string {
 	t.Cleanup(endpoint.Close)
 	iss := issuertest.New(t, issuertest.WithDefaultAudience("arca"))
 	m := map[string]string{
-		"ARCA_DATABASE_URL":      "postgres://arca:arca@127.0.0.1:1/arca?sslmode=disable",
+		"ARCA_DB_URL":            "postgres://arca:arca@127.0.0.1:1/arca?sslmode=disable",
 		"ARCA_BUCKET":            "arca",
 		"ARCA_BUCKET_REGION":     "us-east-1",
 		"ARCA_BUCKET_ENDPOINT":   endpoint.URL,
@@ -399,7 +399,7 @@ func TestMigrateAppliesWhatIsPendingAndSaysSo(t *testing.T) {
 	applyMigrations = func(databaseURL string) error { url = databaseURL; return nil }
 	var out bytes.Buffer
 	code := run(t.Context(), []string{"migrate"}, env(map[string]string{
-		"ARCA_DATABASE_URL": "postgres://arca@db/arca",
+		"ARCA_DB_URL": "postgres://arca@db/arca",
 	}), &out, io.Discard)
 	if code != 0 {
 		t.Fatalf("exit %d", code)
@@ -414,7 +414,7 @@ func TestMigrateAppliesWhatIsPendingAndSaysSo(t *testing.T) {
 	applyMigrations = func(string) error { return errors.New("the database is away") }
 	var errOut bytes.Buffer
 	if code := run(t.Context(), []string{"migrate"}, env(map[string]string{
-		"ARCA_DATABASE_URL": "postgres://arca@db/arca",
+		"ARCA_DB_URL": "postgres://arca@db/arca",
 	}), io.Discard, &errOut); code != 1 {
 		t.Fatalf("exit %d", code)
 	}
@@ -428,7 +428,7 @@ func TestMigrateReadsTheDatabaseVariableAndNothingElse(t *testing.T) {
 	if code := run(t.Context(), []string{"migrate"}, env(nil), io.Discard, &errOut); code != 1 {
 		t.Fatalf("exit %d", code)
 	}
-	if got := errOut.String(); !strings.Contains(got, "ARCA_DATABASE_URL is unset") || strings.Contains(got, "ARCA_BUCKET") {
+	if got := errOut.String(); !strings.Contains(got, "ARCA_DB_URL is unset") || strings.Contains(got, "ARCA_BUCKET") {
 		t.Fatalf("stderr = %q; migrate reads the database variable and nothing else", got)
 	}
 	if code := run(t.Context(), []string{"migrate", "-no-such-flag"}, env(nil), io.Discard, io.Discard); code != 2 {

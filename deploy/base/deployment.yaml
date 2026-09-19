@@ -90,8 +90,11 @@ spec:
               value: arca
             # The connection string is its own Secret, separate from the
             # bucket credential and from the authorizer bearer: one
-            # credential per endpoint.
-            - name: ARCA_DATABASE_URL
+            # credential per endpoint. The key inside that Secret is
+            # ARCA_DATABASE_URL and stays that way: it is the contract with
+            # whoever writes the Secret, where ARCA_DB_URL is the variable
+            # arcad reads, and this mapping is where the two meet.
+            - name: ARCA_DB_URL
               valueFrom:
                 secretKeyRef:
                   name: arcad-database

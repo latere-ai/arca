@@ -51,7 +51,7 @@ var ErrConflict = errors.New("store: the row already exists")
 func Open(ctx context.Context, databaseURL string) (*DB, error) {
 	cfg, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
-		return nil, fmt.Errorf("store: ARCA_DATABASE_URL: %w", err)
+		return nil, fmt.Errorf("store: ARCA_DB_URL: %w", err)
 	}
 	p, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {

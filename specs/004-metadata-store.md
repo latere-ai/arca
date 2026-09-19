@@ -256,7 +256,7 @@ migration, and the test tier resets by dropping the database
 
 ### The migrate subcommand
 
-`arcad migrate` reads `ARCA_DATABASE_URL`, applies every pending
+`arcad migrate` reads `ARCA_DB_URL`, applies every pending
 migration, and exits. It is `latere.ai/x/pkg/pgxmigrate`, the bring-up
 every service in the family runs: it opens the embedded source, retries
 the database open for about ten seconds so a rolling deploy that briefly
@@ -277,7 +277,7 @@ of the binary is a rollback in progress and is allowed.
 
 `github.com/jackc/pgx/v5` and its `pgxpool`, no ORM and no query
 generator. Queries are SQL text with numbered parameters. The pool opens
-once from `ARCA_DATABASE_URL`, and its `Ping` is the readiness check
+once from `ARCA_DB_URL`, and its `Ping` is the readiness check
 [[002-repository-scaffold]] reserves. Every query function takes a
 querier, so one function serves callers inside and outside a
 transaction:

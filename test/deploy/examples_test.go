@@ -240,6 +240,12 @@ var dialled = []string{
 	"ARCA_OIDC_ISSUERS",
 	"ARCA_AUTHORIZER_URL",
 	"ARCA_BUCKET_ENDPOINT",
+	// The database endpoint arrives under two spellings and both are
+	// dialled. ARCA_DB_URL is the variable arcad reads; ARCA_DATABASE_URL is
+	// the key inside the arcad-database Secret, which the Deployment maps to
+	// that variable. The key is the Secret's contract with whoever wrote it
+	// by hand, so it is not the variable's name and does not follow it.
+	"ARCA_DB_URL",
 	"ARCA_DATABASE_URL",
 	"ARCA_OTEL_EXPORTER_OTLP_ENDPOINT",
 	"OTEL_EXPORTER_OTLP_ENDPOINT",

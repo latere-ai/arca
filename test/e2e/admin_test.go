@@ -97,7 +97,7 @@ func TestE2ECheckFailsOnABrokenVariable(t *testing.T) {
 			value: "no-such-bucket", requirement: "bucket",
 		},
 		{
-			name: "the database is somewhere else", variable: "ARCA_DATABASE_URL",
+			name: "the database is somewhere else", variable: "ARCA_DB_URL",
 			value: "postgres://arca:arca@127.0.0.1:1/arca?sslmode=disable", requirement: "database",
 		},
 		{

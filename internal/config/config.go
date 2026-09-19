@@ -156,7 +156,7 @@ type Config struct {
 // Database reads the one variable the migrate subcommand needs, so a
 // migration job runs with the database and nothing else configured.
 func Database(getenv Getenv) (string, error) {
-	url := value(getenv("ARCA_DATABASE_URL"))
+	url := value(getenv("ARCA_DB_URL"))
 	if problem := checkDatabaseURL(url); problem != "" {
 		return "", errors.New("configuration: " + problem)
 	}
@@ -170,9 +170,9 @@ func Database(getenv Getenv) (string, error) {
 func checkDatabaseURL(url string) string {
 	switch {
 	case url == "":
-		return "ARCA_DATABASE_URL is unset, and the database is what decides whether an object exists"
+		return "ARCA_DB_URL is unset, and the database is what decides whether an object exists"
 	case !strings.HasPrefix(url, "postgres://") && !strings.HasPrefix(url, "postgresql://"):
-		return fmt.Sprintf("ARCA_DATABASE_URL is %q, and a connection string begins with postgres:// or postgresql://", url)
+		return fmt.Sprintf("ARCA_DB_URL is %q, and a connection string begins with postgres:// or postgresql://", url)
 	default:
 		return ""
 	}
@@ -203,7 +203,7 @@ func Load(getenv Getenv) (Config, error) {
 		BucketAccessKey: value(getenv("ARCA_BUCKET_ACCESS_KEY")),
 		BucketSecretKey: value(getenv("ARCA_BUCKET_SECRET_KEY")),
 		PublicCDNURL:    strings.TrimRight(value(getenv("ARCA_PUBLIC_CDN_URL")), "/"),
-		DatabaseURL:     value(getenv("ARCA_DATABASE_URL")),
+		DatabaseURL:     value(getenv("ARCA_DB_URL")),
 
 		PublicURL:           value(getenv("ARCA_PUBLIC_URL")),
 		OIDCIssuers:         list(getenv("ARCA_OIDC_ISSUERS")),

@@ -6,6 +6,19 @@ refused before it is pushed.
 
 ## Unreleased
 
+- **Breaking: the connection string is read from `ARCA_DB_URL`.** The
+  variable was `ARCA_DATABASE_URL`; every Latere open core with a database
+  now reads `<PRODUCT>_DB_URL` for the direct endpoint and
+  `<PRODUCT>_DB_POOL_URL` for a transaction pooler in front of it, so arca
+  reads `ARCA_DB_URL` and will read `ARCA_DB_POOL_URL` when its serving path
+  moves onto a pooler. An installation that sets the old name must set the
+  new one before upgrading.
+
+  The key inside the `arcad-database` Secret is unchanged and stays
+  `ARCA_DATABASE_URL`: that key is the contract with whoever writes the
+  Secret, and the Deployment maps it onto the variable arcad reads. An
+  installation that keeps its Secret as it is needs no change there.
+
 ## v0.1.7 - 2026-09-19
 
 - **A production replica reaches the decider.** arcad dials platformd's

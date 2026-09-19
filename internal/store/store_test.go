@@ -32,7 +32,7 @@ func TestOpenReadsTheURLAndDialsNothing(t *testing.T) {
 }
 
 func TestOpenRefusesAURLItCannotRead(t *testing.T) {
-	if _, err := Open(t.Context(), "://not a url"); err == nil || !strings.Contains(err.Error(), "ARCA_DATABASE_URL") {
+	if _, err := Open(t.Context(), "://not a url"); err == nil || !strings.Contains(err.Error(), "ARCA_DB_URL") {
 		t.Fatalf("Open = %v, want the error that names the variable", err)
 	}
 }

@@ -110,7 +110,7 @@ func TestTheCommandRunsEveryRequirementOfAReadableConfiguration(t *testing.T) {
 		"ARCA_BUCKET_ENDPOINT":       gone,
 		"ARCA_BUCKET_REGION":         "us-east-1",
 		"ARCA_BUCKET_PATH_STYLE":     "true",
-		"ARCA_DATABASE_URL":          "postgres://arca:arca@127.0.0.1:1/arca?sslmode=disable",
+		"ARCA_DB_URL":                "postgres://arca:arca@127.0.0.1:1/arca?sslmode=disable",
 		"ARCA_OIDC_ISSUERS":          gone,
 		"ARCA_OIDC_INSECURE_ISSUERS": "true",
 	}

@@ -97,7 +97,7 @@ start with `-` selects a subcommand; without one the binary serves.
 |---|---|---|---|
 | `serve` (default) | the whole table | the API, the stores, the probes | this spec |
 | `reap` | the store variables and `ARCA_REAP_*` | the reconciler as a process of its own | 010 |
-| `migrate` | `ARCA_DATABASE_URL` | applies the migrations and exits | 004 |
+| `migrate` | `ARCA_DB_URL` | applies the migrations and exits | 004 |
 | `check` | the whole table | one line per requirement, exit 1 on any failure | 012 |
 
 An unknown subcommand is a usage error, exit 2. `reap`, `migrate`, and
@@ -122,7 +122,7 @@ operator fixes a deployment in one round. A blank value is unset.
 | `ARCA_BUCKET_PATH_STYLE` | `false` | path-style addressing, for MinIO and stores without virtual hosts | 003 |
 | `ARCA_BUCKET_ACCESS_KEY`, `ARCA_BUCKET_SECRET_KEY` | the SDK's chain | static credentials, when the environment has no other | 003 |
 | `ARCA_PUBLIC_CDN_URL` | unset | the prefix a public object's redirect points at, when one fronts the bucket | 003 |
-| `ARCA_DATABASE_URL` | required | the Postgres connection string | 004 |
+| `ARCA_DB_URL` | required | the Postgres connection string | 004 |
 | `ARCA_MAX_UPLOAD_BYTES` | `5368709120` | the largest object accepted | 007 |
 | `ARCA_INLINE_BYTES` | `16777216` | the largest object streamed through the server; above it, parts go direct | 007 |
 | `ARCA_OIDC_ISSUERS` | required | the issuers whose tokens are verified, comma separated | 006 |

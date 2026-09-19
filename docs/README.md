@@ -43,7 +43,7 @@ its probe and the database holds every migration the binary carries. The
 `/v1` routes a token is for arrive with the [API spec](../specs/013-api.md).
 
 Without Docker or Podman the server still runs: point `ARCA_BUCKET_*` and
-`ARCA_DATABASE_URL` at a bucket and a database of your own, apply the
+`ARCA_DB_URL` at a bucket and a database of your own, apply the
 migrations with `arcad migrate`, and start `arcad`.
 
 ## Building against it

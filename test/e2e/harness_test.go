@@ -115,7 +115,7 @@ func start(t *testing.T) *installation {
 		"ARCA_PUBLIC_ADDR=127.0.0.1:0",
 		"ARCA_INTERNAL_ADDR=127.0.0.1:0",
 		"ARCA_PUBLIC_URL=http://127.0.0.1",
-		"ARCA_DATABASE_URL="+databaseURL,
+		"ARCA_DB_URL="+databaseURL,
 		"ARCA_BUCKET="+s.bucket,
 		"ARCA_BUCKET_ENDPOINT="+s.endpoint,
 		"ARCA_BUCKET_REGION=us-east-1",

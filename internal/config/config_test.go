@@ -22,7 +22,7 @@ func required(extra map[string]string) Getenv {
 	m := map[string]string{
 		"ARCA_BUCKET":        "arca",
 		"ARCA_BUCKET_REGION": "us-east-1",
-		"ARCA_DATABASE_URL":  "postgres://arca:arca@db:5432/arca?sslmode=disable",
+		"ARCA_DB_URL":        "postgres://arca:arca@db:5432/arca?sslmode=disable",
 		"ARCA_PUBLIC_URL":    "https://storage.example",
 		"ARCA_OIDC_ISSUERS":  "https://issuer.example",
 	}
@@ -70,7 +70,7 @@ func TestLoadReadsEveryVariable(t *testing.T) {
 		"ARCA_BUCKET_ACCESS_KEY": "key",
 		"ARCA_BUCKET_SECRET_KEY": "secret",
 		"ARCA_PUBLIC_CDN_URL":    "https://cdn.example/",
-		"ARCA_DATABASE_URL":      "postgresql://arca@db/arca",
+		"ARCA_DB_URL":            "postgresql://arca@db/arca",
 
 		"ARCA_PUBLIC_URL":                          "https://storage.example/base",
 		"ARCA_OIDC_ISSUERS":                        "https://issuer.example, https://other.example ,",
@@ -133,7 +133,7 @@ func TestLoadReportsEveryProblemInOneSortedMessage(t *testing.T) {
 		`ARCA_PUBLIC_ADDR is "nope", not a host:port address`,
 		"ARCA_BUCKET is unset",
 		"ARCA_BUCKET_REGION is unset",
-		"ARCA_DATABASE_URL is unset",
+		"ARCA_DB_URL is unset",
 		"ARCA_OIDC_ISSUERS names no issuer",
 		"ARCA_PUBLIC_URL is unset",
 	} {
@@ -266,12 +266,12 @@ func TestAnInjectedCollectorEndpointIsReadAndTheTablesRowWins(t *testing.T) {
 
 func TestTheDatabaseURLIsOneTheMigratorCanReadToo(t *testing.T) {
 	for _, raw := range []string{"host=db user=arca dbname=arca", "mysql://db/arca", "db:5432/arca"} {
-		_, err := Database(env(map[string]string{"ARCA_DATABASE_URL": raw}))
-		if err == nil || !strings.Contains(err.Error(), "ARCA_DATABASE_URL") {
+		_, err := Database(env(map[string]string{"ARCA_DB_URL": raw}))
+		if err == nil || !strings.Contains(err.Error(), "ARCA_DB_URL") {
 			t.Errorf("a connection string of %q loaded with %v", raw, err)
 		}
 	}
-	url, err := Database(env(map[string]string{"ARCA_DATABASE_URL": " postgres://arca@db/arca "}))
+	url, err := Database(env(map[string]string{"ARCA_DB_URL": " postgres://arca@db/arca "}))
 	if err != nil || url != "postgres://arca@db/arca" {
 		t.Errorf("Database() = %q, %v", url, err)
 	}

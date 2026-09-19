@@ -164,5 +164,5 @@ identity:
 
 # The database shape: which endpoint the serving path connects on.
 postgres:
-  # Direct until this repository's cutover release reads ARCA_DATABASE_POOL_URL.
+  # Direct until this repository's cutover release reads ARCA_DB_POOL_URL.
   role: direct

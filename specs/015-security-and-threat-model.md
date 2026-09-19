@@ -65,7 +65,7 @@ the whole spec deck.
 | link and public grant tokens | the `shares` table, and every URL a holder has ever pasted | read of one subtree, with no token of the holder's own |
 | presigned URLs | in flight, in a `302`, in a materialize manifest, in a browser's history | read of one object for five minutes |
 | the public-read ACL a public grant stamps on an object | the bucket, and the CDN in front of it | read of one object by anyone, without reaching `arcad` at all |
-| `ARCA_BUCKET_SECRET_KEY`, `ARCA_DATABASE_URL`, `ARCA_AUTHORIZER_TOKEN` | the server's configuration, mounted from a Secret | the installation |
+| `ARCA_BUCKET_SECRET_KEY`, `ARCA_DB_URL`, `ARCA_AUTHORIZER_TOKEN` | the server's configuration, mounted from a Secret | the installation |
 | the record of who did what: the event log ([[012-administration]]) | Postgres | the only account of an administrator's actions |
 | the installation's availability | `arcad`, and the two stores behind it | every space at once, for as long as it is down |
 
@@ -401,7 +401,7 @@ the subject it names, for the answer's `ttl` ([[006-identity]]).
 - Encryption at rest and in transit between `arcad` and its two stores.
   Both are the operator's: a bucket's server-side encryption and a
   Postgres connection's TLS are configured where they live, and
-  `ARCA_DATABASE_URL` carries the mode.
+  `ARCA_DB_URL` carries the mode.
 - The security of the issuer and of the authorizer. Arca trusts what the
   operator configured, and the blast radius of a compromised authorizer
   is every space, which is why `arcad check` tests it and why an
