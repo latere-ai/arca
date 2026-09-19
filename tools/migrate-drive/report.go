@@ -18,7 +18,10 @@ import (
 type Report struct {
 	Source, Target string
 	Issuer, Prefix string
-	DryRun         bool
+	// OrgIssuer is what -org-issuer named, and is empty where the
+	// organizations came from a mapping file instead.
+	OrgIssuer string
+	DryRun    bool
 
 	// ManifestPath is where -manifest put the file that ties a row to a
 	// byte, ManifestKeys is how many distinct source keys it lists, and
@@ -126,6 +129,7 @@ func (r *Report) Write(w io.Writer) {
 	_, _ = fmt.Fprintf(head, "source\t%s\n", r.Source)
 	_, _ = fmt.Fprintf(head, "target\t%s\n", r.Target)
 	_, _ = fmt.Fprintf(head, "issuer\t%s\n", r.Issuer)
+	_, _ = fmt.Fprintf(head, "organizations\t%s\n", r.organizations())
 	_, _ = fmt.Fprintf(head, "prefix\t%s\n", r.Prefix)
 	_, _ = fmt.Fprintf(head, "mode\t%s\n", mode)
 	_, _ = fmt.Fprintf(head, "manifest\t%s\n", r.manifestLine())
@@ -149,6 +153,15 @@ func (r *Report) Write(w io.Writer) {
 
 	fmt.Fprintf(&b, "\nthe bytes\n%s\n", indent(BytesFinding))
 	_, _ = io.WriteString(w, b.String())
+}
+
+// organizations is the header block's row for where an organization's subject
+// came from, which is a rule or a file and never both.
+func (r *Report) organizations() string {
+	if r.OrgIssuer == "" {
+		return "the subjects of -org-subjects"
+	}
+	return r.OrgIssuer + "|<drive organization id>, derived from -org-issuer"
 }
 
 // manifestLine is the manifest's row of the header block: where the file is,

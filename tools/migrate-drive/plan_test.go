@@ -436,20 +436,74 @@ func TestARowTheRewriteRefusesStopsItsTable(t *testing.T) {
 }
 
 func TestAPathInAPlaneWithNoRuleStopsItsTable(t *testing.T) {
-	for _, c := range []struct{ name, match string }{
+	for _, c := range planeTables() {
+		f := source()
+		replace(f, c.match, unknownRow(c.name))
+		err := testRun(f, false).Copy(t.Context())
+		if err == nil || !strings.Contains(err.Error(), "sandboxes") {
+			t.Errorf("%s over a path in a plane with no rule answered %v", c.name, err)
+		}
+	}
+}
+
+// TestTheAgentsZoneFoldsUnderFilesAndIsCounted is the maintainer's decision of
+// 2026-09-19: the zone rule is gone, so its rows are files in the same space,
+// under a prefix that says who wrote them, and the report counts each one.
+func TestTheAgentsZoneFoldsUnderFilesAndIsCounted(t *testing.T) {
+	for _, c := range planeTables() {
+		f := source()
+		replace(f, c.match, agentsRow(c.name))
+		r := testRun(f, false)
+		if err := r.Copy(t.Context()); err != nil {
+			t.Fatalf("%s over an agents path answered %v", c.name, err)
+		}
+		if got := r.Report.Table(c.name).Noted[NoteAgentsFolded]; got != 1 {
+			t.Errorf("%s counted %d folded rows, want 1", c.name, got)
+		}
+	}
+
+	// The path lands under files/ in the space it was already in, and the
+	// bucket key does not move with it: a key derives from an object id and
+	// carries no path (spec 003).
+	f := source()
+	replace(f, "FROM files ORDER BY id", agentsRow("files"))
+	r := testRun(f, false)
+	if err := r.Copy(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	row := f.one(t, "INSERT INTO files")
+	if got := row.args[2]; got != "files/agents/a.md" {
+		t.Errorf("the folded row is at %v, want files/agents/a.md", got)
+	}
+	if got := row.args[1]; got != "https://issuer.example|9f1" {
+		t.Errorf("the folded row changed space to %v", got)
+	}
+	if got := row.args[3]; got != string(r.objectID("drive/k")) {
+		t.Errorf("the folded row points at %v and the key mints %v", got, r.objectID("drive/k"))
+	}
+	// The share's subtree prefix folds the same way, so a grant over the zone
+	// still covers the rows it covered.
+	shares := source()
+	replace(shares, "FROM shares ORDER BY id", agentsRow("shares"))
+	sr := testRun(shares, false)
+	if err := sr.Copy(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := shares.one(t, "INSERT INTO shares").args[2]; got != "files/agents/" {
+		t.Errorf("the folded grant covers %v", got)
+	}
+}
+
+// planeTables is every table whose copy rewrites a path, which is every table
+// a plane decision reaches.
+func planeTables() []struct{ name, match string } {
+	return []struct{ name, match string }{
 		{"files", "FROM files ORDER BY id"},
 		{"file_versions", "FROM file_versions ORDER BY id"},
 		{"stars", "FROM stars ORDER BY"},
 		{"upload_sessions", "FROM upload_sessions ORDER BY id"},
 		{"shares", "FROM shares ORDER BY id"},
 		{"events", "FROM events ORDER BY id"},
-	} {
-		f := source()
-		replace(f, c.match, agentsRow(c.name))
-		err := testRun(f, false).Copy(t.Context())
-		if err == nil || !strings.Contains(err.Error(), "agents") {
-			t.Errorf("%s over an agents path answered %v", c.name, err)
-		}
 	}
 }
 
@@ -514,8 +568,16 @@ func unmappedRow(table, org string) [][]any {
 
 // agentsRow is one row of the named table at a path in the plane spec 019
 // gives no rule for.
-func agentsRow(table string) [][]any {
-	const path = "agents/a.md"
+func agentsRow(table string) [][]any { return planeRow(table, "agents/a.md", "agents/") }
+
+// unknownRow is one row of each table in a plane spec 019 gives no rule for,
+// which is what stops a table rather than folding.
+func unknownRow(table string) [][]any { return planeRow(table, "sandboxes/a.md", "sandboxes/") }
+
+// planeRow is one row of each table at a path, and the share's subtree prefix
+// beside it, so a case names a plane once and reads every table's refusal or
+// fold from it.
+func planeRow(table, path, prefix string) [][]any {
 	switch table {
 	case "files":
 		return [][]any{{"f1", "principal", "9f1", path, "9f1", "text/plain", int64(1), "drive/k", sha, false, nil, at, at}}
@@ -526,7 +588,7 @@ func agentsRow(table string) [][]any {
 	case "upload_sessions":
 		return [][]any{{"s1", "principal", "9f1", path, int64(1), "text/plain", "drive/k", "u", "9f1", at}}
 	case "shares":
-		return [][]any{{"h1", "principal", "9f1", "agents/", "link", nil, "read", ptr("t"), "active", "9f1", nil, at}}
+		return [][]any{{"h1", "principal", "9f1", prefix, "link", nil, "read", ptr("t"), "active", "9f1", nil, at}}
 	case "events":
 		return [][]any{{int64(1), "principal", "9f1", ptr(path), "put", nil, nil, at}}
 	}

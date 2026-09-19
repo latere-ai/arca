@@ -387,6 +387,68 @@ func TestStoreMigrateDriveDryRunWritesNoManifest(t *testing.T) {
 	}
 }
 
+// fileAgents is the file in the retired agents zone the fold case adds.
+const fileAgents = "aaaaaaaa-0000-4000-8000-000000000005"
+
+// tierOrgIssuer is the issuer a platform derives an organization's subject
+// from, which is not the issuer its people carry.
+const tierOrgIssuer = "https://orgs.example"
+
+// TestStoreMigrateDriveFoldsTheAgentsZoneAndDerivesOrganizationSubjects holds
+// the two decisions of 2026-09-19 against the real schemas: a row in the
+// retired agents zone lands under files/ in the space it was already in, and
+// an organization's subject is derived from -org-issuer with no mapping file
+// at all.
+func TestStoreMigrateDriveFoldsTheAgentsZoneAndDerivesOrganizationSubjects(t *testing.T) {
+	src, dst := tierDatabases(t)
+	source := open(t, src)
+	if _, err := source.Exec(t.Context(), fmt.Sprintf(`
+		INSERT INTO files (id, owner_type, owner_id, path, created_by, content_type,
+		                   size_bytes, storage_key, checksum, is_public, deleted_at) VALUES
+		  ('%[1]s', 'principal', '%[2]s', 'agents/plan.md', '%[2]s', 'text/markdown', 50,
+		   'drive/u-%[2]s/agents/plan.md', '%[3]s', false, NULL);`,
+		fileAgents, personA, tierSHA)); err != nil {
+		t.Fatalf("seed the agents row: %v", err)
+	}
+
+	t.Setenv(BucketPrefixVar, "drive/")
+	var out, errs bytes.Buffer
+	code := cli(t.Context(), []string{
+		"-source", src, "-target", dst,
+		"-issuer", tierIssuer, "-org-issuer", tierOrgIssuer,
+	}, &out, &errs)
+	if code != exitOK {
+		t.Fatalf("the copy exited %d\n%s\n%s", code, out.String(), errs.String())
+	}
+	target := open(t, dst)
+
+	// The zone rule is gone, so the row is a file in the space it was in,
+	// under a prefix that says who wrote it.
+	if got := one[string](t, target, `SELECT path FROM files WHERE id = $1`, fileAgents); got != "files/agents/plan.md" {
+		t.Errorf("the folded row is at %q", got)
+	}
+	if got := one[string](t, target, `SELECT owner FROM files WHERE id = $1`, fileAgents); got != subjectA() {
+		t.Errorf("the folded row changed space to %q", got)
+	}
+	if !strings.Contains(out.String(), NoteAgentsFolded) {
+		t.Errorf("the report does not count the fold:\n%s", out.String())
+	}
+
+	// The organization's subject is a rule and not a table, and this run was
+	// given no mapping file at all.
+	want := tierOrgIssuer + "|" + orgID
+	if got := one[string](t, target, `SELECT owner FROM files WHERE id = $1`, fileRepo); got != want {
+		t.Errorf("the organization owner is %q, want %q", got, want)
+	}
+	if got := one[string](t, target,
+		`SELECT path_prefix FROM shares WHERE owner = $1 AND grantee = $1`, want); got != "workspaces/site/" {
+		t.Errorf("the organization's grant covers %q", got)
+	}
+	if !strings.Contains(out.String(), tierOrgIssuer+"|<drive organization id>") {
+		t.Errorf("the report does not say where an organization's subject came from:\n%s", out.String())
+	}
+}
+
 // TestStoreMigrateDriveRefusesATargetThatHoldsRows is the idempotence of
 // criterion 3: a second run over the database the first one filled does not
 // begin, so running the tool twice leaves what one run left.

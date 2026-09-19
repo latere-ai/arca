@@ -120,6 +120,20 @@ func (r *Run) table(ctx context.Context, fn func(insert) error) error {
 	})
 }
 
+// path rewrites one row's path and counts the folds spec 019 names by name.
+// Every table's copy goes through it rather than through Path, so a row that
+// changed plane is a number in the report and not a silent rewrite.
+func (r *Run) path(table, path string) (string, error) {
+	moved, err := Path(path)
+	if err != nil {
+		return "", err
+	}
+	if Folded(path) {
+		r.Report.Note(table, NoteAgentsFolded)
+	}
+	return moved, nil
+}
+
 // charge adds one row's bytes to the ledger the run recomputes space_usage
 // from.
 func (r *Run) charge(owner string, size int64) { r.usage[owner] += size }
@@ -187,7 +201,7 @@ func copyFiles(ctx context.Context, r *Run) error {
 				if err != nil {
 					return err
 				}
-				path, err = Path(path)
+				path, err = r.path("files", path)
 				if err != nil {
 					return err
 				}
@@ -230,7 +244,7 @@ func copyFileVersions(ctx context.Context, r *Run) error {
 				if err != nil {
 					return err
 				}
-				path, err = Path(path)
+				path, err = r.path("file_versions", path)
 				if err != nil {
 					return err
 				}
@@ -267,7 +281,7 @@ func copyStars(ctx context.Context, r *Run) error {
 				if err != nil {
 					return err
 				}
-				path, err = Path(path)
+				path, err = r.path("stars", path)
 				if err != nil {
 					return err
 				}
@@ -304,7 +318,7 @@ func copyUploadSessions(ctx context.Context, r *Run) error {
 				if err != nil {
 					return err
 				}
-				path, err = Path(path)
+				path, err = r.path("upload_sessions", path)
 				if err != nil {
 					return err
 				}
@@ -364,7 +378,7 @@ func copyShares(ctx context.Context, r *Run) error {
 				if err != nil {
 					return err
 				}
-				prefix, err = Path(prefix)
+				prefix, err = r.path("shares", prefix)
 				if err != nil {
 					return err
 				}
@@ -518,7 +532,7 @@ func copyEvents(ctx context.Context, r *Run) error {
 				}
 				var eventPath *string
 				if path != nil {
-					moved, err := Path(*path)
+					moved, err := r.path("events", *path)
 					if err != nil {
 						return err
 					}

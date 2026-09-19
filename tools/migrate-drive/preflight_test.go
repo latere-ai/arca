@@ -53,13 +53,24 @@ func TestAnUnmappedOrganizationRefusesBeforeAnyWrite(t *testing.T) {
 
 func TestAPlaneWithNoRuleRefusesBeforeAnyWrite(t *testing.T) {
 	f := clean()
-	replace(f, "split_part(path, '/', 1)", [][]any{{"files"}, {"agents"}})
+	replace(f, "split_part(path, '/', 1)", [][]any{{"files"}, {"sandboxes"}})
 	err := Preflight(t.Context(), testRunPair(f, emptyTarget(), false))
 	if err == nil {
 		t.Fatal("a plane spec 019 gives no rule for is a refusal")
 	}
-	if !strings.Contains(err.Error(), "agents") {
+	if !strings.Contains(err.Error(), "sandboxes") {
 		t.Errorf("the refusal names no plane: %v", err)
+	}
+}
+
+// TestTheAgentsPlaneNoLongerRefusesTheRun is the maintainer's decision of
+// 2026-09-19: the retired zone has a rule now, so its rows fold under files/
+// rather than stopping the copy before it begins.
+func TestTheAgentsPlaneNoLongerRefusesTheRun(t *testing.T) {
+	f := clean()
+	replace(f, "split_part(path, '/', 1)", [][]any{{"files"}, {"agents"}})
+	if err := Preflight(t.Context(), testRunPair(f, emptyTarget(), false)); err != nil {
+		t.Fatalf("the agents plane refused the run: %v", err)
 	}
 }
 
@@ -103,7 +114,7 @@ func TestEveryReasonIsAnsweredAtOnce(t *testing.T) {
 		{"22222222-2222-4222-8222-222222222222"},
 		{"33333333-3333-4333-8333-333333333333"},
 	})
-	replace(f, "split_part(path, '/', 1)", [][]any{{"agents"}})
+	replace(f, "split_part(path, '/', 1)", [][]any{{"sandboxes"}})
 	replace(f, "HAVING count(*) > 1", [][]any{{"principal", "9f1", "site"}})
 	replace(f, "strpos(storage_key", [][]any{{int64(2)}})
 	err := Preflight(t.Context(), testRunPair(f, emptyTarget(), false))

@@ -290,6 +290,13 @@ you switch a route.
   The header row is optional. An organization in the old database that the
   file does not name stops the run before it writes anything, and names the
   id you have to add.
+
+  **Or no file at all.** If your identity provider gives an organization the
+  subject `<issuer>|<its id>` rather than a subject of its own, that is a rule
+  and not a table: pass `-org-issuer https://orgs.example` instead of
+  `-org-subjects`, and every `o-<id>` becomes `https://orgs.example|<id>`. The
+  issuer is often not the one your people carry, which is why it is its own
+  flag. Give one or the other; both is a command line to correct.
 - **Drive in read-only mode.** The copy is a snapshot. A write that lands
   after a table has been read is a row the new database does not have and
   nothing will tell you about. Turn the read-only flag on and confirm writes
@@ -365,8 +372,9 @@ space_usage            2       0        recomputed over 2 spaces
 - **noted** lists what changed inside a row without dropping it: tokens
   minted for a link or public grant that had none, invite tokens cleared
   where the grantee became a subject, repositories that became workspaces,
-  actions in the log that Arca's vocabulary does not have, and upload
-  sessions still open.
+  `agents_folded` for each row that left the retired agent zone, actions in
+  the log that Arca's vocabulary does not have, and upload sessions still
+  open.
 - **manifest**, in the header block, is where the file was written, how many
   old keys it lists, and whether it is complete. Only a run that verified
   completes it, and the second command refuses one that is not complete.
@@ -380,8 +388,15 @@ on one either.
 - Owners become subjects. `u-<id>` becomes `<issuer>|<id>`, and `o-<id>`
   becomes the subject your mapping gives it.
 - Paths move plane. Arca has two, `files/` and `workspaces/`. `memory/`
-  becomes `files/memory/`, and `repos/<name>/` becomes `workspaces/<name>/`.
-  The workspace keeps its name; it stops being a separate kind of thing.
+  becomes `files/memory/`, `agents/` becomes `files/agents/`, and
+  `repos/<name>/` becomes `workspaces/<name>/`. The workspace keeps its name;
+  it stops being a separate kind of thing.
+- The `agents/` rows land in the same space they were in, counted in the
+  report as `agents_folded`. Arca has no rule that keeps a machine out of
+  where a person curates, so those files are files: read the count, because
+  the person who owns the space can now see them in their own plane. The
+  objects do not move for the fold; a bucket key derives from an object id and
+  carries no path.
 - A path in any other plane stops the run. If your installation holds one,
   decide where those rows belong before you migrate.
 - `quotas`, `webhooks`, `agent_visibility` and `admin_audit` are not copied.

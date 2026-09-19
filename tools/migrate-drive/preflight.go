@@ -123,7 +123,8 @@ func preflightOrgs(ctx context.Context, r *Run, refusal *Refusal) error {
 				return err
 			}
 			if _, err := r.Rewriter.Subject("o-" + id); err != nil {
-				refusal.Refuse("the organization %s is in the source and in no mapping; add it to -org-subjects", id)
+				refusal.Refuse("the organization %s is in the source and in no mapping; add it to -org-subjects, "+
+					"or give -org-issuer where your platform derives an organization's subject from its id", id)
 			}
 			return nil
 		})

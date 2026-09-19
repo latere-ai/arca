@@ -20,11 +20,17 @@
 //
 //   - Every owner column becomes a subject. Drive addressed a space with a
 //     pair, (owner_type, owner_id); Arca has one column holding the subject
-//     <issuer>|<sub>. A principal takes the issuer of -issuer, and an
+//     <issuer>|<sub>. A principal takes the issuer of -issuer. An
 //     organization takes the subject the platform's identity provider assigns
-//     it, which only the file -org-subjects names knows.
-//   - Four planes become two. files/ and workspaces/ stay, memory/ folds into
-//     files/memory/, and repos/<name>/ becomes workspaces/<name>/.
+//     it, which only the file -org-subjects names knows, or the subject
+//     -org-issuer derives from its id where the platform follows that rule
+//     rather than assigning one per organization. The two are alternatives,
+//     and naming both is a usage error.
+//   - Five planes become two. files/ and workspaces/ stay, memory/ folds into
+//     files/memory/, agents/ folds into files/agents/ in the space it was
+//     already in and is counted as agents_folded, and repos/<name>/ becomes
+//     workspaces/<name>/. A bucket key does not move with a path: it derives
+//     from an object id and carries none.
 //   - Grants whose grantee is a role, a team or an email address do not
 //     arrive, and neither do the pending and denied statuses, which are the
 //     share requests the platform now owns.
