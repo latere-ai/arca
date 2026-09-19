@@ -1,5 +1,6 @@
-# The ports this installation's database listens on, which the base cannot
-# know.
+# The ports this installation's own dependencies listen on, which the base
+# cannot know: its database, and the telemetry collector injected into the
+# namespace.
 #
 # The base admits 5432, which is where a Postgres an operator runs listens.
 # This installation's database is DigitalOcean's managed Postgres, and that
@@ -20,6 +21,13 @@
 # and leaves the confinement every other installation inherits exactly as
 # the base writes it. The reaper carries the same label as the server and
 # reads the same database, so one policy covers both.
+#
+# 40318 is the telemetry collector's. The namespace carries a monitoring
+# resource that instruments every workload in it, and the collector it
+# injects is reached on the node at 40318 rather than on the 4317 and 4318
+# the base admits. Telemetry is not readiness, so a dropped export fails
+# nothing and says nothing: the service would have gone dark while looking
+# healthy, which spec 018 exists to prevent.
 #
 # 25061 is admitted although nothing dials it yet. The pooled DSN is
 # written into `arcad-database` from the cutover and read by a later
@@ -43,4 +51,6 @@ spec:
         - port: 25060
           protocol: TCP
         - port: 25061
+          protocol: TCP
+        - port: 40318
           protocol: TCP

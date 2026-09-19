@@ -15,7 +15,11 @@ refused before it is pushed.
   failed, and the rollout would have timed out with the image already
   built and signed. The production overlay admits both ports, the way the
   kind overlay admits its own stack's, and a test names the pairing
-  because the ports live in a Secret no manifest test can read.
+  because the ports live in a Secret no manifest test can read. The
+  telemetry collector is admitted in the same policy and for the same
+  reason: the namespace instruments every workload in it and the collector
+  is reached on 40318, not on the 4317 and 4318 the base admits, and a
+  dropped export fails nothing and says nothing.
 
 - **The production Ingress applies.** `/openapi.json` was routed with
   `pathType: Exact`, and the nginx admission webhook refuses a path

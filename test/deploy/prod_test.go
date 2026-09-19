@@ -211,9 +211,13 @@ func TestProdAdmitsTheDatabasePortsThisInstallationUses(t *testing.T) {
 			}
 		}
 	}
-	for _, port := range []string{"25060", "25061"} {
-		if !admitted[port] {
-			t.Errorf("deploy/prod admits no egress to %s; the managed database listens there and the base names only 5432", port)
+	for _, c := range []struct{ port, why string }{
+		{"25060", "the managed database listens there and the base names only 5432"},
+		{"25061", "the database's connection pool listens there"},
+		{"40318", "the telemetry collector injected into this namespace is reached there, not on the 4317 and 4318 the base admits"},
+	} {
+		if !admitted[c.port] {
+			t.Errorf("deploy/prod admits no egress to %s; %s", c.port, c.why)
 		}
 	}
 }
