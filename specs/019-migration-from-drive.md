@@ -8,7 +8,7 @@ depends_on:
 affects: [internal/, cmd/arcad/, deploy/prod/, tools/migrate-drive/, specs/]
 effort: xlarge
 created: 2026-09-18
-updated: 2026-09-18
+updated: 2026-09-19
 author: changkun
 ---
 
@@ -39,6 +39,29 @@ author of record and the licence notice on every file. And there is no
 compatibility window: Drive serves until the cutover, the cutover is one
 change of routes at the origin, and Drive is read-only from that moment
 until it is deleted.
+
+## Current state
+
+Phases 0 through 8 are done: v0.1.0 is cut and the deck's specs are at
+`testing` or `complete`. Phase 9 has one part built and one part blocked.
+
+`tools/migrate-drive` is in the tree on 2026-09-19, the row copy step 3
+of the cutover names. It reads Drive's database, applies every rewrite
+"The data" names, writes Arca's one transaction per table, refuses
+before it writes anything it cannot decide, and verifies counts and a
+sample of checksums afterwards. Criterion 3 holds, proved by
+`TestStoreMigrateDrive*` in `tools/migrate-drive/store_tier_test.go`,
+which runs the tool between two Postgres databases in the store tier of
+[[014-test-stubs-and-tiers]] (`make test-store`). The operator's
+procedure is the "Migrating from Drive" section of `docs/operations.md`.
+
+Building it found one thing this spec had wrong, and criterion 4 is
+blocked on it. **Drive's bucket keys are not derivable from an id**, so
+the bytes row of "The data" below does not hold and the cutover needs an
+object move it does not yet plan. The finding is written into that row.
+Nothing about it changes the row copy, which is complete and verified on
+its own terms; what it changes is that the routes cannot switch on the
+copy's report alone.
 
 ## Design
 
@@ -86,10 +109,10 @@ metadata in one Postgres database. Neither is copied.
 
 | Store | Cutover |
 |---|---|
-| bytes | none. Arca is deployed with `ARCA_BUCKET_PREFIX=drive/` against the same bucket, so every key Drive wrote is a key Arca reads. Invariant 8 of [[001-architecture]] is what makes this free: a key derives from an id, and the ids do not change |
-| metadata | Arca owns a fresh database. `tools/migrate-drive` copies every table in one transaction per table with one rewrite: the owner columns `u-<id>` become `<issuer>|<id>` and `o-<id>` become the subject the platform's identity provider assigns that organization, read from a mapping the platform exports. The tool is idempotent, verifies row counts and a sample of checksums, and refuses to run against a database that already holds rows |
-| the ledger | copied as is; the event enum is a superset of Drive's, and `attach`, `sync` and `release` rows from the withdrawn sandbox auto-mount are history, not a reason to keep the mount |
-| what is removed | the tool does not copy the `quotas`, `webhooks`, `share_requests` and `agent_visibility` tables, drops the workspace kind and rewrites `repos/<name>/` slugs to `workspaces/<name>/`, and drops grants whose grantee is a role, a team or an email address, reporting each dropped row count |
+| bytes | **blocked, found 2026-09-19.** This row said none: deploy Arca with `ARCA_BUCKET_PREFIX=drive/` against the same bucket, because a key derives from an id and the ids do not change. It does not hold. Drive derives a key from the owner and the path, `drive/{owner}/{path}` with a random suffix on a versioned write (`space.storageKey` in `drive/internal/handler/handler.go`), and Arca derives one from an object id, `<prefix><shard>/<id>` ([[003-object-store]], whose own arrival table already names the divergence). A Drive key holds no id to keep, so `object.ParseKey("drive/", "drive/u-…/files/x")` is an error and `migrate-drive` mints a fresh object id per distinct key it reads. `TestADriveKeyHoldsNoObjectIDToKeep` holds the two shapes to that. Invariant 8 of [[001-architecture]] is what the copy has to satisfy and not what makes it free: satisfying it costs an object move, one bucket write per distinct key, from Drive's key to `<prefix><shard>/<id>`. That move is not designed here, and until it is, criterion 4 cannot be proved and the routes of step 4 cannot switch. Decision 2 below, that the prefix stays `drive/`, survives the finding: the prefix is still configuration, and it is the keys under it that have to move |
+| metadata | Arca owns a fresh database. `tools/migrate-drive` copies every table in one transaction per table with one rewrite: the owner columns `u-<id>` become `<issuer>|<id>` and `o-<id>` become the subject the platform's identity provider assigns that organization, read from a mapping the platform exports as JSON or CSV. The tool is idempotent, verifies row counts and a sample of checksums, and refuses to run against a database that already holds rows. Built and in the tree on 2026-09-19; the operator's procedure is `docs/operations.md`. It also refuses, before any write, an organization no mapping names, a path in a plane this spec gives no rule for, two workspaces that collide once the kind is dropped, and a key outside the prefix |
+| the ledger | copied as is. The event enum is **not** a superset, found 2026-09-19: `internal/events` names eleven actions and Drive's `CHECK` named thirteen, and the two Drive has that Arca does not are `share_resolved` and `quota_exceeded`, both belonging to features this spec removes. Arca's schema carries no `CHECK` on the column, so the rows copy and read; what they do not do is pass `events.Action.Valid`, which only an append checks. `migrate-drive` counts them under "actions outside Arca's vocabulary" rather than rewriting them, because which action they become, if any, is the maintainer's call. `attach`, `sync` and `release` rows from the withdrawn sandbox auto-mount are history, not a reason to keep the mount |
+| what is removed | the tool does not copy the `quotas`, `webhooks`, `agent_visibility` and `admin_audit` tables, drops the workspace kind and `agent_access` and rewrites the `repos/<name>/` plane to `workspaces/<name>/`, and drops grants whose grantee is a role, a team or an email address, reporting each dropped row count. Share requests are not a table of Drive's: they are the `pending` and `denied` statuses of the `shares` table, and the tool drops and counts those under that name. Two drops this row did not name and the tool found it had to make: a link or public grant above `read`, which the `shares_token_is_read_only` constraint of [[008-shares-and-links]] refuses and which the tool will not silently downgrade; and `memory/`, which folds to `files/memory/` per "what is removed" below. A path in any plane with no rule here, `agents/` among them, refuses the run rather than landing a row no route can reach |
 
 The cutover itself:
 
@@ -99,7 +122,14 @@ The cutover itself:
    the console's key picker shows Arca's labels. Nothing routes to it.
 2. Drive is put in read-only mode: its deployment takes a flag that
    refuses every write with 503 and a message naming the maintenance.
-3. `tools/migrate-drive` runs. Minutes, at the current row counts.
+3. `tools/migrate-drive` runs. Minutes, at the current row counts. Its
+   report is read, not skimmed: it names every dropped row, and it names
+   the bytes finding on every run.
+
+   - The objects move to their new keys, one bucket write per distinct
+     key. This has no design and no tool as of 2026-09-19, and it is
+     what the bytes row of "The data" records. Step 4 does not begin
+     until it has run and criterion 4 holds.
 4. The origin's routes for the storage prefixes switch from Drive's
    service to Arca's. The console's Storage section, which calls the
    origin, follows without a change. Drive's own host answers a redirect
@@ -256,8 +286,8 @@ limit variables join the configuration table
 |---|---|---|
 | 1 | Every spec of the deck at `complete` names in its Outcome the Drive files it inherited and the commit that brought each | the Outcomes, read by a test in `tools/specindex` |
 | 2 | No file in this repository carries a line copied from Drive without the licence notice and without a spec that names it | the `license` gate and criterion 1 |
-| 3 | `tools/migrate-drive` is idempotent, refuses a non-empty target, rewrites every owner column, and verifies counts and checksums | its test against two Postgres instances in the store tier |
-| 4 | After the copy, every object Drive listed is listed by Arca under the same path with the same version history, and every byte reads through Arca with the same checksum | the tool's verification report, recorded in the Outcome |
+| 3 | `tools/migrate-drive` is idempotent, refuses a non-empty target, rewrites every owner column, and verifies counts and checksums | **Holds, 2026-09-19.** `TestStoreMigrateDrive*` in `tools/migrate-drive/store_tier_test.go`, run by `make test-store` against two Postgres databases the tier creates: one holds Drive's schema from `testdata/drive_schema.sql` and the fixture, one holds Arca's migrations. The four cases are the copy of every table, the refusal of a second run, the dry run that leaves the target empty, and the refusal of a missing mapping. The rewrite rules and the dependency order are proved against a fake in the unit tier beside it |
+| 4 | After the copy, every object Drive listed is listed by Arca under the same path with the same version history, and every byte reads through Arca with the same checksum | **Blocked, 2026-09-19.** The row half holds: the copy's report verifies the counts and a sample of checksums, and the store tier proves the paths and the version history arrive. The byte half cannot be proved by this tool, because Drive's keys are not derivable from an id and the bytes are not at the keys the copied rows name. See the bytes row of "The data". The criterion holds once the object move is designed, built and run, and the routes of step 4 do not switch before it |
 | 5 | Drive refuses every write during the copy | Drive's read-only flag and its test, in Drive's repository |
 | 6 | The origin routes the storage prefixes to Arca and nothing routes to Drive | the origin's route table and the release smoke |
 | 7 | Every consumer in the table above is repointed by a commit that names this spec | `git log --grep` in each repository, listed in the Outcome |

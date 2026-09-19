@@ -247,3 +247,139 @@ what a small installation wants.
 To move it off the API replicas, patch `arcad-reaper` to one replica in your
 overlay and set `ARCA_REAP_INTERVAL=0` on `arcad`. Exactly one replica: the
 sweep is over the whole installation, and two would do the same work twice.
+
+## Migrating from Drive
+
+Arca replaces a service called Drive. If you run that service, `migrate-drive`
+copies its metadata into an Arca database once, during the cutover. It reads
+the old database and writes the new one, and it changes nothing in the old
+one.
+
+Read this whole section before you start. One step of it has no tool.
+
+### What to prepare
+
+- **A fresh Arca database**, with the migrations applied and no rows in it.
+  Run `arcad migrate` against it. The copy refuses a database that already
+  holds rows, so a second attempt begins by dropping this database and
+  migrating it again.
+- **The issuer URL** your identity provider signs tokens with, for example
+  `https://issuer.example`. Every personal space becomes the subject
+  `<issuer>|<id>`, so this value has to be the one your installation verifies
+  against. It is what `ARCA_OIDC_ISSUERS` names.
+- **A mapping of organizations to subjects**, exported from your identity
+  provider. Drive addressed an organization by its own id; Arca addresses it
+  by the subject the provider assigns it, and nothing but the provider knows
+  which is which. JSON or CSV, read by what the file begins with and not by
+  its name:
+
+  ```json
+  {
+    "33333333-3333-4333-8333-cccccccccccc": "https://issuer.example|org-acme"
+  }
+  ```
+
+  ```csv
+  organization,subject
+  33333333-3333-4333-8333-cccccccccccc,https://issuer.example|org-acme
+  ```
+
+  The header row is optional. An organization in the old database that the
+  file does not name stops the run before it writes anything, and names the
+  id you have to add.
+- **Drive in read-only mode.** The copy is a snapshot. A write that lands
+  after a table has been read is a row the new database does not have and
+  nothing will tell you about. Turn the read-only flag on and confirm writes
+  are refused before you start, and leave it on until you have switched your
+  routes.
+
+### The command
+
+It runs from a checkout of this repository, with the Go toolchain and reach to
+both databases. It is not in the server image: it runs once, from wherever you
+can reach the two databases, and never from inside the service.
+
+```sh
+go run ./tools/migrate-drive \
+  -source 'postgres://user:password@old-db/drive?sslmode=require' \
+  -target 'postgres://user:password@new-db/arca?sslmode=require' \
+  -issuer https://issuer.example \
+  -org-subjects orgs.json
+```
+
+Add `-dry-run` to read, rewrite and report without writing. A dry run prints
+the report a real run prints, so run it first: it tells you which rows will be
+dropped and whether the mapping is complete, and it leaves the target alone.
+
+`-prefix` defaults to `drive/` and is the bucket prefix the old installation
+wrote its keys under. The run checks it twice: every key in the source has to
+begin with it, and it has to match `ARCA_BUCKET_PREFIX` where that variable is
+set, so a copy cannot be made under one prefix for a server deployed with
+another. Read "About the bytes" below before you trust either check to mean
+your objects are reachable.
+
+The run exits 0 when every table verified, 1 when anything went wrong or was
+refused, and 2 on a bad flag.
+
+### What the report means
+
+```
+table                  copied  dropped  verified
+subjects               2       0        counts hold
+files                  4       0        counts hold, and 4 checksums were sampled
+shares                 5       4        counts hold
+space_usage            2       0        recomputed over 2 spaces
+```
+
+- **copied** is the rows now in the new database.
+- **dropped** is the rows that did not come across, listed under `rows
+  dropped` with the reason for each. Four reasons, all of them deliberate:
+  grants to a role, to a team, or to an email address, which Arca does not
+  have; share requests, which are the grants that were pending or denied and
+  are your platform's to hold now; and link or public grants that allowed
+  writing, which Arca's links do not. Read these counts. They are access
+  somebody had yesterday and will not have tomorrow.
+- **verified** is what was checked. `counts hold` means the old database held
+  as many rows as the run accounted for, copied plus dropped, and the new one
+  holds as many as it wrote. For files a sample of rows is read back and
+  compared on checksum and size. For `space_usage`, which is recomputed
+  rather than copied, the ledger is compared against the sum the run made
+  while reading.
+- **noted** lists what changed inside a row without dropping it: tokens
+  minted for a link or public grant that had none, invite tokens cleared
+  where the grantee became a subject, repositories that became workspaces,
+  actions in the log that Arca's vocabulary does not have, and upload
+  sessions still open.
+
+Any table that does not verify makes the run exit 1 and names what it found.
+Do not switch your routes on a run that exited 1.
+
+### What changes on the way
+
+- Owners become subjects. `u-<id>` becomes `<issuer>|<id>`, and `o-<id>`
+  becomes the subject your mapping gives it.
+- Paths move plane. Arca has two, `files/` and `workspaces/`. `memory/`
+  becomes `files/memory/`, and `repos/<name>/` becomes `workspaces/<name>/`.
+  The workspace keeps its name; it stops being a separate kind of thing.
+- A path in any other plane stops the run. If your installation holds one,
+  decide where those rows belong before you migrate.
+- `quotas`, `webhooks`, `agent_visibility` and `admin_audit` are not copied.
+  Arca counts what a space holds and stores no limit; the event log is the
+  integration point; audit is the event log.
+- The event log keeps every id, so a consumer holding a cursor keeps its
+  place.
+
+### About the bytes
+
+**The copy moves rows and not objects, and setting `ARCA_BUCKET_PREFIX` to
+`drive/` does not make the old objects readable.**
+
+Drive built a bucket key out of the owner and the path,
+`drive/<owner>/<path>`. Arca builds one out of an object id,
+`<prefix><shard>/<id>`. There is no id inside an old key to carry over, so
+the copy mints a new object id for every distinct key it reads, and those ids
+name keys that no bytes lie at. The report says so on every run.
+
+Plan the object move as its own step, and do not switch your routes on the
+row copy alone. Spec 019 in this repository records the finding and the
+decision it blocks.
