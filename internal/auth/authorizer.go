@@ -163,7 +163,33 @@ func (a *Authorizer) decide(ctx context.Context, action string, res authz.Resour
 		return Decision{}, refuse(deny, "%s: %s", action, reasonOf(d))
 	}
 	a.record(OutcomeAllow)
+	a.mark(ctx, res)
 	return Decision{TTL: d.TTL, Limits: d.Limits, Filter: d.Filter}, nil
+}
+
+// mark records an allow that neither ownership nor a covering grant
+// explains, which is spec 012's definition of an administrative touch. It
+// runs where the answer is read rather than in a handler, so a route added
+// later is recorded without being told to be, and no handler can put the
+// mark on an allow that was not one.
+//
+// The test is the resource's own, read after the grant step ran: the caller
+// is somebody, the resource names a space, the space is not the caller's,
+// and no rung was added. For a kind no grant reaches, a space or a share or
+// a link or an event, there is no subtree for a grant to cover and the grant
+// step adds nothing, so the absence is settled by the kind rather than by a
+// lookup. Arca cannot see why its authorizer said yes and does not guess:
+// what it records is that neither explanation it can check is the reason.
+func (a *Authorizer) mark(ctx context.Context, res authz.Resource) {
+	subject := CallerFrom(ctx).Subject
+	owner := res.String("owner")
+	if subject == "" || owner == "" || subject == owner {
+		return
+	}
+	if res.String(GrantField) != "" {
+		return
+	}
+	markAdministrative(ctx)
 }
 
 // reasonOf is the endpoint's reason, or a word when it named none, so a log

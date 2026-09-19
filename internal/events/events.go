@@ -24,9 +24,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"time"
 
+	"latere.ai/x/arca/internal/auth"
 	"latere.ai/x/arca/internal/store"
 )
 
@@ -172,7 +174,7 @@ func (eventLog) Append(ctx context.Context, q store.Querier, e Event) (int64, er
 	if !e.Action.Valid() {
 		return 0, fmt.Errorf("events: append %q to %q: %w", e.Action, e.Owner, ErrUnknownAction)
 	}
-	detail, err := marshalDetail(e.Detail)
+	detail, err := marshalDetail(administrative(ctx, e.Detail))
 	if err != nil {
 		return 0, fmt.Errorf("events: append %q to %q: %w", e.Action, e.Owner, err)
 	}
@@ -277,6 +279,29 @@ func scanEvent(row scanner) (Event, error) {
 		}
 	}
 	return e, nil
+}
+
+// DetailAdmin is the key an event carries when neither ownership nor a
+// covering grant explains the allow that caused it (spec 012).
+const DetailAdmin = "admin"
+
+// administrative adds the mark to a detail when the request that caused the
+// event received such an allow. The decision path set it, one question
+// earlier and in another package, so a route added later is recorded without
+// being told to be and no writer can put the key on an event that did not
+// earn it.
+//
+// The map is copied and never written into. Every writer passes a literal
+// today, and a writer that reused one would find this key in it on the next
+// call.
+func administrative(ctx context.Context, detail map[string]any) map[string]any {
+	if !auth.Administrative(ctx) {
+		return detail
+	}
+	marked := make(map[string]any, len(detail)+1)
+	maps.Copy(marked, detail)
+	marked[DetailAdmin] = true
+	return marked
 }
 
 // marshalDetail renders the detail, or nothing when there is none. A detail
