@@ -8,7 +8,7 @@ depends_on:
 affects: [authorizer/, internal/auth/, internal/api/, cmd/arcad/, .lateregate.yaml, docs/]
 effort: medium
 created: 2026-09-18
-updated: 2026-09-18
+updated: 2026-09-19
 author: changkun
 ---
 
@@ -136,11 +136,11 @@ to this one. Twenty-three actions over seven kinds.
 
 | Kind | Actions | Resource fields |
 |---|---|---|
-| `File` | `file.read`, `file.write`, `file.delete`, `file.list`, `file.restore` | `id` (absent on a write that creates), `owner`, `path`, `plane` (`files` or `workspaces`), `size` |
+| `File` | `file.read`, `file.write`, `file.delete`, `file.list`, `file.restore` | `id` (absent on a write that creates), `owner`, `path`, `plane` (`files` or `workspaces`), `size`, `grant` (absent where the caller holds none) |
 | `Upload` | `upload.write` | `owner`, `path`, `size` |
 | `Share` | `share.create`, `share.read`, `share.list`, `share.revoke` | `id`, `owner`, `path`, `grantee`, `permission` |
 | `Link` | `link.create`, `link.read`, `link.revoke` | `id`, `owner`, `path` |
-| `Workspace` | `workspace.create`, `workspace.read`, `workspace.write`, `workspace.delete`, `workspace.list`, `workspace.attach`, `workspace.sync`, `workspace.restore` | `id`, `owner`, `slug` |
+| `Workspace` | `workspace.create`, `workspace.read`, `workspace.write`, `workspace.delete`, `workspace.list`, `workspace.attach`, `workspace.sync`, `workspace.restore` | `id`, `owner`, `slug`, `grant` (absent where the caller holds none) |
 | `Event` | `event.read` | `owner` |
 | `Space` | `space.admin` | `owner` (absent on the overview across spaces) |
 
@@ -173,6 +173,23 @@ Rules of the table:
   `authz.Restrict`; an action the grants do not name is a deny with
   reason `grant`, indistinguishable on the wire from any other deny.
 
+A `File` and a `Workspace` carry `grant`: the highest live grant the
+caller holds on a prefix of the resource's path in the caller's favour,
+`read`, `write` or `manage`, absent where they hold none. `internal/auth`
+resolves it through the same `GrantLookup` seam the owner policy reads,
+before the question goes out, in both modes. It is here because an
+authorizer that is handed an owner, a path, a plane and a size cannot
+tell a grantee from a stranger, so every read of a shared object is a
+deny and the grants of [[008-shares-and-links]] reach nothing: `POST
+/v1/shares` would write a row no decision consults. Arca reads no claim
+for meaning to fill it; it reads its own table, which this spec already
+allows for the owner policy, because a grant is a resource of the core
+and not a claim about a person. What the rung admits stays the
+authorizer's: an endpoint that admits the ladder's actions of the rung
+answers as the owner policy does, and one with rules of its own may
+admit less. A `Share`, a `Link`, an `Event` and a `Space` carry no
+`grant`, because no grant reaches their actions.
+
 Every label the console shows for these actions comes from the
 vocabulary's `WithLabels`, so a platform's key picker reads the words
 from the core and writes none of its own.
@@ -192,10 +209,16 @@ Authorization: Bearer {ARCA_AUTHORIZER_TOKEN}
   "claims":   { "...": "every verified claim, verbatim" },
   "workload": null,
   "action":   "file.write",
-  "resource": {"kind": "File", "owner": "https://issuer.example|0f5c1d2e-...", "path": "files/reports/q3.pdf", "plane": "files", "size": 48213},
+  "resource": {"kind": "File", "owner": "https://issuer.example|4c1d7f90-...", "path": "files/reports/q3.pdf", "plane": "files", "size": 48213, "grant": "write"},
   "request":  {"id": "req_...", "ip": "203.0.113.4", "user_agent": "curl/8.7"}
 }
 ```
+
+The question above is a grantee's: the space is somebody else's and
+`grant` is the rung Arca's table says this caller holds on a prefix of
+that path. A caller writing in their own space asks the same question
+with `owner` equal to `subject` and no `grant` at all, because ownership
+is not a grant.
 
 ```json
 200 {"allow": true, "ttl": 60, "limits": {"quota_bytes": 53687091200}}
