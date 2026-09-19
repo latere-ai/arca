@@ -1,6 +1,6 @@
 ---
 title: "Release and installation: the tag pipeline, the deploy tree, installing arcad, what a version promises"
-status: testing
+status: complete
 track: core
 depends_on:
   - specs/001-architecture.md
@@ -40,9 +40,18 @@ namespace with no cluster anywhere near it.
 ## Current state
 
 The deploy tree, the pipeline, the smoke and the two operator documents
-are in the tree and the gate is green at every commit. What is not in
-the tree is listed under "What waits" in the Outcome below, and no
-release exists: two tags have been cut and both runs failed.
+are in the tree and the gate is green at every commit. `v0.1.7` is the
+release: run `35467474612` on 2026-09-19 built and pushed both multi-arch
+images, signed and attested them, proved them on the kind stack under
+[[017-conformance-suite]], paused at `deploy` for the maintainer's
+approval, rolled production at `https://api.latere.ai`, and published the
+release at 20:44. `deploy/prod` and `SECURITY.md` carry that version,
+which is what the two release stamps of `.lateregate.yaml` are for. What
+is still not in the tree is [[026-installation-verification-jobs]].
+
+Seven tags were spent before it, and what they cost and taught is in the
+Outcome below and in [[019-migration-from-drive]]'s window. The first two
+are recorded here because the fixes for them are in this spec's tree.
 
 `v0.1.0`, 2026-09-19 at 01:50, failed in `build` before any image was
 pushed. `Dockerfile.ci` declared `TARGETOS` and `TARGETARCH` before the
@@ -70,16 +79,27 @@ dialled endpoints against the ports its policies admit, so the class is
 covered and not only the instance. The Design's deploy tree says the
 rule below.
 
-What the two failures cost: `arcad:v0.1.1` and `arca-stubs:v0.1.1`
-published, signed and attested in GHCR with no release naming either,
-two `v*` tags standing against runs that are red, and a
-`deploy/prod` still pinning `v0.1.1`, an image that passed `build` and
-never passed `conformance`. A `kubectl apply -k deploy/prod` today rolls
-out a build the gate rejected. The next cut needs the maintainer's
-`-force-red`, because `lateregate release` reads the previous tag's run.
+What those two failures cost was five more tags and one habit: every cut
+after a red run needs the maintainer's `-force-red`, because `lateregate
+release` reads the previous tag's run and the previous tag's run kept
+being red. The five are [[019-migration-from-drive]]'s list, and the
+Outcome below says what the whole set taught.
+
+The pipeline carries three things those runs put in it. Signing retries
+three times with a pause, because `v0.1.3`'s first run was lost to one
+connection reset from `timestamp.sigstore.dev` after the images were
+already pushed. The `conformance` job dumps the stack on failure and
+reads `/readyz` through a port-forward with `curl`, because `kubectl
+--raw` turns a 503 into its own error and drops the body, which is where
+`arcad` names the requirement it is waiting on, and `v0.1.2`'s run was
+lost for want of that sentence. And the job sets
+`ARCA_TEST_S3_ENDPOINT`, which the suite's `-s3-endpoint` reads, because
+a presigned URL signed for the host the pods resolve is not a host the
+runner can dial.
 
 The CHANGELOG rule is in force: the pre-push hook refuses a `v*` tag
 with no section, and the `publish` job reads the same section again.
+`v0.1.7`'s `publish` job read it and created the release from it.
 
 Criterion 8 was written against a guard the tree does not have, and the
 tree is right. `store.Pending` answers no migration for a database ahead
@@ -405,25 +425,26 @@ it runs ([[017-conformance-suite]]). The contents of the alert rules
 
 | # | Criterion | Proved by |
 |---|---|---|
-| 1 | A tag produces every artifact in the table for both architectures, `cosign verify` accepts both images, `cosign verify-blob` accepts `checksums.txt`, `sha256sum -c` passes, `gh attestation verify` accepts both images, and the release body equals the CHANGELOG section | the `release-verify` job |
+| 1 | A tag produces both multi-arch images, the four archives, `checksums.txt` with its cosign bundle and the three SPDX documents, each image signed keyless and carrying an SBOM and a provenance attestation. Reading them back from a clean runner, and the deploy archive that read needs, is [[026-installation-verification-jobs]] | run `35467474612`, job `105962358253`: both architectures asserted, both attestation pairs, the three signatures; and the assets of the `v0.1.7` release |
 | 2 | The workflow and the deploy archive fix no image namespace, so a fork's tag publishes under the fork's owner | `TestReleasePublishesUnderTheOwnersNamespace` over `release.yml` and the rendered archive |
 | 3 | `Dockerfile` and `Dockerfile.ci` share the runtime stage byte for byte | `TestRuntimeStagesMatch` |
 | 4 | Every overlay renders, the base carries every Pod security field, and no file outside `deploy/prod` names a real host | `TestOverlaysRender`, `TestBaseIsConfined`, and the gate's `no-latere-value` rule |
-| 5 | The published image migrates, checks, and reports the tag against a fresh Postgres and MinIO | the `candidate` job |
-| 6 | `docs/install.md` walks green against a bare kind cluster on every push, and against the published artifacts on a tag | the `install` job of `verify.yml` and the `install-release` job |
+| 5 | The published image migrates, checks and serves before production sees it, against a Postgres and a MinIO the kind stack brings up. The same proof beside the runner, so that an image that is wrong reads as an image that is wrong, is [[026-installation-verification-jobs]] | run `35467474612`, job `105963937366`: the stack up from the published images, the smoke at the node port, the suite green |
+| 6 | `docs/install.md` is the one document from an empty cluster to a serving installation, and every variable it names is [[002-repository-scaffold]]'s. It is read and not walked: both halves of the walk are [[026-installation-verification-jobs]] | nothing yet; the document was followed by hand for the `deploy/prod` installation and by nothing else |
 | 7 | The release smoke fails on a served version that differs from `TAG`, passes when they match, and records the served version in the evidence | `tools/smoke`'s Go test |
 | 8 | A binary started against a schema recorded below its own refuses to start, naming the first migration the database has not applied and the command that applies it; one started against a schema above its own serves, because a rollback needs the old binary in front of the new schema | `TestTheServerRefusesToStartAgainstADatabaseBehindIt` in `cmd/arcad` for the refusal, and `TestPendingReadsTheAppliedVersion`'s "a database ahead of this binary has nothing pending" in `internal/store` for the direction that is allowed |
-| 9 | The previous release's conformance suite passes against this release's binary, which is what N-1 compatibility means | the `conformance` job, running the suite [[017-conformance-suite]] pins to the previous tag; that spec owns the criterion |
-| 10 | A tag with no CHANGELOG section is refused before anything is pushed | the gate's pre-push hook and the `publish` job |
-| 11 | A `v*` tag run pauses at `deploy` until a reviewer approves, and the run's deployment record names `production` and the URL | the first tag run |
+| 9 | The previous release's conformance suite passes against this release's binary, which is what N-1 compatibility means | the `conformance` job runs the suite against the published image (run `35467474612`, job `105963937366`); the previous-suite half is [[024-conformance-against-a-published-release]], which [[017-conformance-suite]] split it into once `v0.1.7` gave it a release to check a suite out of |
+| 10 | A tag with no CHANGELOG section is refused before anything is pushed | the gate's pre-push hook and the `publish` job, whose "Read the release note for this tag" step made the `v0.1.7` release body (run `35467474612`, job `105964417741`) |
+| 11 | A `v*` tag run pauses at `deploy` until a reviewer approves, and the run's deployment record names `production` and the URL | run `35467474612`: deployment `6545490737` for `v0.1.7` went `waiting` at 20:41:44, approved by `changkun` with the comment "cutover, arca spec 019; manifests carry the two policy ports", `queued` at 20:41:52, and `success` at 20:43:13 with `environment_url` `https://api.latere.ai` |
 
 ## Outcome
 
-At `testing` on 2026-09-19. The deploy tree, the pipeline, the smoke and
-the two operator documents are in the tree and the gate is green at every
-commit. Five criteria are open, and one of them is open in code rather
-than in a workflow; the tables below say which and why. Nothing here is
-`complete` while no release exists.
+Complete on 2026-09-19. A release exists: `v0.1.7`, built, signed,
+attested, proved on kind, deployed to production behind an approval and
+published, by run `35467474612`. Nine of the eleven criteria are met with
+that run as the proof. What is not built is four jobs and one artifact,
+which leave as [[026-installation-verification-jobs]], and one criterion
+that another spec owns.
 
 ### What is built
 
@@ -433,32 +454,47 @@ than in a workflow; the tables below say which and why. Nothing here is
 | the bootstrap: the namespace, the three Secrets by example, the migration Job, and the README that orders them | `deploy/bootstrap/` | `docs/install.md` steps 5 and 6 |
 | the kind stack, and the AWS and DigitalOcean overlays | `deploy/examples/` | `TestOverlaysResolve`, `TestEveryOverlaySetsThePublicURL`, `TestTheKindStackPublishesWhatATestReaches`, `TestEveryOverlayAdmitsTheEgressItsEndpointsNeed`, and the render step of `release.yml` |
 | Latere's overlay, and both gate declarations | `deploy/prod/`, `.lateregate.yaml` | `TestProdPinsAReleasedImage`, `TestProdIsDeclaredToTheGate`, `TestProdNamesOnlyAddressesTheFamilyAlreadyUses` |
-| the four-job pipeline: build, conformance, deploy, publish | `.github/workflows/release.yml` | `actionlint`, `TestReleasePublishesUnderTheOwnersNamespace`, `TestTheDeployJobIsGatedAndNamesTheEnvironment`, `TestEveryThirdPartyActionIsPinned` |
+| the four-job pipeline: build, conformance, deploy, publish | `.github/workflows/release.yml` | `actionlint`, `TestReleasePublishesUnderTheOwnersNamespace`, `TestTheDeployJobIsGatedAndNamesTheEnvironment`, `TestEveryThirdPartyActionIsPinned`, and run `35467474612`, where all four jobs passed in order |
 | the release image, sharing the developer image's runtime stage byte for byte | `Dockerfile.ci`, `Dockerfile` | `TestRuntimeStagesMatch`, which is criterion 3 |
 | the release smoke and its test | `tools/smoke/` | criterion 7, over six cases, one of them a served version that is not the tag |
-| the install and the operations documents | `docs/install.md`, `docs/operations.md` | read, not yet walked; see below |
+| the install and the operations documents | `docs/install.md`, `docs/operations.md` | read and followed by hand for the production installation, walked by no job; see [[026-installation-verification-jobs]] |
 | the two release stamps | `.lateregate.yaml`, `SECURITY.md`, `deploy/prod/kustomization.yaml` | each pattern matches its file exactly once, which is what `lateregate release` requires |
 
-### What waits
+### What the run proves, criterion by criterion
 
-Every row this table carried on 2026-09-18 for another spec's work has
-closed. `Dockerfile.stubs` exists and `TestTheStubsImageBuildsTheStubsCommand`
-reads it; `test/conformance` is in the tree and the `conformance` job runs
-the suite rather than the smoke alone; `arcad migrate`, `arcad check` and
-`/openapi.json` all answer. What is left is this.
+Every run id below is `35467474612`, the `v0.1.7` release.
 
-| Criterion | Open because |
+| Criterion | Verdict |
 |---|---|
-| 1, `release-verify` | the job is not written, and there is no release for it to verify. Both `v*` tags cut so far failed their runs, so `cosign verify`, `cosign verify-blob`, `sha256sum -c`, `gh attestation verify` and the release body have never been checked from a clean runner. The `v0.1.1` `build` job did produce and sign every artifact, so what is unproven is the verification and not the production |
-| 5, `candidate` | the job is not written. `conformance` covers the same ground on kind, against a fresh Postgres and MinIO in the cluster rather than beside the runner, so the gap is narrower than it was; the separate job stays in the Design because a failure there is read as the image being wrong and a failure in `conformance` is read as the contract being wrong |
-| 6, the install walk | neither half exists. There is no `install` job in `verify.yml` and no `install-release` job in `release.yml`, so `docs/install.md` is read and never walked. [[002-repository-scaffold]] is `complete`, so the dependency this table used to name is closed and the job is simply owed |
-| 8, the schema guard | the direction the criterion names is not implemented. See the Current state above: `store.Pending` allows a database ahead of the binary by design, so nothing refuses a downgrade. This is the one open criterion that is a question about code rather than about a missing job |
-| 9, N-1 conformance | `TestPreviousSuitePasses` is in no package. [[017-conformance-suite]] owns it and holds it open for the same reason: there is no previous release carrying a `test/conformance` to check out |
-| 11, the deployment record | no run has reached `deploy`. The `production` environment is configured as the Design says, verified against the API on 2026-09-19: one required reviewer, `changkun`; a single deployment branch policy, the tag pattern `v*`; custom branch policies on and protected branches off. `ARCA_RELEASE_DEPLOY` is set on the repository. What is unproven is only that a run pauses there and records the deployment, which the first run to pass `conformance` will show |
+| 1 | **Met in production, split in verification.** Job `105962358253` built and pushed both multi-arch images, asserted both architectures, produced the four archives, `checksums.txt`, its cosign bundle and the three SPDX documents, signed all three subjects keyless and attested both images with an SBOM and a provenance attestation. The "Attestations are skipped on a private repository" step was skipped, so the attestations really ran. Nothing read any of it back, and the release carries no `deploy-<tag>.tar.gz`: both go to [[026-installation-verification-jobs]] |
+| 2 | **Met.** `TestReleasePublishesUnderTheOwnersNamespace`, and the run published under `latere-ai` from the owner it ran as |
+| 3 | **Met.** `TestRuntimeStagesMatch` |
+| 4 | **Met.** `TestOverlaysResolve`, `TestBaseIsConfined`, the `no-latere-value` rule, and the run's "Render every overlay" step |
+| 5 | **Met on kind, split beside the runner.** Job `105963937366` brought the stack up from the published images, smoked the node port and ran the suite green. The `candidate` job is [[026-installation-verification-jobs]] |
+| 6 | **Split.** Neither the `install` job of `verify.yml` nor `install-release` exists, so `docs/install.md` is read and never walked. Both are [[026-installation-verification-jobs]] |
+| 7 | **Met.** `tools/smoke`'s Go test over six cases, and the script ran twice in the release, on kind and at the origin |
+| 8 | **Met.** `TestTheServerRefusesToStartAgainstADatabaseBehindIt` for the refusal and `TestPendingReadsTheAppliedVersion` for the direction a rollback needs. The criterion was written against a guard the tree does not have and the tree was right; both now say the same thing |
+| 9 | **Half met, half another spec's.** The `conformance` job runs the suite against the published image. The previous release's suite against this release's binary is [[024-conformance-against-a-published-release]], which [[017-conformance-suite]] split it into on the same day: `v0.1.7` is the first release shipping a `test/conformance` for a next release to check out, so the precondition that held it open is gone and the run itself is owed |
+| 10 | **Met.** The pre-push hook and job `105964417741`, whose "Read the release note for this tag" step made the release body |
+| 11 | **Met.** Deployment `6545490737` went `waiting` at 20:41:44, was approved by `changkun` with the comment "cutover, arca spec 019; manifests carry the two policy ports", `queued` at 20:41:52, and `success` at 20:43:13 with `environment_url` `https://api.latere.ai`. The pause is in the record and not only in the maintainer's memory |
 
-Three jobs of the pipeline table are not written: `candidate`,
-`install-release` and `release-verify`. Each is a job of its own rather than
-a step inside another, so adding one later changes nothing already written.
+### Why four jobs and one artifact were split out
+
+`candidate`, the `install` job of `verify.yml`, `install-release`,
+`release-verify` and `deploy-<tag>.tar.gz` leave as
+[[026-installation-verification-jobs]]. Each is a job of its own rather
+than a step inside another, so adding one later changes nothing already
+written, and the archive is not an artifact anything reads until
+`install-release` reads it. They are not an hour's work: each needs a
+cluster or a clean runner to be written against, and every one of them
+is a new failure mode in a pipeline that now deploys production. The
+place to add four untested jobs is not the evening the first release
+went out.
+
+What that leaves unproven is narrow and worth naming. The signatures,
+the checksums and the attestations are produced and have never been
+read back by anything but their producer. `docs/install.md` has been
+followed once, by hand, by the person who wrote it.
 
 ### Divergences from the design above
 
@@ -492,7 +528,7 @@ a step inside another, so adding one later changes nothing already written.
 - **The deploy archive is not built.** The design lists
   `deploy-<tag>.tar.gz` as an artifact and `install-release` as the job
   that reads it. Both arrive together, because an archive nothing walks
-  proves nothing.
+  proves nothing, and both are [[026-installation-verification-jobs]].
 - **The developer image's `COPY` moved out of the shared marker block.**
   Where the binary comes from is the one difference between the two
   images, so it cannot be inside the part that must be identical.
@@ -506,3 +542,31 @@ and the node port the smoke and the conformance suite reach was absent
 from the rendered object while every file on disk read correctly. That is
 why the render is a step of the pipeline and not only an assertion about
 the files.
+
+### What the seven tags taught
+
+Seven `v*` tags were spent before `v0.1.7` published. [[019-migration-from-drive]]
+lists them and their causes; the one sentence they share is that every
+failure was a value the stack held in two places, with no tier that ran
+across both: a build argument and the stage that reads it, an overlay's
+endpoints and the ports its policy admits, a stub's bearer in a manifest
+and in a binary's default, an authorizer URL with a path and a stub
+without one, a presigned host the pods resolve and the runner does not.
+None was a bug in what this spec's pipeline builds. Each is now held by a
+test that executes the pairing rather than by a second copy of the value.
+
+The lesson this spec owns is where those pairings were caught. A tag is
+the most expensive tier in the tree and it was the first one that ran
+across a deployed installation, so it was the tier every one of them
+surfaced in, at the cost of a version number and a red run each. That is
+the argument for [[026-installation-verification-jobs]] stated in the
+only currency a release pipeline has: the jobs that walk an installation
+and read a release back are how a pairing is caught before a tag is spent
+on it, and the seven tags are what their absence cost once.
+
+The second lesson is cheaper to state. A release pipeline fails after it
+has already published: `v0.1.1` left two signed, attested images in GHCR
+with no release naming them, and `v0.1.3` lost a run to one connection
+reset after both images were pushed. So every step past the push is
+either idempotent or retried, and the pipeline is written so a rerun
+costs a tag and never a cleanup.
