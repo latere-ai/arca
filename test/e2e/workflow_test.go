@@ -19,11 +19,12 @@ import (
 // command the spec names. A job that drifts from the table is a tier that
 // stops running without anyone noticing.
 //
-// The package list of each job is asserted here and nowhere else. Spec 014
-// describes the store tier as the packages that reach a store rather than
-// printing them, because a list written in a document nothing fails on is a
-// list that goes stale; this is the copy a change to the job has to come
-// past.
+// The store job's package list is not written here. It is read out of the
+// Makefile's test-store target, which is the list a contributor runs, so
+// the job and the target cannot disagree: they did, for a day, and four
+// packages with store-tier tests (files, uploads, and both migration tools)
+// never ran in CI while every local run was green. The e2e list is one
+// package and is written.
 func TestWorkflowJobsMatchTheTable(t *testing.T) {
 	raw, err := os.ReadFile("../../.github/workflows/verify.yml")
 	if err != nil {
@@ -36,7 +37,7 @@ func TestWorkflowJobsMatchTheTable(t *testing.T) {
 		selector string
 		packages string
 	}{
-		{"store", "-run '^TestStore'", "./internal/blob/... ./internal/store/... ./internal/events/... ./internal/reaper/..."},
+		{"store", "-run '^TestStore'", storePackages(t)},
 		{"e2e", "-run '^TestE2E'", "./test/e2e/..."},
 	} {
 		if !strings.Contains(workflow, "\n  "+job.name+":\n") {
@@ -62,6 +63,38 @@ func TestWorkflowJobsMatchTheTable(t *testing.T) {
 	if !strings.Contains(workflow, "run: make up") {
 		t.Error("a tier job starts the stack from something other than compose.yaml")
 	}
+}
+
+// storePackages reads the packages the Makefile's test-store target runs,
+// joined the way verify.yml writes them on one line, so the CI job is held
+// to the target rather than to a second copy of the list.
+func storePackages(t *testing.T) string {
+	t.Helper()
+	raw, err := os.ReadFile("../../Makefile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(string(raw), "\n")
+	var pkgs []string
+	in := false
+	for _, line := range lines {
+		switch {
+		case strings.HasPrefix(line, "test-store:"):
+			in = true
+		case in && strings.TrimSpace(line) == "":
+			in = false
+		case in:
+			for f := range strings.FieldsSeq(line) {
+				if strings.HasPrefix(f, "./") {
+					pkgs = append(pkgs, strings.TrimSuffix(f, "\\"))
+				}
+			}
+		}
+	}
+	if len(pkgs) < 4 {
+		t.Fatalf("read %d packages out of the Makefile's test-store target; the parse is wrong, not the target", len(pkgs))
+	}
+	return strings.Join(pkgs, " ")
 }
 
 // TestMakeRun reads the run target and holds it to the seven steps of spec
