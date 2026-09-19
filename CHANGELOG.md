@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.1.1 - 2026-09-19
+
 The first release that publishes. `v0.1.0` was tagged with every note
 below it and failed in its build job before any image was pushed; this
 tag carries the same service with the two release files fixed.
