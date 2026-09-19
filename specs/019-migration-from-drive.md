@@ -326,6 +326,43 @@ become the table of [[013-api]], twenty-nine actions become twenty-three,
 seventeen migrations become one per owning spec ([[004-metadata-store]]
 counts them), and four planes become two.
 
+### The order the cutover has to run in
+
+Three orderings are forced by the code rather than by preference, and each
+one fails in a way that costs a tag or stalls the cluster.
+
+**The platform's decider is released before Arca deploys.** The production
+overlay sets `ARCA_AUTHORIZER_URL`, so the identity is in authorizer mode,
+so `/readyz` carries the `authorizer` check of [[006-identity]]. That check
+sends the probe question every authorizer of the family denies. A non-200
+answer is not a deny: `authz.Client` turns it into `Unavailable`, the check
+returns the error, readiness stays 503, the rollout times out and the
+release's deploy job fails with publish skipped. platformd answers 404 on
+`/internal/arca/authorize` until the release that carries the decider is
+out, so that release precedes Arca's tag. The bearer the two sides share
+is written before either, because platformd's Pod will not start without
+the Secret its environment names.
+
+**Drive stops before Arca starts.** Both run against one Postgres server
+with a connection ceiling the cluster has already hit once. Arca arrives as
+three pods, two `arcad` and one reaper, each opening a pool whose default
+maximum is the CPU count. `store.Open` hands the whole URL to
+`pgxpool.ParseConfig`, so `pool_max_conns` written into the connection
+string bounds all three without a code change; scaling Drive to zero first
+frees the slots its own pods hold. The hard cut already accepted the write
+outage this opens.
+
+**The grant field's name is one string in two repositories.** Arca renders
+it on a file and a workspace resource; the platform's decider reads it off
+the question. No test spans both modules, so a rename on either side leaves
+both green and answers 404 to every grantee in production. The name is
+checked on both sides before the cutover and after any edit to either.
+
+Deleting Drive's api ingress also retires three prefixes Arca does not
+serve, `/v1/quotas`, `/v1/webhooks` and `/v1/agent-visibility`, which are
+the three features this migration removed. They answer 404 at the origin
+from the switch. No consumer calls them.
+
 ## Decisions for the maintainer
 
 The plan takes these; each is reversible before its phase begins.

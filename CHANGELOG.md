@@ -30,9 +30,12 @@ refused before it is pushed.
 
 ## v0.1.1 - 2026-09-19
 
-The first release that publishes. `v0.1.0` was tagged with every note
-below it and failed in its build job before any image was pushed; this
-tag carries the same service with the two release files fixed.
+`v0.1.0` was tagged with every note below it and failed in its build job
+before any image was pushed; this tag carries the same service with the
+two release files fixed. Its own run then failed in conformance, where the
+kind stack's `arcad` crash-looped against a NetworkPolicy the overlay did
+not carry, so the release did not publish either. v0.1.2 is the first tag
+with a published release, and it carries everything below.
 
 - The release image reads its platform. `Dockerfile.ci` declared the two
   platform arguments before the runtime stage's `FROM`, where an argument
