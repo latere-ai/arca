@@ -6,6 +6,22 @@ refused before it is pushed.
 
 ## Unreleased
 
+- **The administration routes answer at the production origin.** The
+  overlay's Ingress enumerates the path prefixes Arca claims, because the
+  origin is shared and a catch-all would take the whole host, and `/v1/admin`
+  was not among them. `GET /v1/admin/overview` and `POST
+  /v1/admin/spaces/{owner}/restore` are in the served document and arcad
+  served both, so a console that asked the origin for the administration
+  screen took a 404 from nginx while every other prefix answered. The
+  overlay claims the prefix.
+
+  The list was a second copy of the route table, which is why it drifted.
+  `TestProdRoutesEveryPrefixTheDocumentServes` now derives every `/v1`
+  namespace from the committed `api/openapi.yaml` and asserts each one is
+  routed, so a namespace the server grows fails the tree rather than the
+  origin. An installation whose ingress routes `/` needs no change; the
+  examples do.
+
 - **Breaking: the connection string is read from `ARCA_DB_URL`.** The
   variable was `ARCA_DATABASE_URL`; every Latere open core with a database
   now reads `<PRODUCT>_DB_URL` for the direct endpoint and

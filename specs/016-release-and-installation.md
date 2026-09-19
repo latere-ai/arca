@@ -522,9 +522,19 @@ followed once, by hand, by the person who wrote it.
   replicas are ready and only a request through the ingress proves what
   answers there. `/livez` is left out: the kubelet reads it and nothing at
   the origin does.
-- **`/v1/admin` is not claimed at the origin.** [[013-api]] registers the
-  administration surface under it, but at a shared origin that prefix is
-  the platform's; [[012-administration]] owns where it is reached.
+- **The origin claims every `/v1` prefix the document serves, and the
+  overlay no longer names them.** `/v1/admin` was held back on the reading
+  that at a shared origin that prefix is the platform's, with
+  [[012-administration]] to say where it is reached. That spec names the two
+  routes and never says where, so the prefix was reached nowhere: the
+  console asked the origin for `GET /v1/admin/overview` and nginx answered
+  404 while arcad served it. The prefix is claimed.
+
+  The enumeration was also a second copy of the route table, which is what
+  let it drift. `TestProdRoutesEveryPrefixTheDocumentServes` derives the
+  prefixes from `api/openapi.yaml`, which criterion 13 of [[013-api]] holds
+  equal to a fresh generation, so a namespace the server grows is a red tree
+  rather than a 404 after a rollout.
 - **The deploy archive is not built.** The design lists
   `deploy-<tag>.tar.gz` as an artifact and `install-release` as the job
   that reads it. Both arrive together, because an archive nothing walks

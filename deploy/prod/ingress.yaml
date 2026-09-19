@@ -10,17 +10,22 @@
 # no Certificate of Arca's: this object adds paths and nothing else. The
 # secret it names is the one the origin already holds.
 #
-# The seven prefixes are the storage half of the platform's resource
+# Seven of the prefixes are the storage half of the platform's resource
 # namespace table, which is the service Arca replaces minus what spec 013
 # does not register: `orgs` and `whoami` are identity's, `quotas`,
 # `webhooks` and `agent-visibility` are retired, and the `s/{token}` share
 # link is now `shares/links/{token}`, already covered by `shares`.
 #
-# `/v1/admin` is not here. Spec 013 registers the administration surface
-# under that prefix, but at a shared origin the prefix is the platform's and
-# not one service's; an administrator reaches it through the in-cluster
-# Service, or through whatever prefix the platform assigns it, and spec 012
-# owns that question.
+# The eighth is `/v1/admin`, the administration surface spec 012 owns. It
+# was left out on the reading that at a shared origin the prefix is the
+# platform's and not one service's, with spec 012 to say where an
+# administrator reaches it instead. Spec 012 never said, and the console
+# asked this origin for `/v1/admin/overview` and took a 404 from nginx while
+# arcad served the route and every other prefix answered a JSON 401. No
+# other service on the origin claims the prefix, so Arca claims it here.
+# test/deploy/prod_test.go derives the list from api/openapi.yaml, so a
+# namespace the document grows is a red tree rather than a 404 after a
+# rollout.
 #
 # Two probes are here, as exact paths: `/readyz` and `/version`. They are
 # what the release smoke reads, and it must read them through the address
@@ -103,6 +108,14 @@ spec:
                 port:
                   name: http
           - path: /v1/events
+            pathType: Prefix
+            backend:
+              service:
+                name: arcad
+                port:
+                  name: http
+          # Spec 012's administration surface, which the console reaches here.
+          - path: /v1/admin
             pathType: Prefix
             backend:
               service:
