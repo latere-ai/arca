@@ -39,8 +39,14 @@ func (r *Refusal) Refuse(format string, args ...any) {
 //     unique per kind and Arca's is unique per space.
 //  4. Does every key lie under the prefix the operator named? A key outside it
 //     means the source is not the installation the operator thinks it is.
+//  5. Is the target empty? The copy writes the ids the source chose, so a
+//     second run over a database that kept the first one's rows is a conflict
+//     on every primary key and never an update.
 func Preflight(ctx context.Context, r *Run) error {
 	refusal := &Refusal{}
+	if err := preflightTarget(ctx, r, refusal); err != nil {
+		return err
+	}
 	if err := preflightOrgs(ctx, r, refusal); err != nil {
 		return err
 	}
@@ -55,6 +61,34 @@ func Preflight(ctx context.Context, r *Run) error {
 	}
 	if len(refusal.Reasons) > 0 {
 		return refusal
+	}
+	return nil
+}
+
+// preflightTarget refuses a target that already holds rows.
+//
+// This is what makes the tool idempotent in the only way a row copy can be:
+// running it twice writes what one run wrote, because the second run does not
+// begin. Arca owns a fresh database on the cutover (decision 1 of spec 019),
+// and a rerun is a fresh one, so a target that survived a first attempt is
+// dropped and migrated again rather than added to.
+//
+// A dry run reads a target however full it is: it writes nothing, and an
+// operator rehearsing the cutover against a populated database is reading the
+// source's arithmetic and not the target's.
+func preflightTarget(ctx context.Context, r *Run, refusal *Refusal) error {
+	if r.DryRun {
+		return nil
+	}
+	for _, name := range TableNames() {
+		rows, err := count(ctx, r.Target, name)
+		if err != nil {
+			return err
+		}
+		if rows > 0 {
+			refusal.Refuse("the target already holds %d rows in %s; the copy writes into an empty database, "+
+				"so drop it, apply the migrations again, and rerun", rows, name)
+		}
 	}
 	return nil
 }

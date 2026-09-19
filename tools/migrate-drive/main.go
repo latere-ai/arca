@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -100,9 +101,20 @@ func run(ctx context.Context, o options, stdout io.Writer) error {
 	if err := r.Copy(ctx); err != nil {
 		return err
 	}
+	if err := Verify(ctx, r); err != nil {
+		return err
+	}
 	report.Write(stdout)
+	if !report.OK() {
+		return errNotVerified
+	}
 	return nil
 }
+
+// errNotVerified is a run whose report a table did not hold in. The report is
+// already printed and names the table, so the message here adds the verdict
+// and not a second copy of it.
+var errNotVerified = errors.New("migrate-drive: the copy is not verified; the report above names the table")
 
 // check reads the flags that have to hold before a database is opened, and
 // answers the prefix the run compares keys against.
