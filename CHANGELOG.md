@@ -6,6 +6,16 @@ refused before it is pushed.
 
 ## Unreleased
 
+- **The production overlay routes everything the release smoke reads.**
+  The Ingress claimed `/readyz` and `/version` at the origin, and the
+  smoke the deploy job runs after the rollout asks for `/livez` and
+  `/openapi.json` as well, so a deploy would have taken a 404 at the
+  origin after a rollout that worked, failed the job and skipped the
+  publish. Both paths are routed. The test behind it no longer keeps its
+  own copy of the list: it reads the paths out of `tools/smoke/release.sh`,
+  which is how the two drifted apart, so a path the script grows is a red
+  tree rather than a spent tag.
+
 - **The kind stack comes up.** `deploy/examples/kind` reaches its stub
   issuer on 8081, its stub authorizer on 8082 and MinIO on 9000, and the
   base's egress policy admits 53, 80, 443, 5432 and the two OTLP ports

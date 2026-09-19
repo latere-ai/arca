@@ -109,8 +109,26 @@ spec:
                 name: arcad
                 port:
                   name: http
-          # The two the release smoke reads.
+          # The four the release smoke reads, each Exact so it claims
+          # nothing beyond itself at an origin several services share.
+          # test/deploy/prod_test.go reads the list out of
+          # tools/smoke/release.sh, so a path the script grows is a red
+          # tree here rather than a 404 after the rollout.
+          - path: /livez
+            pathType: Exact
+            backend:
+              service:
+                name: arcad
+                port:
+                  name: http
           - path: /readyz
+            pathType: Exact
+            backend:
+              service:
+                name: arcad
+                port:
+                  name: http
+          - path: /openapi.json
             pathType: Exact
             backend:
               service:

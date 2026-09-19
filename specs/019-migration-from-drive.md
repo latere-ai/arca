@@ -1,6 +1,6 @@
 ---
 title: "Migration from Drive: the order the code moves, the data, the consumers, the sunset, the archive"
-status: drafted
+status: in-progress
 track: core
 depends_on:
   - specs/001-architecture.md

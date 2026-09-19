@@ -62,11 +62,17 @@ func TestProdPinsAReleasedImage(t *testing.T) {
 	}
 }
 
-// TestProdRoutesWhatTheSmokeReads holds the Ingress to the two paths the
+// TestProdRoutesWhatTheSmokeReads holds the Ingress to every path the
 // release pipeline depends on. The deploy job smokes the origin the
 // production environment names, so a rule dropped here leaves a green tree
 // and a release that fails after the rollout, which is the worst moment to
 // find it.
+//
+// The paths are read out of tools/smoke/release.sh rather than written
+// here. A list in both places is a list that drifts: this one did, naming
+// /readyz and /version while the script had grown to read /livez and
+// /openapi.json as well, so the overlay routed neither and the deploy job
+// would have taken a 404 at the origin after a rollout that worked.
 //
 // The catch-all is asserted absent for the opposite reason: the host is
 // shared with several services, and a `/` rule would take the whole origin
@@ -91,8 +97,11 @@ func TestProdRoutesWhatTheSmokeReads(t *testing.T) {
 	if !found {
 		t.Fatal("deploy/prod holds no Ingress")
 	}
-	// tools/smoke/release.sh reads these two through the origin.
-	for _, path := range []string{"/readyz", "/version"} {
+	smoked := smokedPaths(t)
+	if len(smoked) < 2 {
+		t.Fatalf("read %d paths out of the release smoke, want the several it checks: the parse is wrong, not the overlay", len(smoked))
+	}
+	for _, path := range smoked {
 		got, ok := routed[path]
 		switch {
 		case !ok:
@@ -117,6 +126,52 @@ func TestProdRoutesWhatTheSmokeReads(t *testing.T) {
 		case got != "Prefix":
 			t.Errorf("deploy/prod routes %s as %q, want Prefix", prefix, got)
 		}
+	}
+}
+
+// smokedPaths reads the paths tools/smoke/release.sh asks the origin for,
+// which is the list the production Ingress has to route. Each is a
+// check_status call whose second argument is the path, so the path is taken
+// from there rather than from the label beside it.
+func smokedPaths(t *testing.T) []string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(root(t), filepath.FromSlash("tools/smoke/release.sh")))
+	if err != nil {
+		t.Fatalf("read the release smoke: %v", err)
+	}
+	var paths []string
+	for line := range strings.SplitSeq(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "check_status ") {
+			continue
+		}
+		args := smokeArgs(line)
+		if len(args) < 2 || !strings.HasPrefix(args[1], "/") {
+			continue
+		}
+		if !slices.Contains(paths, args[1]) {
+			paths = append(paths, args[1])
+		}
+	}
+	return paths
+}
+
+// smokeArgs splits a shell call into its double-quoted arguments, which is
+// all the smoke's own calls use.
+func smokeArgs(line string) []string {
+	var args []string
+	for rest := line; ; {
+		i := strings.Index(rest, `"`)
+		if i < 0 {
+			return args
+		}
+		rest = rest[i+1:]
+		j := strings.Index(rest, `"`)
+		if j < 0 {
+			return args
+		}
+		args = append(args, rest[:j])
+		rest = rest[j+1:]
 	}
 }
 

@@ -65,7 +65,7 @@ validated spec is dispatched when every spec in its `depends_on` is at
 | [016](016-release-and-installation.md) | Release and installation: images, binaries, deploy manifests, the operator's overlay | testing |
 | [017](017-conformance-suite.md) | Conformance suite: the contract as an importable test package | testing |
 | [018](018-observability.md) | Observability: traces, metrics, logs, the alert rules | testing |
-| [019](019-migration-from-drive.md) | Migration from Drive: the order the code moves, the data, the consumers, the sunset, the archive | drafted |
+| [019](019-migration-from-drive.md) | Migration from Drive: the order the code moves, the data, the consumers, the sunset, the archive | in-progress |
 
 The order of building is the order of the numbers except where a spec's
 `depends_on` says otherwise, and 019 runs alongside all of them: each
