@@ -611,6 +611,21 @@ func (s starsOf) Move(ctx context.Context, q store.Querier, owner, from, to stri
 	return s.MoveStars(ctx, q, owner, from, to)
 }
 
+// sharesOf is the grants table at the unit tier. Only Move is reached from
+// this package: a move carries a grant on the exact path the object leaves,
+// and the count it answers is what a case reads. The rest of the query set
+// belongs to internal/shares, so the embedded interface is left nil and any
+// other call panics rather than answering something invented.
+type sharesOf struct {
+	store.Shares
+	moved []string
+}
+
+func (s *sharesOf) Move(_ context.Context, _ store.Querier, owner, from, to string) (int64, error) {
+	s.moved = append(s.moved, owner+" "+from+" -> "+to)
+	return 1, nil
+}
+
 // counted is the ledger of the unit tier: it records every charge and every
 // event, and refuses a charge past the limit the answer carried, which is
 // what internal/events does against Postgres.

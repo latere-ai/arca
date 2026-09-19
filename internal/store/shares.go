@@ -87,6 +87,10 @@ type Shares interface {
 	// else. It answers false when there is no such grant. A grant that is
 	// already revoked is a success: the end state is the goal.
 	Revoke(ctx context.Context, q Querier, id string) (bool, error)
+	// Move carries a grant on exactly this path to the path an object moved
+	// to, inside the move's own transaction. A grant on an ancestor covers a
+	// subtree and stays where it is.
+	Move(ctx context.Context, q Querier, owner, from, to string) (int64, error)
 	// ListSpace answers one page of the grants on a space, ordered by id,
 	// narrowed to one subtree when prefix is not empty. Revoked grants are
 	// not answered.
@@ -292,6 +296,26 @@ func (shares) Covering(ctx context.Context, q Querier, owner, path string) ([]Gr
 		   AND (expires_at IS NULL OR expires_at > now())
 		 ORDER BY CASE permission WHEN 'manage' THEN 3 WHEN 'write' THEN 2 ELSE 1 END DESC, id`,
 		owner, prefixes, GrantActive)
+}
+
+// Move carries a grant on exactly this path to the path the object moved to.
+//
+// A grant on an ancestor covers a subtree and stays where it is: the object
+// left that subtree or stayed inside it, and either way the ancestor still
+// means what it meant. A grant on the exact path means "this object", so it
+// follows the object.
+//
+// Leaving it behind is not merely a lost grant. The old path becomes free,
+// and the next object written there would be covered by a grant its owner
+// gave for something else, which hands the grantee an object nobody shared
+// with them (spec 005 criterion 8, spec 008's ladder).
+func (shares) Move(ctx context.Context, q Querier, owner, from, to string) (int64, error) {
+	tag, err := q.Exec(ctx,
+		`UPDATE shares SET path_prefix = $3 WHERE owner = $1 AND path_prefix = $2`, owner, from, to)
+	if err != nil {
+		return 0, classify(fmt.Sprintf("move the grants on %q of %q", from, owner), err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 // PrefixesOf lists the prefixes a grant may carry that cover path: the path

@@ -220,6 +220,10 @@ type Options struct {
 	Files    store.Files
 	Versions store.Versions
 	Stars    store.Stars
+	// Shares is spec 008's grants table, which a move writes to: a grant on
+	// the exact path an object leaves has to follow it. Nil takes the one
+	// over Postgres.
+	Shares store.Shares
 	// Decide is the seam of spec 006. A surface built without one would act
 	// where nobody decided, so New refuses it.
 	Decide Decider
@@ -251,6 +255,7 @@ type Service struct {
 	files      store.Files
 	versions   store.Versions
 	stars      store.Stars
+	shares     store.Shares
 	decide     Decider
 	ledger     Ledger
 	workspaces Workspaces
@@ -264,7 +269,7 @@ type Service struct {
 func New(o Options) *Service {
 	s := &Service{
 		db: o.DB, bucket: o.Bucket,
-		files: o.Files, versions: o.Versions, stars: o.Stars,
+		files: o.Files, versions: o.Versions, stars: o.Stars, shares: o.Shares,
 		decide: o.Decide, ledger: o.Ledger, workspaces: o.Workspaces,
 		references: o.References, cfg: o.Config, clock: o.Now,
 		metrics: o.Metrics,
@@ -280,6 +285,9 @@ func New(o Options) *Service {
 	}
 	if s.stars == nil {
 		s.stars = store.NewStars()
+	}
+	if s.shares == nil {
+		s.shares = store.NewShares()
 	}
 	if s.ledger == nil {
 		s.ledger = noLedger{}

@@ -36,6 +36,14 @@ func TestAMoveTouchesNoBytesAndCarriesTheHistoryAndTheBookmarks(t *testing.T) {
 	if got := h.bucket.Total() - before; got != 0 {
 		t.Fatalf("the move made %d bucket calls, and a key derives from an id", got)
 	}
+	// The grant on the exact path goes with the object. Left behind it would
+	// not merely be lost: the old path becomes free, and the next object
+	// written there would be covered by a grant its owner gave for something
+	// else, handing the grantee an object nobody shared with them.
+	want := h.owner + " files/plan.md -> files/archive/plan.md"
+	if len(h.grants.moved) != 1 || h.grants.moved[0] != want {
+		t.Fatalf("the move carried the grants %v, want exactly [%s]", h.grants.moved, want)
+	}
 	var moved Object
 	decode(t, w, &moved)
 	if moved.Path != "files/archive/plan.md" || moved.Checksum != digest("second") {

@@ -52,6 +52,9 @@ type harness struct {
 	counters *metrics.Set
 	owner    string
 	clock    time.Time
+	// grants is the grants table a move writes to, so a case can read that
+	// the grant on the path an object left followed it.
+	grants *sharesOf
 	// service is the one the routes are bound to, so a case reaches a
 	// method the node calls directly — the object read of a public link,
 	// or the restore across owners of spec 012 — without a request.
@@ -85,16 +88,17 @@ func newHarness(t *testing.T, opts ...func(*Options)) *harness {
 	}
 
 	m := newMemory()
+	grants := &sharesOf{}
 	objects := blob.NewMemory()
 	h := &harness{
 		store: m, objects: objects, bucket: blob.NewCounting(objects),
 		ledger: &counted{memory: m}, issuer: iss, endpoint: endpoint,
 		asked: &recorder{inner: id.Authorizer}, counters: metrics.Register(nil),
-		owner: iss.URL() + "|9ab3", clock: time.Now(),
+		owner: iss.URL() + "|9ab3", clock: time.Now(), grants: grants,
 	}
 	o := Options{
 		DB: m, Bucket: h.bucket,
-		Files: filesOf{m}, Versions: versionsOf{m}, Stars: starsOf{m}, References: m,
+		Files: filesOf{m}, Versions: versionsOf{m}, Stars: starsOf{m}, Shares: grants, References: m,
 		Decide: h.asked, Ledger: h.ledger,
 		Config:  configOf(inlineBytes, 1<<20),
 		Now:     func() time.Time { return h.clock },

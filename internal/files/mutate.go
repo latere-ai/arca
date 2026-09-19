@@ -108,15 +108,23 @@ func (s *Service) move(w http.ResponseWriter, r *http.Request, to string) {
 		case !moved:
 			return api.Refuse(api.CodeNotFound, "there is no object at %q", from.Path)
 		}
-		// The history and the bookmarks key on the path and follow it. A
-		// share on a parent prefix covers a subtree and stays where it is;
-		// the one on this exact path follows too, and that statement
-		// arrives with the grants table of spec 008.
+		// The history, the bookmarks and the grants key on the path and
+		// follow it. A share on a parent prefix covers a subtree and stays
+		// where it is; the one on this exact path means "this object", so it
+		// follows the object.
+		//
+		// Leaving the grant behind would not merely lose it. The old path
+		// becomes free, and the next object written there would be covered
+		// by a grant its owner gave for something else, handing the grantee
+		// an object nobody shared with them.
 		if _, err := s.versions.Move(ctx, q, from.Owner, from.Path, dest.Path); err != nil {
 			return fault(ctx, "move the history", err)
 		}
 		if _, err := s.stars.Move(ctx, q, from.Owner, from.Path, dest.Path); err != nil {
 			return fault(ctx, "move the bookmarks", err)
+		}
+		if _, err := s.shares.Move(ctx, q, from.Owner, from.Path, dest.Path); err != nil {
+			return fault(ctx, "move the grants", err)
 		}
 		return nil
 	})

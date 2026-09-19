@@ -90,6 +90,21 @@ func (t *table) Revoke(_ context.Context, _ store.Querier, id string) (bool, err
 	return false, nil
 }
 
+// Move carries every grant on exactly from to to, the way the Postgres
+// statement does; a grant on an ancestor is not on from and stays.
+func (t *table) Move(_ context.Context, _ store.Querier, owner, from, to string) (int64, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	var n int64
+	for i := range t.grants {
+		if t.grants[i].Owner == owner && t.grants[i].PathPrefix == from {
+			t.grants[i].PathPrefix = to
+			n++
+		}
+	}
+	return n, nil
+}
+
 func (t *table) ListSpace(_ context.Context, _ store.Querier, owner, prefix, cursor string, limit int) ([]store.Grant, error) {
 	return t.page(t.failList, cursor, limit, func(g store.Grant) bool {
 		return g.Owner == owner && g.Status == store.GrantActive && (prefix == "" || g.PathPrefix == prefix)
