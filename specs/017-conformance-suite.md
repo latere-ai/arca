@@ -1,6 +1,6 @@
 ---
 title: "Conformance suite: the contract as an importable test package against any base URL"
-status: testing
+status: complete
 track: core
 depends_on:
   - specs/001-architecture.md
@@ -46,11 +46,17 @@ test-conformance` runs it against the compose stack, and the
 the published image on the kind stack.
 
 Against this build, which answers all forty-one of [[013-api]]'s
-routes, a run is **fifty-one cases passed, none failed, and none
+routes, a run is **fifty-three cases passed, none failed, and none
 skipped**. The pending group passes with no route outstanding, which is
 the evidence [[016-release-and-installation]]'s gate reads: the
 installation this build makes serves the whole contract and not part of
-it.
+it. That is a measured run and not a local one: the `conformance` job of
+`.github/workflows/release.yml` drove those cases against the image the
+tag's `build` job had just pushed, on a kind cluster, and logged `53
+passed, 0 failed, 0 skipped, 48 objects created and deleted` twice — in
+run 35467474612 for `v0.1.7`, which published, and in run 35464362441 for
+`v0.1.6`, whose conformance job was green and whose deploy step then
+failed.
 
 Twenty-six of the thirty rows of [[013-api]]'s error table are provoked
 by a case, which declares the codes it makes the target answer, and the
@@ -63,7 +69,7 @@ read off the served document by the pending group.
 | Group | On this build | Recorded |
 |---|---|---|
 | identity | passes, 4 cases | the expired token and the wrong audience are `Unverified`, below |
-| authorizer | passes, 3 cases | |
+| authorizer | passes, 4 cases | |
 | paths | passes, 1 case | the file routes add nothing it cannot already see through `POST /v1/shares` |
 | files | passes, 4 cases | |
 | bytes | passes, 1 case | |
@@ -76,7 +82,7 @@ read off the served document by the pending group.
 | links | passes, 4 cases | the anonymous half is `Unverified`, below |
 | workspaces | passes, 6 cases | |
 | events | passes, 4 cases | |
-| usage | passes, 2 cases | |
+| usage | passes, 3 cases | |
 | administration | passes, 3 cases | the ordinary caller's half is `Unverified`, below |
 | errors | passes, 7 cases | |
 | pending | passes, no route outstanding | |
@@ -121,32 +127,55 @@ declares rather than what a run happened to see, so the rule holds
 against a build that serves none of the routes. Criterion 4's second
 half is `TestConcurrentRuns`, with one narrowing recorded below.
 
-Criteria 8 and 9 are open, and they are why this spec is not complete.
-Criterion 8's import graph half is proved by
-`TestTheSuiteReachesNoHelperOfThisTree`; the `conformance-external` job
-it names is in neither workflow, so the external form is a suggestion
-rather than a claim. Criterion 9 has no `TestPreviousSuitePasses`
-anywhere in the tree, and it waits on a release that carries a
-`test/conformance` to check out. There is no release: both `v*` tags cut
-so far failed their runs ([[016-release-and-installation]]), so the
-previous tag holds no suite to check out and the test has nothing to be
-written against. The spec stays at `testing` until both close.
+Criteria 8 and 9 were both open on 2026-09-19 morning. A release closed
+one and not the other.
+
+Criterion 8 is met. Its import graph half was always proved by
+`TestTheSuiteReachesNoHelperOfThisTree`. Its other half, the documented
+command running from a clean checkout against a URL, is what the
+`conformance` job of `.github/workflows/release.yml` does: the job checks
+the repository out fresh, brings the kind stack up from the published
+images, and runs the command of the table below against a URL, with
+`TestTheSuiteReachesNoHelperOfThisTree` named in the same `-run` pattern
+so the command and the import graph are proved in one invocation. It ran
+green in run 35464362441 for `v0.1.6` and run 35467474612 for `v0.1.7`,
+each logging `53 passed, 0 failed, 0 skipped`.
+The `conformance-external` job this criterion first named was never
+written and is not needed: the job that exists does what the criterion
+asks. The one thing it does not do is run from outside this repository's
+checkout, and that is the half `TestTheSuiteReachesNoHelperOfThisTree`
+proves by reading the import graph instead.
+
+Criterion 9 as first written is not met, and it left rather than waited;
+the row below now says what the pipeline proves, which is this release's
+suite against this release's published image with no route pending. A
+release now exists, so the blocker on the N-1 half is gone, but building
+it is not an edit to the suite: the previous tag's driver carries the
+`tiers` tag and imports
+`test/stubs/issuer` and `test/stubs/authorizer`, so checking out
+`test/conformance` alone into a temporary module does not build, and the
+only place the step runs is a release's own `conformance` job against a
+candidate image that exists after `build` has pushed it. It is
+[[024-conformance-against-a-published-release]] now, at `validated`,
+carrying the criterion verbatim; [[016-release-and-installation]]'s
+criterion 9 cites the same test.
 
 What the implementation decided, where this spec was silent or where the
 tree made another reading better:
 
-- The input is `Options`, not `Config`, which is the word the tree
-  already uses for what a package is built from (`api.Options`). The
-  field set is this spec's unchanged.
+- The input is `Options` rather than the `Config` this spec first wrote,
+  because `Options` is the word the tree already uses for what a package
+  is built from (`api.Options`). The field set is this spec's unchanged,
+  and the block below says `Options`.
 - `Report` gains `SkippedGroups`, so a group that skipped whole is named
   once rather than once per case, and `Pending`, which is the routes of
   [[013-api]] the target does not answer.
 - The build tag is `tiers`, the one every tier of this repository
   carries ([[014-test-stubs-and-tiers]]), rather than the `e2e` this
-  spec wrote. That tag was settled before this spec was built, and a
-  second one would be a second way to say the same thing. The files that
-  carry `Run` are untagged, so a consumer imports the suite and none of
-  the driver.
+  spec first wrote. That tag was settled before this spec was built, and
+  a second one would be a second way to say the same thing. "Where it
+  runs" below says `tiers`. The files that carry `Run` are untagged, so a
+  consumer imports the suite and none of the driver.
 - A route [[013-api]] names and the target does not answer puts every
   case that drives it in the pending group, above. This spec wrote the
   optional-route rule for a `501`; [[013-api]] marks no route optional,
@@ -235,9 +264,9 @@ tree made another reading better:
 
 ```go
 // Run executes every group the inputs allow and returns what happened.
-func Run(t *testing.T, cfg Config) Report
+func Run(t *testing.T, opts Options) Report
 
-type Config struct {
+type Options struct {
 	URL string // the base URL of the installation, without /v1
 
 	// Token mints a bearer for a subject. The suite asks for three:
@@ -367,10 +396,14 @@ release that is green on one and not the other does not publish.
 
 ### Where it runs
 
-`TestContract`, under the `e2e` build tag, wraps `Run`. It reads
-`-url`, either `-issuer` (a stub issuer to mint every subject from) or
-`-token`, `-token-bob` and `-admin`, plus `-authorizer` and
-`-s3-endpoint`, and skips whole with the reason when `-url` is empty.
+`TestContract`, in `test/conformance/contract_test.go` under the `tiers`
+build tag, wraps `Run`. It reads `-url`, either `-issuer` (a stub issuer
+to mint every subject from) or `-token`, `-token-bob` and `-admin`, plus
+`-authorizer`, `-anonymous` and `-s3-endpoint`, each falling back to the
+`ARCA_TEST_*` variable of the same name. With no `-url` it starts an
+installation of its own on the compose stack of [[014-test-stubs-and-tiers]],
+which is what `make test-conformance` runs; with no stack either there is
+nothing to drive and it skips whole with the remediation.
 
 `-s3-endpoint` (`ARCA_TEST_S3_ENDPOINT`) is `BucketDial`, and it exists
 because a presigned URL is signed over the host it names. A target on a
@@ -385,14 +418,20 @@ empty.
 
 | Target | Command | Groups that skip |
 |---|---|---|
-| the unit tier's in-process server | `go test -tags e2e -run '^TestContract' ./test/conformance -args -url $ARCA_TEST_URL -issuer $ARCA_TEST_ISSUER` | none; the stubs of [[014-test-stubs-and-tiers]] supply the authorizer control |
-| the kind stack | the same against the stack's node port | none |
+| an installation the tier starts on the compose stack | `make test-conformance`, which is `go test -tags=tiers ./test/conformance/...` over `TestContract`, `TestConcurrentRuns`, `TestSuiteCatchesADrift` and `TestTheSuiteReachesNoHelperOfThisTree` with no `-url`: the tier reads the stack from the `E2E_` variables of [[014-test-stubs-and-tiers]], starts `arcad` and both stubs itself, and drives that | none; the stubs of [[014-test-stubs-and-tiers]] supply the authorizer control |
+| the kind stack | the same with `-url`, `-issuer`, `-authorizer` and `-admin` on the stack's node ports, and `ARCA_TEST_S3_ENDPOINT` on MinIO's, because the target signs a presigned URL for an address only the cluster resolves | none |
 | a released installation | the same with `-token`, `-token-bob`, `-admin` and no `-issuer` | `authorizer` and the byte-limit cases of `usage` when the installation runs no stub, each reported by name |
 | a consumer's own front | the same, from that consumer's CI | whatever their `Skip` list names |
 
-A CI job, not a Go test, proves the external form: a clean checkout
-runs the documented command against a URL, so the package a consumer
-imports pulls in no helper from this repository's test tree.
+A CI job, not a Go test, proves the external form: a clean checkout runs
+the documented command against a URL, so the package a consumer imports
+pulls in no helper from this repository's test tree. That job is
+`conformance` in `.github/workflows/release.yml`. It checks the
+repository out fresh, brings the kind stack up from the images the
+release just published, and runs the kind row's command with
+`TestTheSuiteReachesNoHelperOfThisTree` in the same invocation, so the
+command and the import graph are proved together against a published
+image rather than against a working tree.
 
 ### The marker
 
@@ -430,11 +469,14 @@ case is never weakened to make a release green: a target that no longer
 passes a case either has a defect or is a major bump.
 
 N-1 compatibility ([[016-release-and-installation]]) is proved by
-running the previous release's suite against this release's binary. The
-`conformance` job checks out `test/conformance` at the previous tag
-into a temporary module and runs it against the candidate image; a case
-the previous suite holds and the new binary fails is a break that must
-become a major or be fixed before the tag.
+running the previous release's suite against this release's binary: a
+case the previous suite holds and the new binary fails is a break that
+must become a major or be fixed before the tag. That run is
+[[024-conformance-against-a-published-release]] and is not built. The
+`conformance` job today runs this release's own suite against the
+candidate image, which proves the tag serves the contract as this tag
+writes it and not that it still serves the contract the tag before it
+wrote.
 
 ### What arrives from Drive
 
@@ -454,7 +496,10 @@ The stubs and the tiers the suite runs on
 under an injected failure is the e2e tier's and no `Fault` interface is
 part of this package, so a consumer importing it needs no cluster
 helper. The routes and the codes themselves ([[013-api]]). Load,
-timing, and cost; a case asserts an answer and never a latency.
+timing, and cost; a case asserts an answer and never a latency. Running a
+previous release's suite against this release's binary, which is a step
+in the release pipeline and a temporary module rather than a case here
+([[024-conformance-against-a-published-release]]).
 
 ## Acceptance criteria
 
@@ -467,5 +512,58 @@ timing, and cost; a case asserts an answer and never a latency.
 | 5 | `arcad` started with each value of `ARCA_TEST_DRIFT` fails exactly the named group's case and no other | `TestSuiteCatchesADrift` |
 | 6 | A route of [[013-api]]'s table the target does not answer puts every case that drives it in the pending group, which fails naming the route and the spec that owns it, and a target serving no document is held to the whole table | `TestSurfaceReadsTheServedDocument`, `TestPendingFailsUntilTheRoutesLand`. The `501` rule this criterion first wrote is superseded: [[013-api]] marks no route optional, so the difference the suite reports is what the served document names against what the contract does |
 | 7 | The verifier `arcad` installs admits `arca` and refuses the issuer's audience, another audience, and a token with no subject, calls the issuer only for its key set, and reads no flag in place of a role | `TestConformance` in `internal/auth`, the family suite |
-| 8 | The package a consumer imports pulls in no helper from this repository's test tree, and the documented command runs from a clean checkout against a URL | `TestTheSuiteReachesNoHelperOfThisTree` for the import graph; the `conformance-external` CI job, which is not built, for the command. **Open** |
-| 9 | The previous release's suite passes against this release's binary, or the tag is a major | `TestPreviousSuitePasses`, run by the `conformance` job of [[016-release-and-installation]]; this spec owns the test and that spec cites it. Neither is written: there is no release to check a previous suite out of. **Open** |
+| 8 | The package a consumer imports pulls in no helper from this repository's test tree, and the documented command runs from a clean checkout against a URL | `TestTheSuiteReachesNoHelperOfThisTree` for the import graph, and the `conformance` job of `.github/workflows/release.yml` for the command: it checks out clean, brings the kind stack up from the published images, and runs both in one invocation. Green in run 35464362441 (`v0.1.6`) and run 35467474612 (`v0.1.7`), each `53 passed, 0 failed, 0 skipped` |
+| 9 | This release's suite passes against this release's published image, with no route in the pending group | the same `conformance` job and the same two runs; a failed case, the pending group included, stops the release ([[016-release-and-installation]]). Running the **previous** release's suite against this release's binary was this criterion's first form and is [[024-conformance-against-a-published-release]], which carries it verbatim: the previous tag's driver imports this repository's stub packages, so the step is a temporary module and a release-only run rather than an edit here |
+
+## Outcome
+
+Complete on 2026-09-19. `test/conformance` is in the tree with
+fifty-three cases across eighteen groups, `contract_test.go` under the
+`tiers` tag drives them, `make test-conformance` runs them against the
+compose stack, and the `conformance` job of
+`.github/workflows/release.yml` runs them against the image a tag just
+pushed, on a kind cluster. That job logged `53 passed, 0 failed, 0
+skipped` in run 35464362441 for `v0.1.6` and in run 35467474612 for
+`v0.1.7`, and `v0.1.7` is the release that serves `api.latere.ai`. A
+release does not publish on a failed case, the pending group included, so
+the suite is the gate [[016-release-and-installation]] reads and not a
+report.
+
+| Criterion | What closed it |
+|---|---|
+| 1, 2, 3 | `TestEveryGroupHasACase`, `TestSkipsCarryAReason`, `TestEveryRouteHasACase`, `TestEveryCodeIsProvokedOrNamed` and `TestEveryCriterionHasACase`, each reading the deck or the served document rather than a run's output |
+| 4, 5 | `TestRunCleansUpWhatItMade`, `TestCleanupReportsAFailureAndKeepsGoing`, `TestConcurrentRuns`, and `TestSuiteCatchesADrift` over the three `ARCA_TEST_DRIFT` values |
+| 6 | `TestSurfaceReadsTheServedDocument` and `TestPendingFailsUntilTheRoutesLand`; the `501` rule the criterion first wrote is superseded, as its row records |
+| 7 | `TestConformance` in `internal/auth`, the family audience suite |
+| 8 | met by the `conformance` job, which runs the documented command from a clean checkout against a URL with `TestTheSuiteReachesNoHelperOfThisTree` in the same invocation. The `conformance-external` job it first named was never written and is not needed |
+| 9 | narrowed to what the pipeline proves: this release's suite against this release's published image, with no route pending |
+
+Five statements were corrected against the tree while closing, none of
+them a change to code:
+
+- the Design block named the input `Config`, where `test/conformance` has
+  `Options`;
+- "Where it runs" put `TestContract` under the `e2e` tag, where
+  `contract_test.go` is `//go:build tiers`;
+- the same section said the tier skips whole when `-url` is empty. It
+  starts an installation of its own on the compose stack instead, which
+  is what `make test-conformance` runs, and skips only with no stack
+  either. The command table's rows now say what each target's run is, and
+  the kind row names `ARCA_TEST_S3_ENDPOINT`;
+- the run was recorded as fifty-one cases, with the authorizer group at
+  three and usage at two, where the suite has fifty-three, four and
+  three. The counts above are what the two release runs printed;
+- "Versioning with the API" claimed the `conformance` job checks out the
+  previous tag's suite. It does not, and that sentence now names the spec
+  that will.
+
+One criterion was split rather than built.
+[[024-conformance-against-a-published-release]] carries criterion 9's
+first form verbatim. Its blocker is gone — a release exists and carries a
+`test/conformance` — but closing it is a temporary module requiring
+`latere.ai/x/arca` at the previous tag, because that tag's driver imports
+this repository's stub packages, and a step that runs only inside a
+release's `conformance` job against a candidate image. It cannot be
+exercised on `main`, so it is a change with a release cycle attached
+rather than an hour before a tag. Every other divergence from the draft
+is in Current state above.
