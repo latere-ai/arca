@@ -6,6 +6,23 @@ refused before it is pushed.
 
 ## Unreleased
 
+The first release that publishes. `v0.1.0` was tagged with every note
+below it and failed in its build job before any image was pushed; this
+tag carries the same service with the two release files fixed.
+
+- The release image reads its platform. `Dockerfile.ci` declared the two
+  platform arguments before the runtime stage's `FROM`, where an argument
+  is in scope for `FROM` lines only, so the stage's `COPY` read them empty
+  and the build looked for a binary at `bin/_/arcad`. The arguments are
+  declared inside the stage, and a test reads where they are declared.
+- The stubs image exists. `Dockerfile.stubs`, which the pipeline builds
+  and the kind example and the conformance job run, compiles the stub
+  issuer and the stub authorizer onto the same static runtime with their
+  own ports and entrypoint. A test holds the file to what the workflow
+  builds.
+
+Everything `v0.1.0`'s section says applies to this tag.
+
 ## v0.1.0 - 2026-09-19
 
 Arca's first release is the storage service Drive was, moved into an
