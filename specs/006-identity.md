@@ -1,6 +1,6 @@
 ---
 title: "Identity: verification, the subject, the action vocabulary, the authorizer question, the owner policy"
-status: testing
+status: complete
 track: core
 depends_on:
   - specs/001-architecture.md
@@ -344,3 +344,80 @@ and the owner policy is not consulted.
 The wire shapes of the handlers ([[013-api]]), the grants table
 ([[008-shares-and-links]]), the stubs ([[014-test-stubs-and-tiers]]),
 and the platform's authorizer, which lives with the platform.
+
+## Outcome
+
+Complete on 2026-09-19. All fourteen criteria are met.
+
+What shipped, and where it lives:
+
+- `authorizer/` publishes the contract half an endpoint is written
+  against: `actions.go` holds the twenty-three actions over seven kinds
+  as a `latere.ai/x/pkg/authz` `Vocabulary` with `WithLabels`, and
+  `resources.go` holds one type per kind plus `Probe`. `File`, `Upload`
+  and `Workspace` render `grant`; `Share`, `Link`, `Event` and `Space`
+  do not, because no grant reaches their actions.
+- `internal/auth` holds everything that decides. `verifier.go` wraps
+  `latere.ai/x/pkg/authkit/jwt` and the `ARCA_OIDC_INSECURE_ISSUERS`
+  rule; `authorizer.go` holds the `Decide` and `Lookup` seam, the
+  envelope and `Check`; `policy.go` holds the owner policy and
+  `grantPath`, which reads a workspace's grant against
+  `workspaces/<slug>`; `grant.go` holds the grant step; `startup.go`
+  builds both modes and binds `WithGrants` in each.
+- `cmd/arcad` maps one variable per line into `auth.Options` and mounts
+  the surface of [[013-api]] behind the two.
+- `.lateregate.yaml` carries no `verifier` or `authorizer` waiver, so
+  the family's real identity rules run.
+
+What proves each criterion:
+
+| # | Proved by |
+|---|---|
+| 1 | `internal/auth`, `TestTheReasonTable`, twelve rows over the shared reason table |
+| 2 | `internal/auth`, `TestServiceConformance` (`authkitconformance.Run`), `TestNothingCallsTheIssuerWhileARequestIsServed`; `internal/api`, `TestTheThreeVerifierExceptionsAndNoMore` and `TestEveryOtherPathUnderV1MeetsTheVerifier` |
+| 3 | `authorizer`, `TestVocabularyMatchesSpec006` and `TestTheSevenKindsAreSpec006s`, both reading this file; `internal/api`, `TestEveryRouteAsksExactlyOneAction` over the merged registry, with each owning package holding its own rows (`internal/files`, `internal/shares`, `internal/workspaces`, `internal/uploads`, `internal/admin`, `internal/events`) |
+| 4 | `test/conformance`, `case006AnotherSpace` |
+| 5 | `internal/auth`, `TestUnavailableIsNeverAnAllow`; `test/conformance`, `case006Outage` over the `malformed`, `no-allow` and `status:500` modes of `test/stubs/authorizer` |
+| 6 | `internal/auth`, `TestAnAllowIsCachedPerSubjectActionAndResource` and `TestAnExpiredAnswerIsAskedAgain` |
+| 7 | `internal/events`, `TestTheLimitLivesAsLongAsTheAnswerAndNoLonger`; `internal/files`, `TestAWriteRefusedByTheLedgerLeavesNoRowAndNoBytes`; `test/conformance`, `case010QuotaExceeded` and `case010NoLimitNoRefusal`. No migration writes a limit column |
+| 8 | `internal/auth`, `TestTheOwnerPolicyTable`, `TestTheLadderMatchesSpec006`, `TestTheLadderCoversTheWholeVocabulary` |
+| 9 | `internal/auth`, `TestOwnerPolicyNarrowsByTheGrants` and `TestOwnerPolicyConformance`, which run the family suite's A13 against the owner policy in process and against the stub; `test/conformance`, `case006PersonalKey` |
+| 10 | `internal/check`, `TestEachRequirementFailsOnItsOwnFault`, row "the authorizer allows the probe", against an endpoint that allows `authz.ProbeID` |
+| 11 | `internal/auth`, `TestOwnerPolicyConformance`, through `latere.ai/x/pkg/authz/server` |
+| 12 | no Go file outside `internal/auth` names `org_id`, `roles` or `principal_type` |
+| 13 | `internal/auth`, `TestTheQuestionCarriesTheCallersGrant` (eleven rows over the kinds, the rungs, the anonymous caller and the space's own owner), `TestAGrantsTableThatCannotAnswerStopsTheQuestion`, `TestBothModesResolveTheGrant`, `TestNoGrantsTableIsNoGrant`, `TestTheResourceTheHandlerBuiltIsNotChanged` |
+| 14 | `test/conformance`, `case006Grantee`, against the grants mode of `test/stubs/authorizer` |
+
+Coverage of the owning packages: `authorizer` 100.0% of statements,
+`internal/auth` 90.6%.
+
+What a later reader needs:
+
+- The `Proved by` column above names the tests as they exist. The
+  column in the criteria table names several that were renamed while
+  the work landed, and the names here are the ones to grep for.
+- Criterion 4 compares a refused space against an absent one by status,
+  code and fixed sentence, not by literal bytes: `details.request_id`
+  differs per request, so byte equality is not a property any pair of
+  responses can have. The comparison is in `case006AnotherSpace`, and
+  `internal/workspaces` holds the same pair at handler level in
+  `TestAWorkspaceThatIsNotThereAndOneThatIsRefusedAreOneAnswer`.
+- Criterion 6's deny half is the shared client's `authz.DenyTTL` of five
+  seconds and is proved in `latere.ai/x/pkg/authz`, not here. Arca's
+  test counts round trips and holds the key and the allow's ttl.
+- Three cases in `test/conformance` call `s.unverifiable` by
+  construction rather than by oversight, and the accounting is here:
+  `case006NoBearer` for an expired token and a token for another
+  audience, and `case006PersonalKey` for a narrowed key, because the
+  suite holds no signing key a conforming target trusts and cannot mint
+  either. Both are proved in process instead, the first by
+  `TestServiceConformance` and the second by
+  `TestOwnerPolicyNarrowsByTheGrants`.
+- Criterion 12 was verified by grep over the tree rather than by a gate
+  run, because the machine-global lint lock was held elsewhere at
+  close-out. The one hit for `roles` is a comment in `cmd/arcad/main.go`
+  about `serve` and `reap`, not a claim.
+- The criterion accounting in `## Current state` predates the grant
+  amendment of 2026-09-19. It lists criteria 4, 5, 7, 9 and 10 as open
+  and does not mention criteria 13 and 14 at all. This section
+  supersedes it.

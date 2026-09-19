@@ -75,8 +75,8 @@ differs is whether a package writes to it yet.
 | `arca_stored_bytes` | waits on a per-plane ledger read; see the divergence below |
 | `arca_db_query_seconds`, `arca_db_conns` | waits on [[004-metadata-store]] exposing the pool's statistics and a timed querier |
 
-The two gauges that read a store rather than a number this process keeps —
-`arca_leases_held` and `arca_upload_sessions_open` — are bound in `cmd/arcad`
+The two gauges that read a store rather than a number this process keeps,
+`arca_leases_held` and `arca_upload_sessions_open`, are bound in `cmd/arcad`
 through one helper, because a lease taken on one replica is held on all of
 them and no replica's own count would be the installation's. A gauge carries
 no context, so each read is given a bounded one at the readiness probe's
@@ -101,6 +101,24 @@ decisions by outcome, and as `arca_reaper_findings_total{kind="share_expired"}`.
   collector's operator injecting the standard name still works. The write is
   a function variable, so a test drives the translation without touching the
   environment of the test binary.
+- **No installation in `deploy/` exports anything.** The bootstrap reads
+  `ARCA_OTEL_EXPORTER_OTLP_ENDPOINT` and no manifest of the tree sets it, so
+  every overlay, `deploy/prod` included, runs with the exporter unset: spans
+  are created and discarded, and `/metrics` is the whole of what an operator
+  can reach. That is the designed behaviour for a self-hoster with no
+  collector, and it is not the intended behaviour for the installation that
+  has one. `deploy/prod` admits egress to TCP 40318, where the collector the
+  namespace injects listens, and nothing dials it. Closing the gap is one
+  variable, and the order it is closed in matters: the policy first, then
+  the variable. The reverse gives telemetry that is configured, dropped by
+  the CNI, and silent, which is the failure this spec exists to prevent,
+  while a variable set after the policy starts working the moment it lands.
+  Until the variable is set, criterion 4's OTLP half is unreachable in a cluster for the same
+  reason the reap process's half is unreachable in code, and
+  `TestEveryOverlayAdmitsTheEgressItsEndpointsNeed` of
+  [[016-release-and-installation]] cannot check the collector at all: it
+  reads the addresses an overlay configures, and there is none to read.
+
 - **`arcad reap`'s counters do not leave over OTLP**, which is half of
   criterion 4. The scrape endpoint is `latere.ai/x/pkg/metrics`, a registry
   that writes the Prometheus text format and reaches no exporter, and the
@@ -164,9 +182,9 @@ decisions by outcome, and as `arca_reaper_findings_total{kind="share_expired"}`.
 | # | State |
 |---|---|
 | 1 | Holds. `TestMetricsTable` reads this file through `runtime.Caller` and holds the registry to the table above, kind, labels, vocabularies and histogram bounds; `TestEveryClosedVocabularyHasAZeroSeries` reads the exposition of a fresh registry |
-| 2 | Holds at the frame, which is where a label could carry one: `TestARequestIsCountedByItsRouteAndItsStatus` and `TestTheRequestLineCarriesTheIdsAndNothingSecret`. Over a whole conformance run it waits on [[017-conformance-suite]] |
+| 2 | Open. It holds at the frame, which is where a label could carry one: `TestARequestIsCountedByItsRouteAndItsStatus`, `TestAPathNoRouteRegistersIsCountedUnderOneBoundedLabel` and `TestTheRequestLineCarriesTheIdsAndNothingSecret`. The criterion as written is over a whole conformance run, and [[017-conformance-suite]] is now in the tree, so nothing blocks `TestLabelsAreBounded` any more; it is simply not written |
 | 3 | Holds. `TestUsageSamplingIsAggregate` runs two fixtures of different sizes through the seam and holds the bands cumulative, replaced rather than added to, and three series after six spaces |
-| 4 | Holds for the listener: `TestMetricsListenerOnly`. The OTLP half is the divergence above |
+| 4 | Open. The listener half holds: `TestMetricsListenerOnly`, with `TestTheReaperProcessBootstrapsToo` for the reap process opening none. The OTLP half is the reap-bridge divergence above, and no installation sets the endpoint, which is the other divergence above |
 | 5 | Waits on [[005-files]]. `bucket.<op>` exists and is tested at the decorator |
 | 6 | Holds for the line: `TestTheRequestLineCarriesTheIdsAndNothingSecret`. Holding the same ids to the spans waits on the span order of criterion 5 |
 | 7 | Holds at the call site and not at a handler; see the divergence above |

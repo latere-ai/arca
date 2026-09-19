@@ -39,22 +39,58 @@ namespace with no cluster anywhere near it.
 
 ## Current state
 
-The first tag, `v0.1.0` on 2026-09-19 at 01:50, failed in its build job
-before any image was pushed: `Dockerfile.ci` declared `TARGETOS` and
-`TARGETARCH` before the runtime stage's `FROM`, where an ARG is in scope
-for FROM lines only, so the stage's COPY read them empty and looked for
-`bin/_/arcad`; and `Dockerfile.stubs`, which the workflow builds, did not
-exist. Both are fixed on main with the two tests that would have caught
-them, `TestTheReleaseImageCopiesWhatThePipelineBuilt` reading the ARGs'
-position and `TestTheStubsImageBuildsTheStubsCommand`; both images were
-built and run locally with podman. The tag stands and its run is not
-re-run; the next cut is `v0.1.1`, which needs the maintainer's
-`-force-red` because the guard reads the previous tag's red run.
+The deploy tree, the pipeline, the smoke and the two operator documents
+are in the tree and the gate is green at every commit. What is not in
+the tree is listed under "What waits" in the Outcome below, and no
+release exists: two tags have been cut and both runs failed.
 
-Not built. `verify.yml` runs the gate ([[002-repository-scaffold]]),
-there is no `release.yml`, no `deploy/`, no `tools/`, and no install
-document. The CHANGELOG rule is already in force: the pre-push hook
-refuses a `v*` tag with no section.
+`v0.1.0`, 2026-09-19 at 01:50, failed in `build` before any image was
+pushed. `Dockerfile.ci` declared `TARGETOS` and `TARGETARCH` before the
+runtime stage's `FROM`, where an ARG is in scope for FROM lines only, so
+the stage's COPY read them empty and looked for `bin/_/arcad`; and
+`Dockerfile.stubs`, which the workflow builds, did not exist. Both are
+fixed with the two tests that would have caught them,
+`TestTheReleaseImageCopiesWhatThePipelineBuilt` reading the ARGs'
+position and `TestTheStubsImageBuildsTheStubsCommand`; both images were
+built and run locally with podman.
+
+`v0.1.1`, 2026-09-19 at 05:27, got through `build`: both multi-arch
+images were pushed, signed and attested, and the archives, the checksums
+and the three SPDX documents were produced. It failed in `conformance`,
+where `arcad` crash-looped on the kind stack and the rollout timed out
+after five minutes. The cause is the base's `arcad-egress`, which admits
+53, 80, 443, 5432, 4317 and 4318 and nothing else. The stub issuer of
+[[014-test-stubs-and-tiers]] listens on 8081, which no policy named, so
+the CNI dropped the connection rather than refusing it and the replica
+died on `warm http://arca-stubs:8081: Client.Timeout exceeded while
+awaiting headers`. `deploy/examples/kind/networkpolicy-stack.yaml` now
+admits 8081, 8082 and 9000, and
+`TestEveryOverlayAdmitsTheEgressItsEndpointsNeed` holds every overlay's
+dialled endpoints against the ports its policies admit, so the class is
+covered and not only the instance. The Design's deploy tree says the
+rule below.
+
+What the two failures cost: `arcad:v0.1.1` and `arca-stubs:v0.1.1`
+published, signed and attested in GHCR with no release naming either,
+two `v*` tags standing against runs that are red, and a
+`deploy/prod` still pinning `v0.1.1`, an image that passed `build` and
+never passed `conformance`. A `kubectl apply -k deploy/prod` today rolls
+out a build the gate rejected. The next cut needs the maintainer's
+`-force-red`, because `lateregate release` reads the previous tag's run.
+
+The CHANGELOG rule is in force: the pre-push hook refuses a `v*` tag
+with no section, and the `publish` job reads the same section again.
+
+Criterion 8 is not implemented and is not a rename.
+`store.Pending` answers no migration for a database ahead of the binary,
+with the comment that a rollback in progress is allowed, so a binary
+started against a schema recorded above its own serves rather than
+refusing. The guard that exists is the other direction, a database
+behind the binary, which is [[004-metadata-store]]'s criterion 2 and is
+`TestTheServerRefusesToStartAgainstADatabaseBehindIt`. Either the
+Upgrading section below is wrong about what protects a downgrade or
+[[004-metadata-store]] owes the arm; that is a decision for whoever owns
+the schema guard and not a change to make while cutting a tag.
 
 ## Design
 
@@ -176,7 +212,7 @@ deploy/base/            kustomize, no namespace: an overlay sets it
   service.yaml          the public port; the internal port is scraped, not routed
   hpa.yaml              replicas by CPU; arcad is stateless (invariant 3)
   poddisruptionbudget.yaml
-  networkpolicy.yaml    egress to the bucket, the database, the issuers, the authorizer; ingress from the ingress controller and the scraper
+  networkpolicy.yaml    egress to the bucket, the database, the issuers, the authorizer, the collector; ingress from the ingress controller and the scraper
   serviceaccount.yaml   no Role and no RoleBinding: arcad speaks to no API server (invariant 9)
   prometheusrule.yaml   the alerts of [[018-observability]]; beside the kustomization, not in it
   kustomization.yaml
@@ -190,6 +226,35 @@ deploy/examples/aws/    ingress, public URL, replicas, an S3 bucket and RDS
 deploy/examples/digitalocean/  the same against Spaces and a managed Postgres
 deploy/prod/            the operator's overlay
 ```
+
+**An installation admits the ports its own dependencies listen on.** The
+base's egress is an allow-list, and it names the ports a dependency
+reached over the public internet uses: 53 for cluster DNS, 443 for a
+bucket and an issuer, 80 for an in-cluster authorizer, 5432 for
+Postgres, 4317 and 4318 for a collector beside the workload. A CNI that
+enforces policy drops what no rule admits rather than refusing it, so an
+endpoint on any other port is not an error a replica reports. It is a
+replica waiting out its own timeout against a dependency that is up and
+answering, which reads as a start-up failure with no cause in it. The
+base cannot know those ports, because they are the installation's, so
+every overlay whose bucket, database, issuer, authorizer or collector
+listens elsewhere ships a NetworkPolicy of its own beside it; policies
+are additive, so widening one overlay leaves the confinement every other
+installation inherits as the base writes it. Two overlays in this tree
+need one. The kind stack reaches the stub issuer on 8081, the stub
+authorizer on 8082 and MinIO on 9000, and crash-looped the `v0.1.1` run
+before it had one. `deploy/prod` reaches a managed Postgres on 25060,
+its connection pool on 25061, and the collector the namespace injects on
+40318. `TestEveryOverlayAdmitsTheEgressItsEndpointsNeed` reads every
+address an overlay configures out of its manifests and its Secrets and
+holds it to the admitted ports; an address the tree does not hold,
+because it is in a Secret an operator fills in, is named in the
+overlay's own test instead, which is what
+`TestProdAdmitsTheDatabasePortsThisInstallationUses` does. The
+collector's endpoint is the gap in that rule today: no overlay sets
+`ARCA_OTEL_EXPORTER_OTLP_ENDPOINT`, so nothing dials 40318 and the
+generic test has no address to check. [[018-observability]] owns closing
+it.
 
 The Deployment runs `arcad serve` with `ARCA_PUBLIC_ADDR` and
 `ARCA_INTERNAL_ADDR` at their defaults, `terminationGracePeriodSeconds`
@@ -267,7 +332,13 @@ by one release that writes both shapes, so a replica of release N and a
 replica of release N+1 serve the same database during a rolling update.
 A binary refuses to start against a schema recorded above its own,
 naming both versions, so a downgrade across a migration stops before it
-corrupts anything rather than after.
+corrupts anything rather than after. **This is not what the tree does
+today.** `store.Pending` answers no migration for a database ahead of
+the binary, so such a binary starts and serves; the guard that exists is
+the opposite direction. The Current state above records the finding and
+who owns the decision. Until it is settled, a rollback across a
+migration is held by the operator's procedure in `docs/upgrades/` and by
+nothing in the process.
 
 The API keeps N-1 compatibility: a client written against release N-1
 works against release N inside one major. A field is deprecated in one
@@ -338,10 +409,11 @@ it runs ([[017-conformance-suite]]). The contents of the alert rules
 
 ## Outcome
 
-At `testing` on 2026-09-18. The deploy tree, the pipeline, the smoke and
+At `testing` on 2026-09-19. The deploy tree, the pipeline, the smoke and
 the two operator documents are in the tree and the gate is green at every
-commit; what is left is the one thing no commit can produce, which is a
-tag.
+commit. Five criteria are open, and one of them is open in code rather
+than in a workflow; the tables below say which and why. Nothing here is
+`complete` while no release exists.
 
 ### What is built
 
@@ -359,22 +431,24 @@ tag.
 
 ### What waits
 
-| Waiting on | What |
+Every row this table carried on 2026-09-18 for another spec's work has
+closed. `Dockerfile.stubs` exists and `TestTheStubsImageBuildsTheStubsCommand`
+reads it; `test/conformance` is in the tree and the `conformance` job runs
+the suite rather than the smoke alone; `arcad migrate`, `arcad check` and
+`/openapi.json` all answer. What is left is this.
+
+| Criterion | Open because |
 |---|---|
-| the first tag | criteria 1, 5, 9 and 11: every artifact, the signatures and the attestations, the deployment record under `production`, and the release body. Nothing before a tag produces them |
-| [[014-test-stubs-and-tiers]] | `Dockerfile.stubs`. The `build` job publishes `arca-stubs` from it and the kind example runs it; that spec writes it, and a tag cut before it fails in `build` |
-| [[017-conformance-suite]] | the real `conformance` run. The job brings the stack up from the published images today and, with no `test/conformance` in the tree, proves them with the release smoke instead. The branch that runs the suite is written and unreached |
-| [[004-metadata-store]] | `arcad migrate`, which `deploy/bootstrap/migrate-job.yaml` and `up.sh` both run |
-| [[012-administration]] | `arcad check`, which is step 8 of the install document |
-| [[013-api]] | `/openapi.json`, which the smoke requires and nothing serves yet |
-| the owner of [[002-repository-scaffold]] | the `install` job of `verify.yml`, which walks the install document on every push. That file is that spec's |
-| the cutover of [[019-migration-from-drive]] | who renews the certificate for the platform origin. The service Arca replaces holds the only object carrying the issuer annotation for that secret, and phase 10 deletes it |
+| 1, `release-verify` | the job is not written, and there is no release for it to verify. Both `v*` tags cut so far failed their runs, so `cosign verify`, `cosign verify-blob`, `sha256sum -c`, `gh attestation verify` and the release body have never been checked from a clean runner. The `v0.1.1` `build` job did produce and sign every artifact, so what is unproven is the verification and not the production |
+| 5, `candidate` | the job is not written. `conformance` covers the same ground on kind, against a fresh Postgres and MinIO in the cluster rather than beside the runner, so the gap is narrower than it was; the separate job stays in the Design because a failure there is read as the image being wrong and a failure in `conformance` is read as the contract being wrong |
+| 6, the install walk | neither half exists. There is no `install` job in `verify.yml` and no `install-release` job in `release.yml`, so `docs/install.md` is read and never walked. [[002-repository-scaffold]] is `complete`, so the dependency this table used to name is closed and the job is simply owed |
+| 8, the schema guard | the direction the criterion names is not implemented. See the Current state above: `store.Pending` allows a database ahead of the binary by design, so nothing refuses a downgrade. This is the one open criterion that is a question about code rather than about a missing job |
+| 9, N-1 conformance | `TestPreviousSuitePasses` is in no package. [[017-conformance-suite]] owns it and holds it open for the same reason: there is no previous release carrying a `test/conformance` to check out |
+| 11, the deployment record | no run has reached `deploy`. The `production` environment is configured as the Design says, verified against the API on 2026-09-19: one required reviewer, `changkun`; a single deployment branch policy, the tag pattern `v*`; custom branch policies on and protected branches off. `ARCA_RELEASE_DEPLOY` is set on the repository. What is unproven is only that a run pauses there and records the deployment, which the first run to pass `conformance` will show |
 
 Three jobs of the pipeline table are not written: `candidate`,
-`install-release` and `release-verify`. Each needs something that does not
-exist yet, the stores and the install walk respectively, and each is a job
-of its own rather than a step inside another, so adding one later changes
-nothing already written.
+`install-release` and `release-verify`. Each is a job of its own rather than
+a step inside another, so adding one later changes nothing already written.
 
 ### Divergences from the design above
 

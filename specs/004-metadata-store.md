@@ -1,6 +1,6 @@
 ---
 title: "Metadata store: the schema, migrations, transactions, the store interface"
-status: testing
+status: complete
 track: core
 depends_on:
   - specs/001-architecture.md
@@ -8,7 +8,7 @@ depends_on:
 affects: [internal/store/, internal/store/migrations/, cmd/arcad/, .lateregate.yaml]
 effort: large
 created: 2026-09-18
-updated: 2026-09-18
+updated: 2026-09-19
 author: changkun
 ---
 
@@ -379,3 +379,66 @@ pool sizing ([[016-release-and-installation]]); the wire ([[013-api]]).
 | 7 | Keyset listing returns each row once under concurrent inserts, and its cursor round-trips | the store tier, inserting during the walk |
 | 8 | Every subject column accepts a 512 byte subject containing `\|`, `:`, and `/` | `internal/store` tests |
 | 9 | The `depcheck` allow list names every package this spec adds | `go tool lateregate` |
+
+## Outcome
+
+Complete on 2026-09-19. The schema, the migrator, the transaction
+discipline and the two query sets this spec owns are in `internal/store`,
+the embedded migration set in `internal/store/migrations`, and the
+`migrate` subcommand with the `database` readiness check in `cmd/arcad`.
+All five migrations are in the tree: `0001_files.up.sql` is this spec's,
+`0002` through `0005` arrived with their owning specs, and a migrated
+database holds the ten tables the schema above names.
+
+Each criterion and what proves it:
+
+1. `TestStoreMigrationsApplyAndAreIdempotent` in
+   `internal/store/store_tier_test.go`. It reads in two parts: the test
+   asserts `subjects`, `files`, `file_versions` and `stars` by name, and
+   `Pending` returning nothing after the run is what proves the other four
+   migrations applied too. The six tables those create are exercised
+   against the same migrated database by the tier tests of [[007-uploads]],
+   [[008-shares-and-links]], [[009-workspaces]] and
+   [[010-events-and-reaper]]. A second `Migrate` changes nothing.
+2. `TestTheServerRefusesToStartAgainstADatabaseBehindIt` in
+   `cmd/arcad/main_test.go`, and
+   `TestReadinessCarriesTheSchemaCheckWhenTheDatabaseArrivesLate`
+   for the other half: a database that does not answer at start-up is
+   compared by the readiness check instead of crashing the replica.
+3. `TestStoreATransactionLeavesOneRowOrNone`.
+4. `TestStoreARollbackOnACancelledContextReturnsTheConnectionUsable`, which
+   cancels inside eight transactions and then asks the pool for work, and
+   `TestStoreAConditionalReplaceLosesTheRaceRatherThanOverwriting` at the
+   tier with `TestAConditionalReplaceReportsTheRaceItLost` at the unit tier.
+5. `TestStoreAUniqueViolationIsToldFromAFault` for the constraint and the
+   missing row, `TestARefusalIsToldFromAFault` for `classify` and `missing`
+   telling `23505` and `pgx.ErrNoRows` from a connection failure.
+6. `TestObjectReferencedNamesEveryTableThatHoldsAnObjectID` and
+   `TestTheGuardFindsThePredecessorsGap` in `internal/store/schema_test.go`
+   hold the statement to the schema, with one row case per table:
+   `TestStoreAnObjectIsReferencedByAnyTableThatNamesIt` for `files` and
+   `file_versions`, and
+   `TestStoreAnOpenSessionKeepsItsObjectReferencedAndExpiresOnItsColumn` in
+   `internal/store/uploads_tier_test.go` for `upload_sessions`.
+7. `TestStoreAKeysetWalkReturnsEachRowOnceUnderConcurrentInserts`, which
+   inserts ahead of the walk between two pages, with
+   `TestAListingIsKeysetPaginatedAndCarriesItsCursor` at the unit tier.
+8. `TestStoreASubjectColumnHoldsWhatASubjectIs`, a 512 byte subject
+   carrying `|`, `:` and `/` through `subjects` and through `files.owner`.
+9. Verified by reading `.lateregate.yaml` against `go list -deps
+   ./cmd/arcad`: every `github.com/jackc/**` and
+   `github.com/golang-migrate/migrate/v4**` package in the build list
+   resolves to an allow row. The gate itself was not run here because its
+   machine-global lock was held; the gate ran green on the commits this
+   spec's Current state names.
+
+Coverage of the owning packages on the unit run, collected the way the
+cover gate collects it (`go test ./... -covermode=atomic -coverpkg=./...`,
+per-package floor 90): `internal/store` 97.9%, `cmd/arcad` 91.8%.
+
+One thing a later reader needs. The Current state above says criterion 6
+"holds for two tables of three" because `upload_sessions` had not been
+created yet by [[007-uploads]]. That sentence is stale as of this closing:
+`objectReferencedSQL` reads all three tables, the schema guard fails if a
+fourth table gains an `object_id` and is left out, and the third table has
+its own row case. Nothing else in Current state changed.

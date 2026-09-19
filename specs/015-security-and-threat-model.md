@@ -1,11 +1,12 @@
 ---
 title: "Security and threat model: assets, actors, boundaries, every threat with its control and its test"
-status: drafted
+status: testing
 track: core
 depends_on:
   - specs/001-architecture.md
   - specs/002-repository-scaffold.md
   - specs/003-object-store.md
+  - specs/004-metadata-store.md
   - specs/005-files.md
   - specs/006-identity.md
   - specs/007-uploads.md
@@ -16,11 +17,12 @@ depends_on:
   - specs/013-api.md
   - specs/014-test-stubs-and-tiers.md
   - specs/016-release-and-installation.md
+  - specs/017-conformance-suite.md
   - specs/018-observability.md
-affects: [internal/auth/, internal/api/, internal/blob/, internal/files/, internal/shares/, internal/workspaces/, internal/events/, internal/config/, deploy/, test/e2e/, SECURITY.md]
+affects: [internal/auth/, internal/api/, internal/blob/, internal/files/, internal/shares/, internal/admin/, internal/uploads/, internal/workspaces/, internal/events/, internal/reaper/, internal/config/, object/, deploy/base/, deploy/prod/, test/e2e/, test/deploy/, SECURITY.md]
 effort: medium
 created: 2026-09-18
-updated: 2026-09-18
+updated: 2026-09-19
 author: changkun
 ---
 
@@ -31,28 +33,52 @@ author: changkun
 Arca holds other people's bytes, hands out URLs that need no token, and
 lets an unattended sandbox write into a space a person owns. This spec
 names what is worth taking, who would take it, where the boundaries
-between them are, and, for every threat, the one control that stops it
-and the one test that proves the control is there. A control without a
-test is a claim, and a test reads this file and fails when a row loses
-its proof.
+between them are, and, for every threat, the control that stops it and
+the test that proves the control is there.
+
+It is written against the code as built, not against the code as
+planned. Every `Test` cell below names a function that exists in this
+tree. The unit tier is green over them; the cells that name a store,
+e2e or conformance test run under their own stack and are green there,
+not in a bare `go test ./...`. That is a deliberate correction: the
+first draft of
+this file named thirty-eight test functions, of which three existed.
+The controls were real and tested throughout; the names in the table
+were invented at drafting time and never reconciled with the tree. A
+threat model whose proofs cannot be looked up is a claim, so criterion
+23 asks for that reconciliation to be mechanical rather than manual.
+Building it is the work this spec still names, and it is why the spec
+stands at `testing` rather than `complete`.
 
 It is also the source of `SECURITY.md`, so a reviewer who arrives at the
-repository reads four commitments and one document rather than seven
-specs.
+repository reads a handful of commitments and one document rather than
+the whole spec deck.
 
 ## Design
 
 ### Assets
 
-| Asset | Where it lives |
-|---|---|
-| object bytes | the operator's bucket, under `ARCA_BUCKET_PREFIX` |
-| paths, owners, checksums, grants, leases, the ledger, the event log | the operator's Postgres |
-| link and public grant tokens | the grants table, and every URL a holder has ever pasted |
-| presigned URLs | in flight, in a `302`, in a materialize manifest, in a browser's history |
-| `ARCA_BUCKET_SECRET_KEY`, `ARCA_DATABASE_URL`, `ARCA_AUTHORIZER_TOKEN` | the server's configuration, mounted from a Secret |
-| the record of who did what: the event log, which is also the record of what an administrator did ([[012-administration]]) | Postgres |
-| the installation's availability | `arcad`, and the two stores behind it |
+| Asset | Where it lives | What holding it is worth |
+|---|---|---|
+| object bytes | the operator's bucket, under `ARCA_BUCKET_PREFIX` | everything a space holds |
+| paths, owners, checksums, grants, leases, the ledger, the event log | the operator's Postgres | the shape of every space, and the authority to change it |
+| link and public grant tokens | the `shares` table, and every URL a holder has ever pasted | read of one subtree, with no token of the holder's own |
+| presigned URLs | in flight, in a `302`, in a materialize manifest, in a browser's history | read of one object for five minutes |
+| the public-read ACL a public grant stamps on an object | the bucket, and the CDN in front of it | read of one object by anyone, without reaching `arcad` at all |
+| `ARCA_BUCKET_SECRET_KEY`, `ARCA_DATABASE_URL`, `ARCA_AUTHORIZER_TOKEN` | the server's configuration, mounted from a Secret | the installation |
+| the record of who did what: the event log ([[012-administration]]) | Postgres | the only account of an administrator's actions |
+| the installation's availability | `arcad`, and the two stores behind it | every space at once, for as long as it is down |
+
+The public-read ACL is the asset with the longest reach. A public grant
+whose prefix names one object marks that object's row and stamps the
+ACL on its key (`internal/shares/links.go`, `mint` and `stamp`), and
+`ARCA_PUBLIC_CDN_URL` makes an ordinary read redirect to the CDN rather
+than to a presigned URL. Those bytes are then readable with no token
+and without touching this server, so the revoke path is the control
+that matters: `withdraw` clears the ACL before it revokes the row, so a
+bucket that will not answer leaves the grant standing and the caller
+retrying, which grants no more than before. Revoking first and failing
+to clear would leave an object readable that no grant covers.
 
 ### Trust boundaries
 
@@ -78,17 +104,21 @@ flowchart LR
   A --> P
   A --> B
   C -.->|presigned URL, one object, five minutes| B
+  L -.->|public-read ACL, no credential, until revoked| B
   A -->|key set only| I
   A -->|one question| Z
 ```
 
-Three boundaries. Between a caller and `arcad` the control is the
+Four boundaries. Between a caller and `arcad` the control is the
 verifier and the authorizer. Between `arcad` and the two stores the
 control is the operator's network and credentials, and a compromise
-there is out of scope below. Between `arcad` and the issuer and
+there is out of scope below. Between `arcad` and the issuer and the
 authorizer the control is configuration: `arcad` trusts them because the
 operator named them, and calls the issuer for a key set and nothing
-else.
+else. The fourth is the dotted pair, where bytes leave the bucket
+without passing through this server at all: a presigned URL, bounded by
+`blob.PresignTTL`, and a public object's ACL, bounded only by the
+revoke.
 
 Nothing in the core dials an address a consumer chose. Arca makes
 outbound calls to the bucket, the database, the issuer, and the
@@ -105,56 +135,253 @@ and the request-forgery surface behind it.
 | a link holder | one token | the rest of the space, a write, another space's link |
 | an anonymous prober | the network | a token by guessing, an object by path, the shape of what exists |
 | a sandbox holding a lease | a token for the audience `arca`, one lease | another workspace, a lease it should have lost, bytes outside its subtree |
+| a revoked collaborator | an id it was shown before the revoke | to learn whether what it once saw is still there |
 | a network position | the wire | a bearer, a link token, a presigned URL |
 | a compromised authorizer | the decision | to allow every action for every subject, including actions it does not recognise |
-| a consumer of the module | an import of `object/`, `space/`, `authorizer/` | to derive a key for an object it does not own |
+| a compromised replica | the pod | the rest of the cluster |
+| a consumer of the module | an import of `object/`, `authorizer/` | to derive a key for an object it does not own |
+
+### The order every handler works in
+
+The whole of the access control is three steps in one order, and the
+order is what makes a refusal say nothing.
+
+```mermaid
+flowchart TD
+  R[a request] --> V{verifier}
+  V -->|no bearer, or one no listed issuer signed| U[401 unauthenticated]
+  V -->|a Caller| G[resolve the caller's grant<br/>from the grants table]
+  G -->|the table could not answer| X[503 authorizer_unavailable]
+  G --> Q{the question:<br/>subject, action, resource, grant}
+  Q -->|no decision| X
+  Q -->|deny on the caller's own action| F[403 forbidden]
+  Q -->|deny while resolving a reference| N[404, the answer an absence gives]
+  Q -->|allow| ACT[act]
+```
+
+Three properties hold that shape up, and each is a row of the controls
+table. Nothing acts before a decision. No failure anywhere in the chain
+becomes an allow: neither the grants table, nor the endpoint, nor the
+ledger. And a deny at lookup is answered as an absence, so a request
+cannot be written to enumerate what somebody else owns.
+
+### The surfaces
+
+**`internal/auth`.** A bearer is verified through
+`latere.ai/x/pkg/authkit/jwt` against the issuers `ARCA_OIDC_ISSUERS`
+lists. The token's own `iss` selects the key set it is checked against,
+so a token from an unlisted issuer is refused before a signature is
+tried. `aud` must contain `ARCA_OIDC_AUDIENCE`, `iat` is required and
+bounds the token's age at a day, and an `http://` issuer off loopback is
+a start-up failure unless `ARCA_OIDC_INSECURE_ISSUERS` admits it. The
+verifier reads no claim for meaning; the claims go to the authorizer
+verbatim.
+
+Who decides is one seam, `Authorizer.Decide` and `Authorizer.Lookup`,
+behind which sits either the operator's endpoint or the `OwnerPolicy` of
+this package. The policy is the shared frame of `latere.ai/x/pkg/authz`
+with Arca's rows in front of it: the probe first and denied for
+everyone, then the administrator, the owner, the grantee within the
+ladder, the link that resolves, and then a deny. `space.admin` is handed
+no object, so the owner rung never reaches it and the administrator list
+decides it alone: a space's owner is not an administrator of its own
+space.
+
+Two refusals are the load-bearing ones. The grant the caller holds on
+the resource is resolved from Arca's own grants table before the
+question goes out, in both modes, and a table that cannot answer
+produces `authorizer_unavailable` and never a deny: a question sent
+without a grant the caller holds is a question the endpoint answers
+wrong, and a wrong answer is worse than none. And `OwnerPolicy.restrict`
+intersects its own allow with the grants the token carries through
+`authz.Restrict`, so a personal key narrowed by RFC 9396
+`authorization_details` reaches only what its grants name. The
+conjunction turns an allow into a deny and never a deny into an allow.
+
+**`internal/shares`, the three public link routes.** These carry no
+caller. They are the whole of the exception to invariant 5 of
+[[001-architecture]], and `redeem` fixes their order: resolve the token
+first, refuse a path the prefix does not cover, and only then ask
+`link.read` with the resolved grant's id, its owner, the path, and an
+empty subject. Every refusal on those routes is one sentence,
+`notFound()`, which names neither the token nor the path: an unknown
+token, a revoked one, an expired one, a path outside the grant, and a
+denied `link.read` are one answer, so a caller learns nothing by asking.
+A deny is collapsed into that sentence explicitly rather than rendered
+through `api.FromAuth`, because the endpoint's reason would say that the
+token resolved, which is the one fact these routes withhold. The token
+is 256 bits from `crypto/rand` rendered base64url, it is answered once
+at creation and dropped by every listing, and the response carries
+`Referrer-Policy: no-referrer` because the token is a path segment.
+
+**`internal/admin`.** Two routes: an overview across spaces and a
+restore across owners. Both ask `space.admin` before they act and
+before any lookup. There is no administrative copy of a listing and no
+moderation route, because a second surface answering the same questions
+from a second set of handlers would double every filter rule and every
+pagination bug: reading someone else's objects is the ordinary file
+route, answered on a space the caller does not own. A deny is 403 and
+not the 404 the service Arca replaces used to hide the surface, because
+the route names are in `/openapi.json` anyway and existence hiding
+protects objects rather than route names. An installation with neither
+an authorizer nor `ARCA_ADMIN_SUBJECTS` has no administrator and both
+routes refuse everyone, which is the correct default for a self-hosted
+installation that needs none.
+
+**`internal/blob` and the bucket prefix.** Keys are opaque to this
+package. `object.ID.Key` derives a key from the object id and the
+prefix and from nothing else, so a path that slipped every check
+addresses nothing, and a move is one `UPDATE` that touches no key. Every
+key carries `ARCA_BUCKET_PREFIX`, normalised at start-up, which is what
+separates two installations sharing one bucket. Every put carries
+`If-None-Match: *`; a store that answers `NotImplemented` degrades once,
+says so, and fails `arcad check`. A presigned read is one key, one
+method, and `PresignTTL`, five minutes, chosen against the download it
+must survive rather than against convenience. Nothing recalls a signed
+URL, so the exposure after a revoke is exactly that window.
+
+**`internal/reaper` and the delete ordering.** The passes exist because
+the two stores fail independently, and the ordering is what decides what
+a crash leaves behind. A put writes the bucket first, so a crash leaves
+bytes nothing points at, which pass 1 sweeps after a grace window. A
+delete writes the database first, so a crash leaves bytes whose row is
+already gone, which is the same orphan. `purgeTrash` holds that order
+explicitly: the rows and the ledger delta go in one transaction, and
+only then are the keys deleted, and a bucket that refuses leaves an
+orphan for pass 1 rather than a row whose object is gone. That is the
+safe direction. The reverse would leave a visible row with no bytes,
+which is a lie to every caller, and invariant 2 forbids it. Every
+destructive statement is conditional on the state it read, so two
+replicas reaping at once give one deletion and one no-op.
+
+**`deploy/base` and `deploy/prod`, the confinement.** The pod runs as a
+non-root user with a read-only root filesystem, no capabilities,
+`seccompProfile: RuntimeDefault`, `allowPrivilegeEscalation: false`, and
+`automountServiceAccountToken: false`, because `arcad` speaks to no API
+server. `arcad-ingress` admits the two listeners; the internal listener
+is protected by nothing routing to it rather than by a token.
+`arcad-egress` is a port list and not a destination allowlist, and it
+says so: a bucket endpoint and an issuer are public names whose
+addresses change, so a policy by CIDR would be wrong on most
+installations and would fail closed with no message a reader could act
+on. What it buys is that a compromised replica cannot reach the rest of
+the cluster on any other port. The ports are 53, 80, 443, 5432, 4317 and
+4318.
+
+`deploy/prod/networkpolicy-database.yaml` widens that for this
+installation alone, and it is the one manifest where the confinement is
+loosened rather than tightened. It admits 25060 and 25061, the managed
+database and its connection pool, and 40318, the telemetry collector the
+namespace injects. Two things follow that a contributor should be able
+to defend. A port no policy names is a connection dropped rather than
+refused, so the failure mode is a timeout and not an error, which is why
+the database port is a release-blocking omission and the collector port
+is a silent one: telemetry is not readiness, so a dropped export fails
+nothing and says nothing. And 25061 is admitted before anything dials
+it, deliberately, so the later pooling change is a Deployment change and
+not a Deployment change plus a policy nobody remembered. Policies are
+additive, so this widens egress for the two workloads carrying the label
+and leaves every other installation's confinement exactly as the base
+writes it.
+
+### What was found and fixed
+
+Five leaks were found and fixed while this service was built. They are
+history rather than open work, and each is stated against the code that
+stands now. A threat model that does not carry them loses the reason
+several of the controls above are shaped the way they are.
+
+| The leak | What the code does now | Where |
+|---|---|---|
+| a share listing answered every link token to any caller who could list; the predecessor stripped the token only from the grantee's own listing | `view` renders a grant without its token, and `Grant.Token` is set in exactly one place, the answer to a create. There is no route that reads a token back out of the database | `internal/shares/grants.go`, `links.go` |
+| a public grant admitted any authenticated caller, because the grant step read a token grant as if it were a subject grant | `grants.Permission` matches `held.GranteeKind == store.GranteeSubject` and nothing else. A token grant is the link step, one branch further down, and it is reached only by `link.read` | `internal/shares/policy.go` |
+| eight lookup refusals carried the authorizer's reason where an absence gives a fixed sentence, which is an existence oracle on a caller-chosen path | `Service.Refused` collapses a `not_found` from a deny into the same sentence the handler writes for an absence, and the eight call sites all route through it | `internal/files/files.go` and its seven callers, plus `internal/uploads/session.go` |
+| a usage check failed open: the predecessor recomputed usage outside the write and admitted the write when the query failed, so enforcement stopped exactly when the database was under pressure | the charge and the check are one statement inside the write's own transaction. A failure refuses the write and records no charge | `internal/events/usage.go`, `internal/files/write.go` |
+| `If-None-Match` admitted a matching write | every put and every copy destination carries `If-None-Match: *`, and a store that refuses the condition degrades loudly and fails `arcad check` rather than silently writing unconditionally | `internal/blob/s3.go`, `memory.go` |
+
+### What the collapse does not cover
+
+The eight sites above are the paths a caller names. Four lookup sites
+still render the authorizer's reason into `details.detail` where an
+absence would render the handler's own sentence: `share.read` and
+`share.revoke` (`internal/shares/grants.go`), `link.revoke`
+(`internal/shares/links.go`), and every workspace route that reads a row
+before it asks (`internal/workspaces/lifecycle.go`, `ask`).
+
+The status line, the error code and the user sentence are identical in
+all four cases, which is what [[017-conformance-suite]] compares and
+what a caller reads. Only the developer detail differs. The
+discriminator is the identifier: those four are addressed by a
+`gen_random_uuid()` primary key, so there is nothing to enumerate over,
+and to use the oracle at all a caller must already hold an id that was
+disclosed to it. The eight that were fixed are addressed by a path the
+caller chooses, where enumeration is the whole attack.
+
+This is stated rather than left implicit because [[013-api]] says a 404
+from a deny is byte for byte a 404 from an absence, and on those four
+routes it is not. The gap is worth an explicit narrowing of that
+sentence or four more calls through `Refused`; it is named in the
+acceptance criteria as outstanding, and it is not a leak of any space's
+contents.
 
 ### Controls
 
-Every row names the spec that owns the control and the test that proves
-it. `Test` cells name test functions; criterion 1 holds them to that.
+Every row names the spec that owns the control and the tests that prove
+it. Names are as they appear in the tree.
 
 | Threat | Control | Spec | Test |
 |---|---|---|---|
-| a caller reaching another subject's space | every handler reads, asks the authorizer, then acts; a deny on the caller's own action is 403, a deny while resolving a reference is a 404 byte for byte identical to an absence | 006, 013 | `TestRouteTableActions`, `TestReadAskAct` |
-| a revoked permission still honoured | an allow is cached per replica for the answer's `ttl`, 60 s by default and capped at 600 s; a deny for 5 s; unavailability never; the key is subject, action, and resource id. The cache window is the accepted staleness and the authorizer sets it per answer | 006 | `TestDecisionCache` |
-| an allow that was never decided | the client fails closed on anything but a 200 carrying `allow`; one retry only when the connection failed before a response line; an `http://` endpoint off loopback is refused at start-up | 006 | `TestAuthorizerFailsClosed` |
-| an authorizer that allows everything, including actions it does not know | `arcad check` asks the probe resource, the id `probe` of kind `Space`, which every authorizer must deny, and fails the installation when it is allowed | 012, 006 | `TestCheckRefusesAPermissiveAuthorizer` |
-| a token minted for another service replayed at Arca | `aud` must contain `ARCA_OIDC_AUDIENCE`, `iss` must be listed, `iat` is required and no older than 24 hours, `exp` and `nbf` are enforced, and only RS256 and ES256 are accepted | 006 | `TestVerifierRefusals`, the family's audience conformance suite |
-| a narrowed personal key used past its grants | `authz.Restrict` intersects the grants with the vocabulary before the question is asked; an action outside them is a deny with reason `grant`, indistinguishable on the wire | 006 | `TestRestrictedKey` |
-| a presigned URL leaking from a redirect, a log, or a history | one object, one method, one expiry of five minutes, `blob.PresignTTL`; a signed URL is written to no log, no event detail, and no response body except a manifest the caller asked for | 003, 013, 018 | `TestPresignIsScoped`, `TestNoPresignedURLIsLogged` |
-| a presigned URL outliving a revoke | nothing recalls a signed URL, so the exposure is exactly `PresignTTL`. Five minutes is that number, chosen against the download it must survive rather than against convenience | 003, 008 | `TestPresignTTL` |
-| path traversal into another object | a path is refused when it holds `..` or `//`, starts or ends with `/`, or names a plane the server does not serve; the check runs before anything else on every route that takes a path | 005, 013 | `TestPathRule`, table-driven over the refusal cases |
-| key confusion: a path that reaches another object's bytes | the bucket key derives from the object id and never from the path, so a path that slipped every check still addresses nothing. A move is one `UPDATE` and touches no key | 003, 001, 005 | `TestKeyIsTheId`, and 001's criterion 7 against a counting bucket |
-| one installation reading another's objects in a shared bucket | every key carries `ARCA_BUCKET_PREFIX`, normalised at start-up, and a leading `/` in it is a configuration error | 003 | `TestKeyPrefix` |
-| public link enumeration | 256 bits from `crypto/rand`, rendered base64url, under a unique index; an unknown, revoked, or expired token is the same `not_found`; the three link routes are rate limited per client address, which is what makes guessing cost more than it can pay | 008, this spec | `TestTokenEntropy`, `TestLinkRateLimit` |
-| a link token in an access log or a referrer | the token is a path segment, so the access log records the grant id in place of the path for the three link routes, and a link response sets `Referrer-Policy: no-referrer` | 008, 018 | `TestLinkPathsAreNotLogged` |
-| a link that grants more than reading | a token grant carries `read`; a create asking `write` or `manage` is `link_read_only` | 008 | 008's criterion 4 |
-| usage accounting bypass through multipart | the session is charged its declared size, and the completion charges the difference against the assembled size read from the store, which is the charge that counts. Bytes that landed before a refusal are aborted and reaped | 007, 010 | `TestUsageOnComplete`, `TestMultipartOverrunIsReaped` |
-| usage accounting bypass by holding many open sessions | an open session's declared bytes are charged from the moment it opens until it completes or is reaped, so a thousand sessions do not fit under one limit | 007, 010 | `TestOpenSessionsCount` |
-| a usage charge that fails open | the charge and the check read and write one ledger row inside the write's own transaction, so a failure refuses the write with `storage_unavailable` and records no charge. The service Arca replaces recomputed usage outside the write and admitted it on failure, so its enforcement stopped exactly when the database was under pressure | 010 | `TestUsageFailsClosed` |
-| a ledger that silently stops counting | the reaper recomputes every space from the rows that hold the bytes each run and reports each correction, so a write path that forgot its delta is a finding and not a slow drift | 010, 018 | `TestLedgerReconciles` |
-| a workspace lease held by a sandbox that died | a lease carries an expiry, one hour by default and twenty-four hours at most, both constants of `internal/workspaces` that no configuration raises, and the reaper releases every lease past its expiry each `ARCA_REAP_INTERVAL`, so a workspace cannot wedge. A reaped writer's unsynced work is lost, which is the stated trade | 009, 010 | `TestLeaseExpires`, `TestReaperFreesAnOrphanLease` |
-| two writers in one workspace | the lease is taken by one conditional `UPDATE` whose predicate is that no writer holds it, so a race yields one winner, never two | 009, 001 | 001's criterion 8 |
-| a released or reaped attachment still writing | a sync checks that the attachment is active and that the workspace's lease is that attachment's; otherwise `attachment_gone` or `lease_not_held` | 009, 013 | `TestSyncRequiresTheLease` |
-| a sandbox reaching outside its workspace | a lease authorizes one workspace subtree; a materialize manifest carries only the pinned paths, and a sync reconciles only under the workspace root | 009 | `TestLeaseIsConfinedToItsSubtree` |
-| a bucket that ignores `If-None-Match: *` | every put carries it. A store that answers `NotImplemented` fails `arcad check`, is named by readiness, and the run is recorded as unconditional, logged once per process. The API's compare and swap is in SQL and does not depend on the bucket, so the loss is a collision guard, not the contract | 003, 012, 018 | `TestConditionalCreateRequired`, the store tier against MinIO and against a stub that refuses |
-| an event log read by the wrong caller | the tail asks `event.read` like any other action, and an authorizer that wants a caller to see part of a space's log answers with a `filter` the handler applies to its own query; no event carries a byte of object content, a token, or a presigned URL | 010, 006 | `TestEventFilter`, `TestEventDetailIsMetadataOnly` |
-| a flood, and the guessing that hides in one | a token bucket per subject after authentication, and one per client address before it; the second bounds both a flood of bad tokens and a search for a link token | this spec, 013 | `TestRateLimits` |
-| a client request id used to inject into a log | `X-Request-Id` is kept only when it is at most 128 printable ASCII characters, and is replaced otherwise | 013 | `TestRequestId` |
-| a body that exhausts memory | JSON bodies are capped and decoded with unknown fields refused; an object body needs a `Content-Length` and is capped at `ARCA_MAX_UPLOAD_BYTES`; above `ARCA_INLINE_BYTES` the bytes do not pass through the server at all | 013, 007 | `TestBodiesAndTypes` |
-| an administrator acting unseen | every allow against a space the caller neither owns nor holds a covering grant on marks its event `admin`, and an administrative mutation appends that event inside the mutation's own transaction, so the record cannot miss one or record one that was rolled back. The record is the event log and no route in the core deletes from it; the reaper prunes it at thirty days, so an installation that must keep longer tails it | 012, 010 | 012's criteria 8, 9, and 10 |
-| a secret in a log or a response | every key and bearer is read once at start-up and never logged; a link token is returned once at creation and is absent from every listing; the deploy manifests mount secrets from a Secret | 002, 008, 016, 018 | `TestLogsRedact`, `TestSecretsAreReturnedOnce` |
-| a consumer of the module deriving another's key | `object.ID.Key` takes the prefix and an id and derives nothing from a path or an owner, so holding the package grants no ability the API does not | 003 | `TestKeyDerivationIsTotal` |
-| a dependency with a known vulnerability | the `vuln` gate on every push, and a dependency list held to invariant 9 of [[001-architecture]] by `depcheck` | 002 | the gate |
-| an image that is not what was released | keyless cosign signatures, an SBOM attestation, and a build provenance attestation on both images, verified from a clean runner before the release exists | 016 | the `release-verify` job |
-| a test that touches a developer's real state | every tier binds `:0`, keeps files under `t.TempDir()`, uses a schema and a bucket prefix of its own, and removes both | 014 | `TestTiersAreIsolated` |
+| a caller reaching another subject's space | every handler reads, asks, then acts; a deny on the caller's own action is 403, a deny while resolving a reference is the answer an absence gives | 006, 013 | `TestEveryHandlerAsksExactlyOneActionBeforeItActs`, `TestEveryLookupDenyIsTheAnswerAnAbsenceGives`, `TestADenyOnAnotherSpaceIsAMissingObject` |
+| a route that acts before it asks, or asks twice | every registered route declares one action and is held to it | 013 | `TestEveryRouteAsksExactlyOneAction`, `TestARouteThatIsDeniedDoesNotAct` |
+| a revoked permission still honoured | an allow is cached per replica for the answer's `ttl`, a deny briefly, unavailability never; the key is subject, action and resource id. The window is the accepted staleness and the authorizer sets it per answer | 006 | `TestAnAllowIsCachedPerSubjectActionAndResource`, `TestAnExpiredAnswerIsAskedAgain` |
+| an allow that was never decided | the client fails closed on anything but a 200 carrying `allow` | 006 | `TestUnavailableIsNeverAnAllow`, `TestAnAuthorizerThatAnswersNothingIsNeverAnAllow` |
+| an authorizer that allows everything, including actions it does not know | the probe resource, the reserved id every authorizer must deny, is asked by `arcad check` and by readiness, and an allow fails the installation | 012, 006 | `TestTheProbeIsDeniedAndAnEndpointThatAllowsItIsReported`, `TestAnUnavailableEndpointFailsTheCheck` |
+| a token minted for another service replayed at Arca | `aud` must contain `ARCA_OIDC_AUDIENCE`, `iss` must be listed, `iat` is required and bounds the age at a day, `exp` and `nbf` are enforced | 006 | `TestServiceConformance`, the family's audience suite in process; `TestATokenWithNoSubjectIsRefused`, `TestTheAudienceDefaults` |
+| a key set fetched over a channel that can be rewritten | an `http://` issuer off loopback is refused at start-up unless the variable admits it | 006 | `TestAnHTTPIssuerOffLoopbackNeedsTheVariable`, `TestTheVerifierRefusesToStartOnABadDeployment` |
+| a narrowed personal key used past its grants | `authz.Restrict` intersects the policy's allow with the token's grants; a claim that does not read as grants is a deny and not an error | 006 | `TestOwnerPolicyNarrowsByTheGrants` |
+| a grants table that cannot answer admitting a stranger | a failure to resolve the grant is `authorizer_unavailable` and never a deny and never an allow | 006, 008 | `TestAGrantsTableThatCannotAnswerIsNoDecision`, `TestAGrantsTableThatCannotAnswerStopsTheQuestion`, `TestATableThatCannotAnswerIsNoDecision` |
+| a grantee indistinguishable from a stranger to an operator's endpoint | every question about a file, an upload or a workspace carries `grant`, the highest live rung the caller holds on a prefix of the path, resolved in both modes. A question about the caller's own space carries none, because ownership is not a grant | 006, 008 | `TestBothModesResolveTheGrant`, `TestTheQuestionCarriesTheCallersGrant`, `TestTheGrantsModeAdmitsTheLaddersActionsOfTheRung` |
+| a token grant read as a subject grant | the grant step matches subject grants only; a token grant is reached by `link.read` alone | 008, 006 | `TestTheLinkStepAnswersLinkReadAndNothingElse`, `TestWhatTheGrantStepDoesNotAdmit` |
+| a claim read for meaning, so an issuer's membership claim becomes authority | nothing but issuer, subject, audience and validity changes what Arca does; claims travel to the authorizer verbatim | 006, 001 | `TestNoHandlerReadsAClaimForMeaning`, `TestAdminReadsNoClaims`, `TestAnAnonymousQuestionCarriesEmptyClaims` |
+| a presigned URL leaking from a redirect, a log, or a history | one object, one method, one expiry of `blob.PresignTTL`; no log attribute carries a signed URL, a credential, or the path | 003, 018 | `TestStoreAPresignedReadIsOneKeyAndOneMethod`, `TestTheRequestLineCarriesTheIdsAndNothingSecret` |
+| path traversal into another object | a path holding an empty or relative segment, a leading or trailing slash, a control character, or an unknown plane is refused before anything else on every route that takes one | 005, 013 | `TestAPathIsTheShapeSpec005Names`, `TestAPathThatIsNotOneIsRefusedBeforeTheBucketIsReached` |
+| key confusion: a path that reaches another object's bytes | the bucket key derives from the object id, never from the path or the owner, so a path that slipped every check addresses nothing. A move touches no key | 003, 001, 005 | `TestKeyPutsTheShardFromTheTailUnderThePrefix`, `TestParseKeyReadsBackTheIDAndRefusesTheRest`, `TestAMoveTouchesNoBucketKey`, `TestStoreAMoveMakesNoBucketCallAndCarriesWhatKeysOnThePath` |
+| one installation reading another's objects in a shared bucket | every key carries `ARCA_BUCKET_PREFIX`, normalised at start-up, and a leading slash in it is a configuration error | 003, 002 | `TestThePrefixGainsItsSlashAndRefusesAnythingElse`, `TestKeyPutsTheShardFromTheTailUnderThePrefix` |
+| public link enumeration | 256 bits from `crypto/rand` under a unique index, and a token bucket per client address in front of the routes that take no bearer | 008, 013 | `TestTheTokenCarriesTheEntropySpec015Requires`, `TestTheAddressRateLimitBoundsWhatHasNoSubject` |
+| a link refusal that says which refusal it was | an unknown, revoked, or expired token, a path outside the prefix, and a denied `link.read` are one sentence naming neither token nor path | 008 | `TestARefusedRedemptionNamesNoToken`, `TestATokenThatResolvesToNothingIsNotFoundBeforeAnyQuestion`, `TestAnAuthorizerThatDeniesLinkReadStopsEveryLink` |
+| a link token in an access log or a referrer | a link response sets `Referrer-Policy: no-referrer`, and the access log names the mux pattern rather than the path, so a token in a path segment reaches no line. The cited tests prove the header and that no bearer reaches a line; that the pattern is logged for a link route in particular is structural and is one of the gaps criterion 23 would surface | 008, 018 | `TestTheThreeRoutesRedeemATokenWithNoBearer`, `TestE2EAPublicLinkIsReadWithNoBearer`, `TestTheRequestLineCarriesTheIdsAndNothingSecret` |
+| a link token in a listing | the token is answered once at creation and is absent from every other shape | 008 | `TestMintingALinkAnswersTheTokenOnce` |
+| a link that grants more than reading | a token grant carries `read`; a create asking for more is `link_read_only` | 008 | `TestALinkThatWouldGrantMoreThanReadingIsRefused`, `TestE2EALinkThatWouldWriteIsRefused` |
+| a link read outside the subtree it names | the prefix is matched by segment, so `files/reports` covers `files/reports/q3.pdf` and not `files/reports-archive` | 008 | `TestALinkServesNothingOutsideItsPrefix` |
+| a public object readable after its grant is gone | the ACL is cleared before the row is revoked, and a bucket that will not answer leaves the grant standing rather than the object readable. A prefix naming a subtree marks no object at all | 008, 003 | `TestAPublicGrantMarksTheObjectItNames`, `TestAPublicGrantOverASubtreeMarksNoObject`, `TestABucketThatWillNotStampIsAnUnavailableStore`, `TestStoreACopyOfAPublicObjectIsStampedAndNotCarried` |
+| usage accounting bypass through multipart | the session is charged its declared size, and the completion charges the difference against the assembled size read back from the store | 007, 010 | `TestACompletionPastTheAnswersLimitIsRefusedAndTheObjectGoes`, `TestTheCompletionReadsTheAssembledSizeBack` |
+| usage accounting bypass by holding many open sessions | an open session's declared bytes are charged from the moment it opens until it completes or is reaped | 007, 010 | `TestASessionThatCouldNotBeOpenedLeavesNoMultipartAndNoCharge`, `TestAnExpiredSessionIsSweptWithItsPartsAndItsCharge` |
+| a usage charge that fails open | the charge and the check are one statement inside the write's own transaction, so a failure refuses the write and records no charge | 010 | `TestUsageFailsClosed`, `TestStoreUsageFailsClosed`, `TestALedgerThatCannotBeWrittenTakesTheWriteDownWithIt`, `TestAWriteRefusedByTheLedgerLeavesNoRowAndNoBytes` |
+| a ledger that silently stops counting | the reaper recomputes every space from the rows that hold the bytes and reports each correction; a correction racing a live charge loses | 010, 018 | `TestLedgerReconciles`, `TestStoreLedgerReconciles`, `TestLedgerCorrectionLosesToALiveCharge` |
+| a workspace lease held by a sandbox that died | a lease expires, one hour by default and twenty-four at most, both constants of `internal/workspaces` that no configuration raises, and the reaper releases every lease past its expiry | 009, 010 | `TestTheLeaseIsBoundedByTheCeilingAndDefaultsToAnHour`, `TestTheReaperPassEndsWhatOutlivedItsDeadline`, `TestTheReaperPassFreesALeaseNoAttachmentHolds` |
+| two writers in one workspace | the lease is taken by one conditional `UPDATE` whose predicate is that no writer holds it, so a race yields one winner | 009, 001 | `TestTwoWritersOnOneWorkspaceLeaveOneLease`, `TestAHolderThatCannotBeReadStillRefusesTheSecondWriter` |
+| a released or reaped attachment still writing | a sync checks that the attachment is active and that the workspace's lease is that attachment's | 009, 013 | `TestASyncThatIsNotTheWritersIsRefused`, `TestAZombieWriterWhoseLeaseMovedOnRenewsNothing`, `TestARenewAgainstAnAttachmentThatEndedIsGone` |
+| a sandbox reaching outside its workspace | a manifest carries only the pinned paths under the workspace root, a path that leaves it is refused, and an attachment of another workspace is not found | 009 | `TestAManifestPathThatLeavesTheWorkspaceIsRefused`, `TestMaterializePinsToTheAttachmentAndSignsTheKeyTheRowNames`, `TestAnAttachmentOfAnotherWorkspaceIsNotFound` |
+| a bucket that ignores `If-None-Match: *` | every put and copy carries it; a store that refuses degrades once, is logged and named by readiness, and fails `arcad check`. The API's compare and swap is in SQL and does not depend on the bucket | 003, 012, 018 | `TestAStoreWithoutConditionalCreateRunsDegradedAndSaysSoOnce`, `TestStoreAConditionalCreateHoldsUnderARaceOfWriters`, `TestIfMatchIsACompareAndSwapAndIfNoneMatchIsCreateOnly`, `TestStoreTwoConditionalWritersOfOnePathLeaveOneWinner` |
+| an event log read by the wrong caller | the tail asks `event.read` like any other action, applies the answer's `filter` to its own query, and fails closed | 010, 006 | `TestTheTailAsksEventReadAboutTheSpaceTheCallerNamed`, `TestTheTailRefusesADeny`, `TestEventFilter`, `TestTheTailFailsClosedOnAnAuthorizerThatAnswersNothing` |
+| a flood, and the guessing that hides in one | a token bucket per subject after authentication and one per client address before it; the second bounds both a flood of bad tokens and a search for a link token | 013, this spec | `TestTheSubjectRateLimitIsPerSubject`, `TestTheAddressRateLimitBoundsWhatHasNoSubject`, `TestARefusedBearerIsStillCounted`, `TestARateOfZeroLimitsNothing` |
+| a client request id used to inject into a log | `X-Request-Id` is kept only when it is at most 128 printable ASCII characters, and is replaced otherwise | 013 | `TestEveryRequestCarriesAnId`, `TestTheQuestionCarriesTheRequestId` |
+| a body that exhausts memory | JSON bodies are capped and decoded with unknown fields refused; an object body needs a `Content-Length` and is capped at `ARCA_MAX_UPLOAD_BYTES`; above `ARCA_INLINE_BYTES` the bytes do not pass through the server | 013, 007 | `TestABodyPastTheBoundIsRefusedRatherThanRead`, `TestAPutIsRefusedWithoutALengthAndAboveTheTwoSizes`, `TestASizeNoRouteServesIsRefusedAndOpensNoMultipart` |
+| an administrator nobody appointed | `space.admin` is handed no object, so no owner rung reaches it; an installation with neither an endpoint nor `ARCA_ADMIN_SUBJECTS` refuses everyone | 012, 006 | `TestAnInstallationWithNoAdministratorRefusesEveryone`, `TestAListedSubjectIsTheAdministratorOfAnInstallationWithNoEndpoint`, `TestADeniedCallerIsForbiddenAndNotHidden` |
+| an administrative surface wider than the two routes | the package declares two rows, both asking `space.admin`, and the document is generated from the same declaration | 012, 013 | `TestAdminRouteActions`, `TestEveryAdministrativeRowOfSpec013IsRegistered`, `TestTheRowsAndTheHandlersAreOneDeclarationReadTwice` |
+| a secret in a log, a manifest, or a response | every key and bearer is read once at start-up and never logged; the manifests mount every credential from a Secret | 002, 016, 018 | `TestTheRequestLineCarriesTheIdsAndNothingSecret`, `TestTheBaseKeepsCredentialsInSecrets`, `TestProdKeepsCredentialsInSecrets` |
+| a visible row whose bytes are gone | a delete writes the database first and the bucket second, so a crash leaves an orphan the reaper sweeps and never a row that lies. A put writes the bucket first for the same reason | 010, 001 | `TestStoreADeleteThatFailedAfterTheRowIsReaped`, `TestStoreAPutThatFailedAfterTheBucketWriteIsReapedAfterTheWindow`, `TestPassFiveTakesTheRowsTheKeysAndTheBytesOfTheLedger`, `TestPassFiveLeavesTheBytesToPassOneWhenTheBucketRefuses` |
+| a compromised replica moving laterally in the cluster | a non-root read-only pod with no capabilities and no service account token, and an egress port list that is the confinement | 016, this spec | `TestBaseIsConfined`, `TestEveryOverlayAdmitsTheEgressItsEndpointsNeed`, `TestProdAdmitsTheDatabasePortsThisInstallationUses` |
+| a consumer of the module deriving another's key | `object.ID.Key` takes a prefix and an id and derives nothing from a path or an owner, and an id that is not one has no key at all | 003 | `TestAnIDThatIsNoIDHasNoShardAndNoKey`, `TestParseIDRefusesEverySpellingButTheCanonicalOne` |
+| a dependency with a known vulnerability | the `vuln` gate on every push, and a dependency list held to invariant 9 of [[001-architecture]] | 002 | the gate |
+| an image that is not what was released | keyless cosign signatures, an SBOM attestation, and a build provenance attestation on both images, verified from a clean runner before the release exists | 016 | `TestTheReleaseImageCopiesWhatThePipelineBuilt`, `TestReleasePublishesUnderTheOwnersNamespace`, and the `release-verify` job |
 
 ### Configuration this spec needs
 
-Two variables, each of which joins the table of
-[[002-repository-scaffold]]. Every other control here is a constant or
-reads a variable that table already holds.
+Two variables, both of which are in the table of
+[[002-repository-scaffold]] and both implemented in `internal/config`.
+Every other control here is a constant or reads a variable that table
+already holds.
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -162,9 +389,7 @@ reads a variable that table already holds.
 | `ARCA_UNAUTHENTICATED_REQUESTS_PER_MINUTE` | `60` | the token bucket per client address before authentication, which bounds bad tokens and link token guessing |
 
 The authorizer's `limits.requests_per_minute` overrides the first for
-the subject it names, for the answer's `ttl` ([[006-identity]]). Every
-response carries `RateLimit-Limit`, `RateLimit-Remaining`, and
-`RateLimit-Reset`, and a 429 adds `Retry-After`.
+the subject it names, for the answer's `ttl` ([[006-identity]]).
 
 ### What is out of scope
 
@@ -193,19 +418,22 @@ response carries `RateLimit-Limit`, `RateLimit-Remaining`, and
   authorized upload imposes on a shared bucket.
 - Side channels between installations sharing one bucket, beyond the key
   prefix.
+- A CDN's own access control. `ARCA_PUBLIC_CDN_URL` names an origin the
+  operator runs, and what it caches and for how long is configured
+  there; a public object's bytes may outlive the revoke in a cache.
 
 ### The root file
 
-`SECURITY.md` carries the reporting address, the response times, and
-four commitments, each a row above:
+`SECURITY.md` carries the reporting address, the response times, and the
+commitments, each of which is a row above:
 
 1. Every `/v1` request carries a token from an issuer the operator
-   listed, and nothing acts before a decision. An unavailable decision
-   is a refusal, and a refusal is indistinguishable from a missing
-   object.
-2. A byte leaves Arca through an authorized read or a presigned URL that
-   names one object, one method, and five minutes, and through nothing
-   else.
+   listed, and nothing reads or writes an object before the authorizer
+   has decided. A decision the authorizer cannot give is a refusal,
+   never an allow.
+2. A byte leaves Arca through an authorized read, a presigned URL that
+   names one object and one method and five minutes, or a public grant
+   the space's own holder minted, and through nothing else.
 3. A public link is a 256 bit capability that grants reading one
    subtree, is revoked by one row with no grace window, and can never
    grant a write.
@@ -213,9 +441,6 @@ four commitments, each a row above:
    issuer, subject, audience, and validity changes what Arca does, so an
    installation's access policy lives in its authorizer and nowhere in
    this code.
-
-A test reads `SECURITY.md` and this file and holds each commitment to a
-row of the controls table.
 
 ### What arrives from Drive
 
@@ -228,36 +453,49 @@ time the reasoning behind it is written down.
 |---|---|---|
 | `drive/internal/storage/s3.go` | the five minute `PresignTTL`, the 24 hour part TTL, and the discipline that no signed URL is logged | unchanged, and now stated as a control with a test |
 | `drive/internal/handler/handler.go`'s `validatePath` | the path rule | unchanged in substance; the plane list is [[001-architecture]]'s two rather than five |
-| `drive/internal/handler/shares.go`'s `newToken` | 256 bits from `crypto/rand` | rendered base64url rather than hex, so the URL is shorter at the same entropy |
+| `drive/internal/handler/shares.go`'s `newToken` | 256 bits from `crypto/rand` | rendered base64url rather than hex, so the URL is shorter at the same entropy. The listing that answered the token does not arrive |
 | `drive/internal/webhook/worker.go`'s `GuardedClient`, `PublicIP`, and its signing | nothing | webhooks were retired on 2026-09-18 before drafting closed. The destination rule, the dialer control hook, the delivery signature, and the whole request-forgery surface they defended go with them; a consumer tails the event log ([[010-events-and-reaper]]) |
-| `drive/internal/handler/quota.go` | the charge and the check after assembly | the stored limit does not arrive; what arrives is the accounting, moved inside the write's own transaction, so the fail-open on a usage query becomes a refusal |
+| `drive/internal/handler/quota.go` | the charge and the check after assembly | the stored limit does not arrive; the accounting moves inside the write's own transaction, so the fail-open on a usage query becomes a refusal |
 | `drive/internal/handler/attach.go` | the conditional lease acquisition, the one hour default and twenty-four hour ceiling, and the reaper that frees an orphan lease | unchanged, and now stated as a control with a test |
-| `drive/internal/handler/admin.go`'s `admin_audit` writes | the transactional record rule, applied to the event log | the separate table does not arrive; the mark moves to where the decision is made, so every allow against a space the caller does not own is recorded and not only the ones on admin routes ([[012-administration]]) |
-| nothing | the rate limits, `Referrer-Policy` on link responses, the conditional-create requirement, the probe question, and `SECURITY.md` | new. The service Arca replaces had no rate limit of any kind, on any route, including the unauthenticated link routes |
+| `drive/internal/handler/admin.go`'s `admin_audit` writes | the transactional record rule, applied to the event log | the separate table does not arrive; the mark moves to where the decision is made ([[012-administration]]). The 404 the predecessor answered an administrative deny with does not arrive either |
+| nothing | the rate limits, `Referrer-Policy` on link responses, the conditional-create requirement, the probe question, the pod confinement and the egress policy, and `SECURITY.md` | new. The service Arca replaces had no rate limit of any kind, on any route, including the unauthenticated link routes |
 
 ## Not in this spec
 
-Each control's own design, which its spec owns. The deploy manifests
-that mount the secrets ([[016-release-and-installation]]). The redaction
-rules and the access log's fields ([[018-observability]]). The suite an
-installation must pass, which includes the refusal cases
-([[017-conformance-suite]]).
+Each control's own design, which its spec owns. The deploy manifests'
+structure ([[016-release-and-installation]]). The redaction rules and
+the access log's fields ([[018-observability]]). The suite an
+installation must pass ([[017-conformance-suite]]).
 
 ## Acceptance criteria
 
+Criteria 1 to 22 are met by tests in the tree. Criteria 23 to 25 name
+work that does not exist yet and are what holds this spec at `testing`.
+
 | # | Criterion | Proved by |
 |---|---|---|
-| 1 | Every `Test` cell in the controls table names a function `go test -list ./...` finds, and every test named appears in the acceptance criteria of the spec its `Spec` cell names | `TestThreatModelControlsHaveTests`, reading this file and the spec deck |
-| 2 | Every commitment in `SECURITY.md` maps to a row of the controls table, and every row's spec is in this file's `depends_on` | `TestSecurityPolicyMatchesTheModel`, reading both files |
-| 3 | A canary object's bytes and a canary link token appear in no log line, no event detail, and no list response across the whole e2e tier | `TestNoSecretsLeak`, grepping the tier's captured output |
-| 4 | No signed URL appears in any log line, and the three link routes log a grant id rather than a path | `TestNoPresignedURLIsLogged`, `TestLinkPathsAreNotLogged` |
-| 5 | A path holding `..`, `//`, a leading or trailing `/`, or an unknown plane is refused on every route that takes a path, and no bucket key is ever derived from a path | `TestPathRule`, `TestKeyIsTheId` |
-| 6 | A caller that completes a multipart larger than the answer's limit allows is refused, the bytes are aborted, and the space's usage returns to what it was | `TestMultipartOverrunIsReaped` |
-| 7 | A ledger read or write that fails refuses the write rather than admitting it, and a ledger altered behind the server's back is corrected and reported by the reaper | `TestUsageFailsClosed`, `TestLedgerReconciles` |
-| 8 | A workspace whose writer stops calling is writable again after the lease expires and one reaper pass, with no operator action | `TestReaperFreesAnOrphanLease` |
-| 9 | A bucket that answers `NotImplemented` to a conditional create fails `arcad check` and is named by readiness, and the server still serves with the condition recorded as unavailable | `TestConditionalCreateRequired` against a refusing stub |
-| 10 | An `event.read` answer carrying a `filter` narrows the tail, and no event `detail` carries object content, a token, or a presigned URL | `TestEventFilter`, `TestEventDetailIsMetadataOnly` |
-| 12 | The 601st authenticated request in a minute is 429 with the four headers, and the 61st unauthenticated request from one address is 429, link routes included | `TestRateLimits` |
-| 13 | An authorizer that allows the probe resource fails `arcad check`, and one that never answers yields 503 and never an allow | `TestCheckRefusesAPermissiveAuthorizer`, `TestAuthorizerFailsClosed` |
-| 14 | Every allow against a space the caller neither owns nor holds a grant on marks its event `admin`, and a failed mutation leaves no event | 012's criteria 8 and 9 |
-| 15 | `cosign verify` and `gh attestation verify` accept both released images from a clean runner | the `release-verify` job of [[016-release-and-installation]] |
+| 1 | Every handler asks exactly one action of the vocabulary before it acts, and a denied route acts on nothing | `TestEveryHandlerAsksExactlyOneActionBeforeItActs`, `TestEveryRouteAsksExactlyOneAction`, `TestARouteThatIsDeniedDoesNotAct` |
+| 2 | A deny at lookup is the answer an absence gives, status, code, sentence and developer detail alike, on every route whose identifier the caller chooses. Criterion 25 carries the routes where it does not | `TestEveryLookupDenyIsTheAnswerAnAbsenceGives`, `TestADenyOnAnotherSpaceIsAMissingObject` |
+| 3 | An authorizer that answers nothing, answers malformed, or answers without `allow` refuses every request and never allows one; so does a grants table that cannot answer | `TestUnavailableIsNeverAnAllow`, `TestAnAuthorizerThatAnswersNothingIsNeverAnAllow`, `TestAGrantsTableThatCannotAnswerIsNoDecision`, `TestAGrantsTableThatCannotAnswerStopsTheQuestion` |
+| 4 | An authorizer that allows the probe resource is reported and fails the check, and one that cannot be reached fails it too | `TestTheProbeIsDeniedAndAnEndpointThatAllowsItIsReported`, `TestAnUnavailableEndpointFailsTheCheck` |
+| 5 | A token for another audience, from an unlisted issuer, past its age bound, or with no subject is refused, and an `http://` issuer off loopback fails start-up | `TestServiceConformance`, `TestATokenWithNoSubjectIsRefused`, `TestTheAudienceDefaults`, `TestAnHTTPIssuerOffLoopbackNeedsTheVariable` |
+| 6 | A personal key narrowed by grants reaches only what its grants name, and the intersection never turns a deny into an allow | `TestOwnerPolicyNarrowsByTheGrants` |
+| 7 | Every question about a file, an upload or a workspace carries the caller's rung in both modes, and a question about the caller's own space carries none | `TestBothModesResolveTheGrant`, `TestTheQuestionCarriesTheCallersGrant`, `TestTheGrantsModeAdmitsTheLaddersActionsOfTheRung` |
+| 8 | A token grant admits no authenticated caller through the grant step; only `link.read` reaches one | `TestTheLinkStepAnswersLinkReadAndNothingElse`, `TestWhatTheGrantStepDoesNotAdmit` |
+| 9 | No handler reads a claim for meaning, and an anonymous question carries empty claims | `TestNoHandlerReadsAClaimForMeaning`, `TestAdminReadsNoClaims`, `TestAnAnonymousQuestionCarriesEmptyClaims` |
+| 10 | A presigned read names one key and one method, and no log line carries a bearer, a signed URL, or a path | `TestStoreAPresignedReadIsOneKeyAndOneMethod`, `TestTheRequestLineCarriesTheIdsAndNothingSecret` |
+| 11 | A path holding a relative or empty segment, a leading or trailing slash, a control character, or an unknown plane is refused before the bucket is reached, and no bucket key is derived from a path | `TestAPathIsTheShapeSpec005Names`, `TestAPathThatIsNotOneIsRefusedBeforeTheBucketIsReached`, `TestKeyPutsTheShardFromTheTailUnderThePrefix`, `TestAMoveTouchesNoBucketKey` |
+| 12 | A link token carries 256 bits, is answered once, is absent from every listing, never grants a write, serves nothing outside its prefix, and every refusal of a link route is one sentence naming neither token nor path | `TestTheTokenCarriesTheEntropySpec015Requires`, `TestMintingALinkAnswersTheTokenOnce`, `TestALinkThatWouldGrantMoreThanReadingIsRefused`, `TestALinkServesNothingOutsideItsPrefix`, `TestARefusedRedemptionNamesNoToken`, `TestATokenThatResolvesToNothingIsNotFoundBeforeAnyQuestion` |
+| 13 | A link response carries `Referrer-Policy: no-referrer` on all three routes | `TestTheThreeRoutesRedeemATokenWithNoBearer`, `TestE2EAPublicLinkIsReadWithNoBearer`, `TestE2EAPublicLinkServesTheObjectsBytes` |
+| 14 | A public grant marks only the object its prefix names, a bucket that will not stamp is an unavailable store rather than a silent partial grant, and publicity does not travel with copied bytes | `TestAPublicGrantMarksTheObjectItNames`, `TestAPublicGrantOverASubtreeMarksNoObject`, `TestABucketThatWillNotStampIsAnUnavailableStore`, `TestStoreACopyOfAPublicObjectIsStampedAndNotCarried` |
+| 15 | A completion past the answer's limit is refused and the object goes, and the charge is read against the assembled size the store reports | `TestACompletionPastTheAnswersLimitIsRefusedAndTheObjectGoes`, `TestTheCompletionReadsTheAssembledSizeBack` |
+| 16 | A ledger read or write that fails refuses the write rather than admitting it, and a ledger altered behind the server's back is corrected and reported, with a correction losing to a live charge | `TestUsageFailsClosed`, `TestStoreUsageFailsClosed`, `TestAWriteRefusedByTheLedgerLeavesNoRowAndNoBytes`, `TestLedgerReconciles`, `TestLedgerCorrectionLosesToALiveCharge` |
+| 17 | A workspace whose writer stops calling is writable again after the lease expires and one reaper pass, two writers leave one lease, and a sync that is not the writer's is refused | `TestTheLeaseIsBoundedByTheCeilingAndDefaultsToAnHour`, `TestTheReaperPassFreesALeaseNoAttachmentHolds`, `TestTwoWritersOnOneWorkspaceLeaveOneLease`, `TestASyncThatIsNotTheWritersIsRefused` |
+| 18 | A manifest path that leaves the workspace is refused, and an attachment of another workspace is not found | `TestAManifestPathThatLeavesTheWorkspaceIsRefused`, `TestAnAttachmentOfAnotherWorkspaceIsNotFound` |
+| 19 | A store that refuses a conditional create runs degraded, says so once, and is named by the check; two conditional writers of one path leave one winner | `TestAStoreWithoutConditionalCreateRunsDegradedAndSaysSoOnce`, `TestStoreAConditionalCreateHoldsUnderARaceOfWriters`, `TestStoreTwoConditionalWritersOfOnePathLeaveOneWinner` |
+| 20 | An `event.read` answer carrying a `filter` narrows the tail, a deny refuses it, and an authorizer that answers nothing never opens it | `TestEventFilter`, `TestTheTailRefusesADeny`, `TestTheTailFailsClosedOnAnAuthorizerThatAnswersNothing` |
+| 21 | The subject bucket limits per subject and the address bucket limits what has no subject, a refused bearer is still charged, and a rate of zero limits nothing | `TestTheSubjectRateLimitIsPerSubject`, `TestTheAddressRateLimitBoundsWhatHasNoSubject`, `TestARefusedBearerIsStillCounted`, `TestARateOfZeroLimitsNothing` |
+| 22 | The pod is non-root, read-only, capability-free and holds no service account token; every overlay admits the egress its own endpoints need and no more; every credential is mounted from a Secret | `TestBaseIsConfined`, `TestEveryOverlayAdmitsTheEgressItsEndpointsNeed`, `TestProdAdmitsTheDatabasePortsThisInstallationUses`, `TestTheBaseKeepsCredentialsInSecrets`, `TestProdKeepsCredentialsInSecrets` |
+| 23 | Every `Test` cell in the controls table names a function `go test -list ./...` finds | not built. A harness reading this file and the test list is what would have caught the thirty-five names this spec carried before 2026-09-19 |
+| 24 | Every commitment in `SECURITY.md` maps to a row of the controls table, and every row's spec is in this file's `depends_on` | not built |
+| 25 | The four lookup sites addressed by a server-minted id answer a deny exactly as an absence, or [[013-api]] narrows its sentence to the routes where the identifier is caller-chosen | not done. Named under "What the collapse does not cover" |

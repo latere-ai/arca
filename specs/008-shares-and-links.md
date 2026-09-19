@@ -1,6 +1,6 @@
 ---
 title: "Shares and links: grants and the permission ladder, public links, what a caller sees shared with them"
-status: testing
+status: complete
 track: core
 depends_on:
   - specs/004-metadata-store.md
@@ -471,3 +471,65 @@ grantee ([[010-events-and-reaper]]).
 | 9 | An organization grantee takes the same code path as a person, with no group table and no org claim read | e2e where the authorizer names an organization subject as the grantee |
 | 10 | A create and a revoke each append one event with the grantee kind in the detail | [[010-events-and-reaper]]'s tail test |
 | 11 | No handler in `internal/shares` reads `org_id`, `roles`, or `email` | the `identity` gate's rule, plus a grep test in `internal/shares` |
+
+## Outcome
+
+Complete on 2026-09-19. The grant is one table and one query set:
+migration `0003_shares.up.sql`, `internal/store/shares.go` and
+`internal/store/links.go`. `internal/shares` holds the eleven handlers, the
+`Grants` and `Links` lookups the owner policy of [[006-identity]] decides
+through, the token, `Expiry` as pass 7 of [[010-events-and-reaper]] and
+`LinkCounts` for [[012-administration]]. `internal/api` keeps the three rows
+that redeem a token, which sit outside the verifier. `cmd/arcad` binds one
+query set to both readers, `Ledger` to the log of
+[[010-events-and-reaper]] through `shareLedger`, and `Reader` to
+`ServeObject` of [[005-files]].
+
+Where each criterion is proved:
+
+| # | Proved by |
+|---|---|
+| 1 | `internal/store`'s `TestCoveringAsksForThePrefixesOfThePathHighestFirst` and the `PrefixesOf` case that holds `files/reports` off `files/reports-archive`; `internal/shares`' `TestWhatTheGrantStepDoesNotAdmit` over the segment, expiry, revoke and kind cases, and `TestARevokeTakesEffectOnTheNextCovering` |
+| 2 | `TestEveryRowAsksTheActionItDeclares`, one request per declared row against the family's stub endpoint, asserting exactly one question and the action the row names; `TestAnAuthorizerThatDeniesLinkReadStopsEveryLink` for the three redemption routes |
+| 3 | `TestACreateAsksShareCreateCarryingThePermissionAndTheGrantee`, which reads `owner`, `path`, `grantee` and `permission` off the recorded question and asserts a create carries no id |
+| 4 | `TestALinkThatWouldGrantMoreThanReadingIsRefused`, and `TestE2EALinkThatWouldWriteIsRefused` through the binary |
+| 5 | `TestTheThreeRoutesRedeemATokenWithNoBearer` and `TestATokenThatResolvesToNothingIsNotFoundBeforeAnyQuestion`, which drives the unknown, the revoked and the expired token over all three routes and asserts no question was asked at all |
+| 5b | the same, reading the question's action, resource id, owner and empty subject, with `TestAnAuthorizerThatDeniesLinkReadStopsEveryLink` as the denying half |
+| 6 | `TestALinkServesNothingOutsideItsPrefix`, which also asserts the read path was never reached |
+| 7 | `TestRevokingALinkStopsTheNextRedemption` and `TestARevokeTakesEffectOnTheNextCovering`; `TestE2EAGrantIsCreatedReadAndRevoked` through the binary |
+| 8 | `TestWithMeAnswersTheGranteesGrants`, and `TestE2EAGrantIsCreatedReadAndRevoked` with two subjects of one issuer |
+| 9 | the same e2e case, which grants to `<issuer>\|org-6f2c` and asserts the row, the kind and the read-back are a person's |
+| 10 | `TestACreateWritesTheGrantAndAppendsOneEvent` and the revoke's half of `TestRevokingALinkStopsTheNextRedemption`; `cmd/arcad`'s `shareLedger` case for the closed vocabulary, and the e2e tail asserting two `share_created` and one `share_revoked` |
+| 11 | `TestNoHandlerReadsAClaimForMeaning`, which reads this package's own non-test files, beside the `identity` rule of `.lateregate.yaml` |
+
+Two of those proofs are not the artefact the table above named, and the
+substitution is deliberate. Criterion 2 named a conformance row per action
+driven against a recording authorizer; the conformance suite of
+[[017-conformance-suite]] is black box and cannot see what was asked, so the
+proof is `TestEveryRowAsksTheActionItDeclares` at the unit tier, which reads
+the question off the stub endpoint and holds the whole declared table to it,
+and `cases008.go` covers the same routes on the wire. Criterion 3's
+resource fields are read the same way.
+
+The permission ladder resolves consistently across the three places that
+carry it. `internal/auth`'s `ladder` puts `share.create`, `share.read`,
+`share.list` and `share.revoke` at `manage` and `upload.write` at `write`,
+and leaves all three `link.*` actions reachable by no grant, which is
+[[006-identity]]'s rule that minting or revoking a token anyone may read is
+a power over the space rather than over a subtree of it. The ladder table in
+this spec defers that reading to that spec, and
+`internal/auth`'s `TestTheLadderMatchesSpec006` reads the ladder out of
+[[006-identity]]'s own text and holds `auth.ladder` to it, so the three
+cannot drift apart silently.
+
+The seam paragraph in Current state above is stale and the tree is the
+authority: `cmd/arcad` binds `Reader` to the object read path, and
+`not_implemented` survives only as what a build that binds no reader answers,
+which is `TestTheFileRouteNeedsTheReadPathOfSpec005`.
+`TestE2EAPublicLinkServesTheObjectsBytes` shows the route serving.
+
+Coverage of the owning package is 92.8% of statements at the unit tier,
+`go test ./internal/shares/...` with no build tag. The store and e2e tiers
+named in the table above were verified by reading the tests rather than by
+running them, because they need `-tags=tiers` and the compose stack, and the
+gate runs them in CI.

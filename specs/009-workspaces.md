@@ -1,6 +1,6 @@
 ---
 title: "Workspaces: durable subtrees, the writer lease, materialize and sync"
-status: testing
+status: complete
 track: core
 depends_on:
   - specs/004-metadata-store.md
@@ -542,3 +542,95 @@ one.
 | 15 | A delete lists in `/v1/workspaces/deleted`, restores within `ARCA_TRASH_RETENTION`, and is purged after it | e2e plus [[010-events-and-reaper]]'s purge test |
 | 16 | Restore of a live workspace is a conflict and restore of a purged id is not-found | e2e |
 | 17 | No handler in `internal/workspaces` reads `org_id`, `roles`, or the principal type | the `identity` gate's rule, plus a grep test |
+
+## Outcome
+
+Complete on 2026-09-19. The record, the writer lease, materialize and sync
+are in `internal/workspaces` over migration `0004_workspaces.up.sql` and the
+queries of `internal/store/workspaces.go` and
+`internal/store/workspaces_objects.go`. `arcad` mounts the twelve routes
+through `workspaces.Routes`, binds `Ledger` to the log and usage counter of
+[[010-events-and-reaper]], binds `Objects` to `store.NewWorkspaceObjects()`,
+and runs `Service.ExpireLeases` as pass 3 and `Tombstones` as pass 6 of that
+spec's table, the second in `arcad reap` as well, because it puts no
+question.
+
+Every criterion's claim holds against the tree. Two of them are proved by a
+different artefact than the Proved by column named, criterion 9 by the shape
+of the code rather than by a race and criterion 17 by the gate rather than by
+an in-package test, and each is written out below rather than left for a
+reader to find.
+
+Where each criterion is proved:
+
+| # | Proved by |
+|---|---|
+| 1 | `internal/store`'s `TestStoreTwoConcurrentWritersLeaveOneLease` against the real Postgres, and `TestTwoWritersOnOneWorkspaceLeaveOneLease` in this package; the e2e case reads the second writer's `writer_held` through the binary |
+| 2 | `TestStoreManyReadersAttachAtOnceAndNoneTouchesTheLease`, with `TestManyReadersAttachAtOnceAndNoneTouchesTheLease` beside it |
+| 3 | `TestARenewExtendsTheDeadlineAndMovesTheLeaseWithIt` and `TestAReleaseClearsTheLeaseAndIsIdempotent` |
+| 4 | `TestTheReaperPassEndsWhatOutlivedItsDeadline` and `TestTheReaperPassFreesALeaseNoAttachmentHolds` for the pass, `TestAZombieWriterWhoseLeaseMovedOnRenewsNothing` and `TestARenewAgainstAnAttachmentThatEndedIsGone` for the zombie's next call, and `cmd/arcad`'s `leasePass` for the loop that runs it |
+| 5 | `TestAWorkspaceIsCreatedUnderTheCallersOwnSpaceWithADerivedRoot`, `TestASlugIsHeldToTheOneShapeARootDerivesFrom` and `TestStoreASlugCollidesAcrossLiveAndDeletedRowsAlike` against the constraint itself |
+| 6 | `TestARenameMovesTheRowsAndReachesNoBucket`, driven against the counting bucket stub |
+| 7 | `TestARenameAndADeleteAreRefusedWhileAWriterHoldsTheWorkspace`, with `TestALapsedLeaseDoesNotHoldARenameOrADelete` for the clause the divergence above records |
+| 8 | `TestMaterializePinsToTheAttachmentAndSignsTheKeyTheRowNames` and `TestMaterializeOmitsAPathWhoseRowIsGone`; the e2e case seeds one object written whole and one assembled from parts and fetches every URL straight from the bucket |
+| 9 | the construction rather than a race: see below |
+| 10 | `TestASyncDeletesWhatTheManifestDropsAndKeepsTheRest`, and the e2e case that heads the dropped key in MinIO after the sync |
+| 11 | `TestASyncNamingAPathThatWasNeverUploadedWritesNothing`, and the e2e case that reads the missing paths out of `details.fields` and checks the boundary, the rows and the bytes are untouched |
+| 12 | `TestReplayingASyncChangesNothingButTheBoundary`, and the e2e replay |
+| 13 | `TestASyncThatIsNotTheWritersIsRefused`, and the e2e case driving a reader's sync and then a released attachment's |
+| 14 | `TestTheModeOfAnAttachPicksTheActionItAsks`, both halves: the action each mode asks, and a caller the authorizer allows `workspace.read` and refuses `workspace.attach` mounting `ro` and refused `rw`; `internal/auth`'s ladder cases carry the same pairing |
+| 15 | `TestASoftDeletedWorkspaceIsHiddenFromEveryRouteButTheRestore` and the e2e delete, deleted listing and restore, with `TestATombstonePastTheWindowTakesItsSubtreeItsBytesAndItsRow` and `TestATombstoneInsideTheWindowIsLeftAlone` for the purge at `ARCA_TRASH_RETENTION` |
+| 16 | `TestRestoreBringsBackADeletedWorkspaceAndRefusesALiveOne`, and the e2e case that also restores an id nothing names |
+| 17 | the `identity` rule of `.lateregate.yaml`, `role: core` with `roles_only`, which runs on every gate; the package's own sources name none of the three, and see the note on the missing grep test below |
+
+Criterion 9 is proved by how materialize is written rather than by the
+concurrent case the table named, and no test drives a sync in flight. Every
+field a manifest entry carries but one comes from the attachment's pinned
+manifest, decoded from the single column an attach writes and a sync
+rewrites inside the transaction that moves the rows; the only live read is
+the object id each path is presigned against, and a path whose row is gone
+is omitted. A materialize concurrent with a sync therefore decodes the
+pre-sync manifest or the post-sync one and never a blend of the two.
+`TestASyncRePinsTheAttachmentToWhatTheRowsHold` proves the rewrite happens
+at the end, `TestAFaultInsideATransactionWritesNothing` that a refused sync
+commits nothing, and `TestMaterializeOmitsAPathWhoseRowIsGone` the omission.
+
+Criterion 17's mechanical half runs and its in-package half does not.
+[[008-shares-and-links]] carries `TestNoHandlerReadsAClaimForMeaning`, which
+reads that package's own non-test files for the words that would mean a claim
+was read for meaning; `internal/workspaces` has no counterpart, so what holds
+the rule here is the `identity` gate alone. The claim itself is true today:
+nothing in the package's sources names `org_id`, `principal_type`,
+`principal_id`, `claims.`, `Roles` or a quoted `email` or `roles`. Porting
+that test is one file.
+
+Criterion 14 closed at the unit tier and needs nothing from
+[[017-conformance-suite]]; the sentence in Current state that waits on those
+rows is stale. `cases009.go` exercises the same routes on the wire, which is
+all a black box suite can see, since it cannot read what was asked.
+
+The deadline precision above is what the code does. `StoredPrecision` is
+`time.Microsecond` and `Service.now` is the one place a stored deadline is
+truncated, so an attach, a renew and the workspace view answer one value.
+`TestADeadlineIsStoredAndAnsweredAtTheDatabasesPrecision` drives a clock
+carrying nanoseconds no column can hold, so the rule is measured rather than
+inherited from whichever machine runs the suite, which is what let the defect
+pass on macOS and fail on Linux.
+
+Coverage of the owning package is 91.8% of statements at the unit tier,
+`go test ./internal/workspaces/...` with no build tag. The store tier in
+`internal/store/workspaces_tier_test.go` and the e2e cases in
+`test/e2e/workspaces_test.go` were verified by reading the tests rather than
+by running them, because they need `-tags=tiers` and the compose stack, and
+the gate runs them in CI.
+
+One thing a later reader should know that no criterion covers. Materialize
+pairs the pinned entry's checksum and size with a URL signed against the
+object id the row carries now. A sync cannot make those disagree, but an
+ordinary put can: a writer that overwrites a path between its attach and its
+sync leaves a reader's pinned entry naming the old checksum beside a URL
+that fetches the new bytes. The window is a write of [[005-files]] and not a
+sync, so invariant 7 is untouched and criterion 9 holds, but a sandbox that
+trusts `checksum` to skip a file it already holds can skip the wrong one.
+Closing it means reading the checksum off the row beside the object id, or
+refusing to serve an entry whose row has moved.

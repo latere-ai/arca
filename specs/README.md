@@ -47,21 +47,21 @@ validated spec is dispatched when every spec in its `depends_on` is at
 
 | Spec | Title | Status |
 |---|---|---|
-| [001](001-architecture.md) | Architecture: two stores, spaces and planes, packages, invariants | drafted |
+| [001](001-architecture.md) | Architecture: two stores, spaces and planes, packages, invariants | complete |
 | [002](002-repository-scaffold.md) | Repository scaffold: module, binary, configuration, quality gate, image, workflow | complete |
 | [003](003-object-store.md) | Object store: the bucket contract, keys, integrity, presigned reads, multipart | testing |
-| [004](004-metadata-store.md) | Metadata store: the schema, migrations, transactions, the store interface | testing |
+| [004](004-metadata-store.md) | Metadata store: the schema, migrations, transactions, the store interface | complete |
 | [005](005-files.md) | Files: put, get, list, move, delete; versions, trash, stars | testing |
-| [006](006-identity.md) | Identity: verification, the subject, the action vocabulary, the authorizer question, the owner policy | testing |
+| [006](006-identity.md) | Identity: verification, the subject, the action vocabulary, the authorizer question, the owner policy | complete |
 | [007](007-uploads.md) | Uploads: sessions, size classes, direct-to-bucket parts, integrity | testing |
-| [008](008-shares-and-links.md) | Shares and links: grants and the permission ladder, public links, what a caller sees shared with them | testing |
-| [009](009-workspaces.md) | Workspaces: durable subtrees, the writer lease, materialize and sync | testing |
+| [008](008-shares-and-links.md) | Shares and links: grants and the permission ladder, public links, what a caller sees shared with them | complete |
+| [009](009-workspaces.md) | Workspaces: durable subtrees, the writer lease, materialize and sync | complete |
 | [010](010-events-and-reaper.md) | Events and the reaper: the ledger, the log, the reconciliation of the two stores | testing |
 | 011 | Webhooks | retired 2026-09-18 before drafting closed; the number is not reused. Events are tailed by cursor, spec 010 |
 | [012](012-administration.md) | Administration: the overview across spaces, the cross-space restore, the record of what was done, the `check` command | testing |
 | [013](013-api.md) | API: routes, the error table, OpenAPI, the document served | testing |
 | [014](014-test-stubs-and-tiers.md) | Test stubs and tiers: the unit tier, the store tier on MinIO and Postgres, the e2e tier | testing |
-| [015](015-security-and-threat-model.md) | Security and threat model | drafted |
+| [015](015-security-and-threat-model.md) | Security and threat model | testing |
 | [016](016-release-and-installation.md) | Release and installation: images, binaries, deploy manifests, the operator's overlay | testing |
 | [017](017-conformance-suite.md) | Conformance suite: the contract as an importable test package | testing |
 | [018](018-observability.md) | Observability: traces, metrics, logs, the alert rules | testing |

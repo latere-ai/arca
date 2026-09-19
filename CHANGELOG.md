@@ -6,6 +6,21 @@ refused before it is pushed.
 
 ## Unreleased
 
+- **A grant on a moved path follows the object.** A move rewrote the file
+  row, its history and its bookmarks, and left the share behind. That is
+  not only a lost grant: the old path becomes free, and the next object
+  written there is covered by a grant its owner gave for something else,
+  which hands the grantee an object nobody shared with them. The move's
+  transaction now carries the grant too. A grant on an ancestor still
+  covers a subtree and still stays where it is.
+- **A space's usage counts the sessions it has open.** An upload session
+  is charged its declared bytes the moment it opens, so that a caller
+  cannot hold a thousand open at once, but the recomputation the reaper
+  reconciles against summed only the settled tables. The correction wrote
+  the lower number over the live charge, so opening a session and waiting
+  one reap interval erased it, and repeating that meant a space was never
+  charged for any session. The recomputation reads all three tables.
+
 - **A replica can reach the database it is configured with.** The base
   confines egress and admits 5432, which is where a Postgres an operator
   runs listens. A managed database listens elsewhere: this installation's

@@ -106,17 +106,31 @@ treat that subject as an administrator, and the suite mints its token at
 the stub issuer. The release job's step passes the same name against the
 kind stack.
 
-Criteria 1, 2, 3, 4, 5, 6 and 7 have passing tests. Criterion 2's route
-half is `TestEveryRouteHasACase` and its code half is
+Criteria 1, 2, 3, 4, 5, 6 and 7 have passing tests. Three of them are
+named in the table below by a test that was folded into others while the
+suite was built, and the table names the real ones now: criterion 1 is
+`TestEveryGroupHasACase` and `TestSkipsCarryAReason`, criterion 4's
+first half is `TestRunCleansUpWhatItMade` with
+`TestCleanupReportsAFailureAndKeepsGoing` beside it, and criterion 6 is
+`TestSurfaceReadsTheServedDocument` and
+`TestPendingFailsUntilTheRoutesLand`, for the reason in the
+optional-route entry below. Criterion 2's route half is
+`TestEveryRouteHasACase` and its code half is
 `TestEveryCodeIsProvokedOrNamed`, which reads the codes each case
 declares rather than what a run happened to see, so the rule holds
 against a build that serves none of the routes. Criterion 4's second
 half is `TestConcurrentRuns`, with one narrowing recorded below.
+
+Criteria 8 and 9 are open, and they are why this spec is not complete.
 Criterion 8's import graph half is proved by
-`TestTheSuiteReachesNoHelperOfThisTree`; its CI job is not built, and is
-a suggestion rather than a claim. Criterion 9 waits on a release that
-carries a `test/conformance` to check out, which is the release after
-this spec lands. The spec stays at `testing` until both close.
+`TestTheSuiteReachesNoHelperOfThisTree`; the `conformance-external` job
+it names is in neither workflow, so the external form is a suggestion
+rather than a claim. Criterion 9 has no `TestPreviousSuitePasses`
+anywhere in the tree, and it waits on a release that carries a
+`test/conformance` to check out. There is no release: both `v*` tags cut
+so far failed their runs ([[016-release-and-installation]]), so the
+previous tag holds no suite to check out and the test has nothing to be
+written against. The spec stays at `testing` until both close.
 
 What the implementation decided, where this spec was silent or where the
 tree made another reading better:
@@ -434,12 +448,12 @@ timing, and cost; a case asserts an answer and never a latency.
 
 | # | Criterion | Proved by |
 |---|---|---|
-| 1 | Every group in the table exists with the scope named, and skips with a reason in the report when its input is empty | `TestGroupsAndSkips` |
+| 1 | Every group in the table exists with the scope named, and skips with a reason in the report when its input is empty | `TestEveryGroupHasACase`, `TestSkipsCarryAReason` |
 | 2 | Every route of [[013-api]] is named by at least one case, and every code of its error table the suite can provoke is asserted | `TestEveryRouteHasACase` reading the served document against the case list |
 | 3 | Every marker in the deck has a case and every case a marker | `TestEveryCriterionHasACase` over `specs/` and `specs/.archive/` |
-| 4 | A run leaves nothing behind, and two concurrent runs against one installation touch none of each other's objects | `TestRunCleansUp`, `TestConcurrentRuns` |
+| 4 | A run leaves nothing behind, and two concurrent runs against one installation touch none of each other's objects | `TestRunCleansUpWhatItMade`, `TestCleanupReportsAFailureAndKeepsGoing`, `TestConcurrentRuns` |
 | 5 | `arcad` started with each value of `ARCA_TEST_DRIFT` fails exactly the named group's case and no other | `TestSuiteCatchesADrift` |
-| 6 | A target that answers `404` for an optional route fails, and one that answers `501` skips with the route in the reason | `TestOptionalRouteDiscipline` against a lying server |
+| 6 | A route of [[013-api]]'s table the target does not answer puts every case that drives it in the pending group, which fails naming the route and the spec that owns it, and a target serving no document is held to the whole table | `TestSurfaceReadsTheServedDocument`, `TestPendingFailsUntilTheRoutesLand`. The `501` rule this criterion first wrote is superseded: [[013-api]] marks no route optional, so the difference the suite reports is what the served document names against what the contract does |
 | 7 | The verifier `arcad` installs admits `arca` and refuses the issuer's audience, another audience, and a token with no subject, calls the issuer only for its key set, and reads no flag in place of a role | `TestConformance` in `internal/auth`, the family suite |
-| 8 | The package a consumer imports pulls in no helper from this repository's test tree, and the documented command runs from a clean checkout against a URL | the `conformance-external` CI job |
-| 9 | The previous release's suite passes against this release's binary, or the tag is a major | `TestPreviousSuitePasses`, run by the `conformance` job of [[016-release-and-installation]]; this spec owns the test and that spec cites it |
+| 8 | The package a consumer imports pulls in no helper from this repository's test tree, and the documented command runs from a clean checkout against a URL | `TestTheSuiteReachesNoHelperOfThisTree` for the import graph; the `conformance-external` CI job, which is not built, for the command. **Open** |
+| 9 | The previous release's suite passes against this release's binary, or the tag is a major | `TestPreviousSuitePasses`, run by the `conformance` job of [[016-release-and-installation]]; this spec owns the test and that spec cites it. Neither is written: there is no release to check a previous suite out of. **Open** |
