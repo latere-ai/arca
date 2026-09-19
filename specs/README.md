@@ -49,14 +49,14 @@ validated spec is dispatched when every spec in its `depends_on` is at
 |---|---|---|
 | [001](001-architecture.md) | Architecture: two stores, spaces and planes, packages, invariants | complete |
 | [002](002-repository-scaffold.md) | Repository scaffold: module, binary, configuration, quality gate, image, workflow | complete |
-| [003](003-object-store.md) | Object store: the bucket contract, keys, integrity, presigned reads, multipart | testing |
+| [003](003-object-store.md) | Object store: the bucket contract, keys, integrity, presigned reads, multipart | complete |
 | [004](004-metadata-store.md) | Metadata store: the schema, migrations, transactions, the store interface | complete |
-| [005](005-files.md) | Files: put, get, list, move, delete; versions, trash, stars | testing |
+| [005](005-files.md) | Files: put, get, list, move, delete; versions, trash, stars | complete |
 | [006](006-identity.md) | Identity: verification, the subject, the action vocabulary, the authorizer question, the owner policy | complete |
 | [007](007-uploads.md) | Uploads: sessions, size classes, direct-to-bucket parts, integrity | testing |
 | [008](008-shares-and-links.md) | Shares and links: grants and the permission ladder, public links, what a caller sees shared with them | complete |
 | [009](009-workspaces.md) | Workspaces: durable subtrees, the writer lease, materialize and sync | complete |
-| [010](010-events-and-reaper.md) | Events and the reaper: the ledger, the log, the reconciliation of the two stores | testing |
+| [010](010-events-and-reaper.md) | Events and the reaper: the ledger, the log, the reconciliation of the two stores | complete |
 | 011 | Webhooks | retired 2026-09-18 before drafting closed; the number is not reused. Events are tailed by cursor, spec 010 |
 | [012](012-administration.md) | Administration: the overview across spaces, the cross-space restore, the record of what was done, the `check` command | testing |
 | [013](013-api.md) | API: routes, the error table, OpenAPI, the document served | testing |
