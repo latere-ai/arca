@@ -184,7 +184,8 @@ deploy/bootstrap/       applied by hand once, before the overlay
   namespace.yaml
   secrets.example.yaml  the shape of the Secret the base mounts, with no value
   README.md
-deploy/examples/kind/   MinIO, Postgres, the stubs image, node ports, up.sh and down.sh
+deploy/examples/kind/   MinIO, Postgres, the stubs image, node ports, the egress
+                        its own dependencies need, up.sh and down.sh
 deploy/examples/aws/    ingress, public URL, replicas, an S3 bucket and RDS
 deploy/examples/digitalocean/  the same against Spaces and a managed Postgres
 deploy/prod/            the operator's overlay
@@ -348,7 +349,7 @@ tag.
 |---|---|---|
 | the kustomize base: two workloads, the Service, two network policies, the budget, the autoscaler, the account with no token mounted, and the alert rules beside the kustomization | `deploy/base/` | `TestBaseIsConfined`, `TestTheBaseServesBothListeners`, `TestTheBaseLeavesThePrometheusRuleOut` |
 | the bootstrap: the namespace, the three Secrets by example, the migration Job, and the README that orders them | `deploy/bootstrap/` | `docs/install.md` steps 5 and 6 |
-| the kind stack, and the AWS and DigitalOcean overlays | `deploy/examples/` | `TestOverlaysResolve`, `TestEveryOverlaySetsThePublicURL`, `TestTheKindStackPublishesWhatATestReaches`, and the render step of `release.yml` |
+| the kind stack, and the AWS and DigitalOcean overlays | `deploy/examples/` | `TestOverlaysResolve`, `TestEveryOverlaySetsThePublicURL`, `TestTheKindStackPublishesWhatATestReaches`, `TestEveryOverlayAdmitsTheEgressItsEndpointsNeed`, and the render step of `release.yml` |
 | Latere's overlay, and both gate declarations | `deploy/prod/`, `.lateregate.yaml` | `TestProdPinsAReleasedImage`, `TestProdIsDeclaredToTheGate`, `TestProdNamesOnlyAddressesTheFamilyAlreadyUses` |
 | the four-job pipeline: build, conformance, deploy, publish | `.github/workflows/release.yml` | `actionlint`, `TestReleasePublishesUnderTheOwnersNamespace`, `TestTheDeployJobIsGatedAndNamesTheEnvironment`, `TestEveryThirdPartyActionIsPinned` |
 | the release image, sharing the developer image's runtime stage byte for byte | `Dockerfile.ci`, `Dockerfile` | `TestRuntimeStagesMatch`, which is criterion 3 |

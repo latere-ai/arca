@@ -8,10 +8,13 @@
 #   30432  Postgres
 #   30900  MinIO
 #
-# The default CNI is left on. Arca's network policies are an installation's
-# confinement rather than something the stack asserts, and kindnet does not
-# enforce them; an installation that wants them enforced runs a CNI that
-# does, which docs/operations.md names.
+# The default CNI is left on, and it enforces NetworkPolicy: kindnetd runs
+# kube-network-policies and queues every pod packet to its verdict engine.
+# The base's confinement therefore applies here exactly as it does in a
+# cluster running Cilium or Calico, which is why the overlay carries
+# networkpolicy-stack.yaml: the stack's own dependencies listen on ports the
+# base has no reason to admit, and a port no policy names is a connection
+# dropped rather than refused.
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:

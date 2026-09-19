@@ -142,6 +142,7 @@ Take that dump before every migration. It is the only rollback there is.
 |---|---|---|
 | the bucket is unreachable | readiness fails on every replica and they leave the endpoint list; the pods keep running | fix the bucket; the replicas return by themselves |
 | the database is unreachable | the same | the same |
+| an issuer is unreachable at start | the replica starts, writes one line naming `ARCA_OIDC_ISSUERS`, and fails the `issuers` check until the issuer answers; it retries in the background | fix the issuer; the replicas return by themselves |
 | a replica is killed | nothing; it holds no state a new one cannot read back | nothing |
 | a node is drained | the budget keeps one ready replica, and an unready one is always evictable, so a drain during an outage proceeds rather than blocking | nothing |
 
@@ -153,8 +154,18 @@ that is the whole of it.
 The base admits the two listeners and nothing else, and lets a replica
 reach DNS, HTTPS, Postgres and an OTLP collector and nothing else. A
 cluster whose CNI does not enforce NetworkPolicy applies those objects and
-gets nothing from them; Cilium and Calico enforce them, and the default CNI
-of a kind cluster does not.
+gets nothing from them; Cilium, Calico and the default CNI of a kind
+cluster all enforce them.
+
+Egress is an allow-list of ports, so a dependency on a port the base does
+not name is unreachable, and unreachable here means the packet is dropped:
+the replica waits out its own timeout rather than being refused. Point Arca
+at a bucket, an issuer or an authorizer on a port other than 443 or 80 and
+you must admit that port yourself, in a second NetworkPolicy that selects
+`app.kubernetes.io/name: arcad`. Policies are additive, so the second one
+widens the egress and leaves the base alone;
+`deploy/examples/kind/networkpolicy-stack.yaml` is that file for the kind
+stack, whose issuer, authorizer and bucket sit on 8081, 8082 and 9000.
 
 ## What to watch
 

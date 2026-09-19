@@ -1,0 +1,41 @@
+# The ports this stack's own dependencies listen on, which the base cannot
+# know.
+#
+# The default CNI of a kind cluster enforces NetworkPolicy: kindnetd runs
+# kube-network-policies and queues every pod packet to its verdict engine.
+# So the base's `arcad-egress` is the whole of a replica's connectivity
+# here, and a port it does not name is a connection dropped rather than
+# refused: the caller waits out its own timeout and reads nothing.
+#
+# The base admits 443 for a bucket and an issuer, and 80 for an in-cluster
+# authorizer, which is what an installation dials. Every dependency of this
+# stack is in the cluster and on a port of its own:
+#
+#   8081  the stub issuer of spec 014, ARCA_OIDC_ISSUERS
+#   8082  the stub authorizer of spec 014, ARCA_AUTHORIZER_URL
+#   9000  MinIO, ARCA_BUCKET_ENDPOINT
+#
+# Policies are additive: a pod may go wherever any policy that selects it
+# allows, so this widens the stack's egress and leaves the confinement every
+# other installation inherits exactly as the base writes it. DNS on 53 and
+# Postgres on 5432 are the base's and are not repeated.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: arcad-egress-stack
+  labels:
+    app.kubernetes.io/name: arcad
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: arcad
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - port: 8081
+          protocol: TCP
+        - port: 8082
+          protocol: TCP
+        - port: 9000
+          protocol: TCP

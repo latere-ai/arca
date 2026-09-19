@@ -4,6 +4,8 @@
 package deploy
 
 import (
+	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -210,6 +212,123 @@ func TestTheStackScriptsAreExecutable(t *testing.T) {
 		}
 		if info.Mode().Perm()&0o111 == 0 {
 			t.Errorf("deploy/examples/kind/%s is not executable", name)
+		}
+	}
+}
+
+// dialled are the variables whose value is an address arcad opens a
+// connection to. ARCA_PUBLIC_URL is not one of them: it is the origin
+// clients reach this installation at, and nothing in the process dials it.
+var dialled = []string{
+	"ARCA_OIDC_ISSUERS",
+	"ARCA_AUTHORIZER_URL",
+	"ARCA_BUCKET_ENDPOINT",
+	"ARCA_DATABASE_URL",
+}
+
+// endpoints is every address an overlay configures arcad to dial, mapped to
+// the variable that carries it: the container environment, and the Secrets
+// the overlay writes for itself. An overlay whose Secrets an operator fills
+// in by hand declares none, and there is then nothing here to hold it to.
+func endpoints(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	keep := func(name, value string) {
+		if !slices.Contains(dialled, name) || value == "" {
+			return
+		}
+		// ARCA_OIDC_ISSUERS is a list, read the way internal/config reads it.
+		for part := range strings.SplitSeq(value, ",") {
+			if part = strings.TrimSpace(part); part != "" {
+				out[part] = name
+			}
+		}
+	}
+	for _, d := range read(t, dir) {
+		for _, c := range d.containers() {
+			for _, e := range c.items("env") {
+				keep(e.text("name"), e.text("value"))
+			}
+		}
+		if d.kind() != "Secret" {
+			continue
+		}
+		if data := d.at("stringData"); data != nil {
+			for _, e := range data.children {
+				keep(e.key, e.value)
+			}
+		}
+	}
+	return out
+}
+
+// egressPorts is the union of the TCP ports the NetworkPolicies of these
+// documents admit to a pod labelled app.kubernetes.io/name: arcad. Policies
+// are additive, so the union is what a replica may reach.
+func egressPorts(sets ...[]document) map[string]bool {
+	out := map[string]bool{}
+	for _, docs := range sets {
+		for _, d := range docs {
+			if d.kind() != "NetworkPolicy" ||
+				d.text("spec", "podSelector", "matchLabels", "app.kubernetes.io/name") != "arcad" {
+				continue
+			}
+			for _, rule := range d.items("spec", "egress") {
+				for _, p := range rule.items("ports") {
+					// The default protocol is TCP, which is what every
+					// endpoint below is reached over.
+					if proto := p.text("protocol"); proto == "" || proto == "TCP" {
+						out[p.text("port")] = true
+					}
+				}
+			}
+		}
+	}
+	return out
+}
+
+// dialPort is the TCP port an endpoint is reached on: the one it names, or
+// its scheme's.
+func dialPort(endpoint string) (string, error) {
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Host == "" {
+		return "", fmt.Errorf("%s is not a URL", endpoint)
+	}
+	if port := u.Port(); port != "" {
+		return port, nil
+	}
+	switch u.Scheme {
+	case "https":
+		return "443", nil
+	case "http":
+		return "80", nil
+	case "postgres", "postgresql":
+		return "5432", nil
+	}
+	return "", fmt.Errorf("%s names the scheme %q, whose port this test does not know", endpoint, u.Scheme)
+}
+
+// TestEveryOverlayAdmitsTheEgressItsEndpointsNeed: egress is an allow-list
+// of ports, and every CNI that enforces policy drops what it does not
+// admit rather than refusing it, so an endpoint on a port no policy names
+// is a replica waiting out its own timeout against a dependency that is up
+// and answering. That is how the kind stack of spec 016 crash-looped: the
+// stub issuer on 8081, MinIO on 9000 and the stub authorizer on 8082 are
+// none of the base's 53, 80, 443, 5432, 4317 and 4318.
+func TestEveryOverlayAdmitsTheEgressItsEndpointsNeed(t *testing.T) {
+	base := read(t, "deploy/base")
+	for dir := range overlays(t) {
+		admitted := egressPorts(base, read(t, dir))
+		for endpoint, variable := range endpoints(t, dir) {
+			port, err := dialPort(endpoint)
+			if err != nil {
+				t.Errorf("%s sets %s to %s: %v", dir, variable, endpoint, err)
+				continue
+			}
+			if !admitted[port] {
+				t.Errorf("%s sets %s to %s, and no NetworkPolicy admits egress to TCP %s; a cluster that enforces policy drops the connection and the replica waits out its own timeout",
+					dir, variable, endpoint, port)
+			}
 		}
 	}
 }
