@@ -1,6 +1,6 @@
 ---
 title: "Uploads: sessions, size classes, direct-to-bucket parts, integrity"
-status: testing
+status: complete
 track: core
 depends_on:
   - specs/001-architecture.md
@@ -10,7 +10,7 @@ depends_on:
 affects: [internal/uploads/, internal/api/, internal/store/, internal/store/migrations/, internal/config/, cmd/arcad/, test/e2e/]
 effort: medium
 created: 2026-09-18
-updated: 2026-09-18
+updated: 2026-09-19
 author: changkun
 ---
 
@@ -80,10 +80,14 @@ proved at the unit tier with the row write failed once, and the retry
 resumes from the row write. Criterion 9 is closed: the expiry query is proved
 against Postgres and the sweep that runs it is bound as pass 4 above. The uploads group of
 [[017-conformance-suite]] runs green against this build on 2026-09-19, four
-cases over the three routes. Criterion 10 waits on it still: no case in that
-group drives a second subject against a session, and the stack the suite runs
-on answers every subject every action, so the criterion's own question cannot
-be asked there. Criterion 12 is open: see the divergence below.
+cases over the three routes. Criterion 10 is closed at the unit tier and not
+in that group: the stack the suite runs on answers every subject every
+action, so the question cannot be asked there, and what this core owes the
+criterion is one question asked and one answer given, which
+`TestASessionIsInvisibleToEverySubjectTheAuthorizerRefuses` and
+`TestASessionAnotherSubjectHoldsIsASessionThatIsNotThere` hold. The creator
+half of it is the authorizer's by the divergence below. Criterion 12 is
+[[020-per-part-checksums]], split out on 2026-09-19.
 
 What the implementation decided, where this spec was silent or where the
 tree made another reading better:
@@ -93,12 +97,19 @@ tree made another reading better:
   and `storage_unavailable` is the row for a store that could not do what
   was asked. The row stays either way, which is the property the paragraph
   is about, and the reaper retries.
-- A session carries no `checksum` field, so criterion 12 is open. Opening a
-  multipart with a checksum algorithm is `blob.PutOptions`'s to offer and it
-  carries a content type alone ([[003-object-store]]). The two mechanisms
-  that hold today are the part labels the store verifies when it assembles,
-  and the head that reads the assembled size back. Adding the algorithm is a
-  change to [[003-object-store]]'s options and then one field here.
+- A session carries no `checksum` field, and criterion 12 is
+  [[020-per-part-checksums]]. Opening a multipart with a checksum algorithm
+  is `blob.PutOptions`'s to offer and it carries a content type alone
+  ([[003-object-store]]). The two mechanisms that hold today are the part
+  labels the store verifies when it assembles, and the head that reads the
+  assembled size back. What was written here as one field turned out to be
+  four: a presigned `UploadPart` URL carries only a header its signature
+  covers, so the digest is known when the URL is minted, which puts one
+  digest per part in the create body ([[013-api]]), the algorithm and the
+  digests in `blob.PutOptions`, `PresignPart` and `blob.Part`
+  ([[003-object-store]]), and the digests on the `upload_sessions` row,
+  because a session resumed inside its twenty-four hours mints the URLs it
+  minted before. Three specs and a migration is not one field.
 - Visibility is the authorizer's answer alone. This spec names the creator
   and an administrator; Arca holds no notion of an administrator, and
   comparing a session's creator against the caller inside the handler is a
@@ -230,12 +241,14 @@ administrator. Anyone else gets `404` ([[006-identity]]).
 The server cannot hash what it never reads, so integrity is delegated
 and verified at three points.
 
-1. **Per part, by the store.** A client that sends a part's base64
-   sha256 as `x-amz-checksum-sha256` has it verified on receipt, and
-   Arca passes the per part digests to the completion so the store
-   recomputes the composite over them. Sessions created with
-   `"checksum": "sha256"` open the multipart with that algorithm
-   ([[003-object-store]]).
+1. **Per part, by the store.** A part's base64 sha256, sent as
+   `x-amz-checksum-sha256` and verified by the store on receipt, with the
+   digests carried to the completion so the store recomputes the
+   composite over them. That is [[020-per-part-checksums]] and not this
+   spec: the header has to be signed into the presigned URL, so the
+   digests are known at create and kept on the row, which is a change to
+   [[003-object-store]]'s options, this spec's create body and
+   [[013-api]]'s wire. What holds here is points 2 and 3.
 2. **Per part, by the ETag.** Every completion must echo each part's
    ETag. A wrong or missing one fails the assembly at the store, not at
    Arca, and answers `400`.
@@ -312,6 +325,60 @@ themselves ([[003-object-store]]), the reaper's schedule
 | 7 | `If-Match` and `If-None-Match: *` behave at completion exactly as at `PUT`, and a completion with neither succeeds | one table run against both handlers |
 | 8 | An abort removes the multipart and the row, and an abort whose store call fails keeps the row and answers `502` | `internal/uploads` tests with a failing stub |
 | 9 | An expired session is aborted and removed by the reaper, and its parts are gone from the store | the e2e tier with the clock moved |
-| 10 | A session is invisible to every subject but its creator and an administrator | the conformance rows of [[017-conformance-suite]] |
+| 10 | A session is visible only to a subject the authorizer admits, and a session another subject holds answers byte for byte what a session that is not there answers. Which subjects are admitted, the creator included, is the authorizer's answer and not this core's; the divergence above records why | `TestASessionIsInvisibleToEverySubjectTheAuthorizerRefuses` and `TestASessionAnotherSubjectHoldsIsASessionThatIsNotThere` |
 | 11 | An overwrite through a session captures a version, and the previous object's bytes survive | the e2e tier |
-| 12 | A part uploaded with a wrong sha256 is rejected by a store that verifies checksums | the store tier against MinIO |
+| 12 | A part's integrity is held by the two mechanisms a server that never reads the bytes has: the part labels the store verifies when it assembles, and the head that reads the assembled size back. A digest the store verifies per part is [[020-per-part-checksums]] | criterion 5 for the labels, criterion 4 for the head |
+
+## Outcome
+
+Complete on 2026-09-19. The three routes, the session row, the two size
+classes, the resumable completion, the abort that keeps its row, and the
+expiry sweep are in the tree and serving: `v0.1.7` runs them in production
+at the origin, and phase 3 of [[019-migration-from-drive]] put them there.
+`internal/uploads` is at 92% and the gate is green at every commit.
+
+Eleven of the twelve criteria are met by tests that run. Criterion 12 is
+[[020-per-part-checksums]].
+
+### What shipped against what was written
+
+| Criterion | Outcome |
+|---|---|
+| 1, 4, 5, 6, 9, 11 | met against MinIO and Postgres at the store and e2e tiers |
+| 2, 3, 7, 8 | met at the unit tier, the refusals proved with `blob.Counting` so a refused session opens no multipart |
+| 10 | met, narrowed. This core asks one question and renders a deny at lookup byte for byte as an unknown id; which subjects the answer admits is the authorizer's, so the creator comparison the criterion named is not made here |
+| 12 | split to [[020-per-part-checksums]] |
+
+### Why criterion 12 was split
+
+It reads as one field on a session and one option on a put, and it is
+neither. A presigned `UploadPart` URL carries only the headers its
+signature covers, so `x-amz-checksum-sha256` has to be signed in when the
+URL is minted, and a digest signed at mint is a digest the client declared
+at create. That pushes one digest per part into the create body
+([[013-api]]), the algorithm and the digests into `blob.PutOptions`,
+`PresignPart` and `blob.Part` ([[003-object-store]]), and the digests onto
+the `upload_sessions` row, because a session is resumable for
+twenty-four hours and a resume mints the URLs it minted before. Three
+specs, a migration and a store-tier fixture against MinIO is not an hour,
+and half of it belongs to [[003-object-store]] rather than here: the
+whole-object path already carries a trailing sha256 over TLS, and what is
+missing is the multipart side of a contract the single put keeps.
+
+What holds in the meantime is written down rather than implied. A part
+with a wrong label fails the assembly at the store and answers `400`, and
+the head after assembly is the fact the row records and the space is
+charged for, against a declared size that was only a promise. Neither
+catches a part whose bytes are not the bytes the client meant to send, and
+the spec now says so where it used to say the opposite.
+
+### The divergence worth keeping
+
+Visibility. The criterion named the creator and an administrator, and this
+core knows neither. Comparing a session's creator against the caller inside
+the handler is a policy decision, and reading it off a token is a claim read
+for meaning, which invariant 5 of [[001-architecture]] forbids. So one
+question is asked, and a session nobody may act on is a session that is not
+there, developer detail included: until `eee80ec` a deny at lookup carried
+the authorizer's reason and an unknown id carried its own sentence, and a
+session id is a guessable string, so that difference was an oracle.

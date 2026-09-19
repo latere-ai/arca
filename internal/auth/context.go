@@ -7,6 +7,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"sync/atomic"
 
 	"latere.ai/x/pkg/authz"
 )
@@ -18,6 +19,8 @@ import (
 type callerKey struct{}
 
 type requestKey struct{}
+
+type marksKey struct{}
 
 // WithCaller carries the verified caller. [Verifier.Middleware] sets it on
 // every request under /v1 that is not one of the three public link routes;
@@ -46,6 +49,50 @@ func WithRequest(ctx context.Context, info authz.Caller) context.Context {
 func RequestFrom(ctx context.Context) authz.Caller {
 	info, _ := ctx.Value(requestKey{}).(authz.Caller)
 	return info
+}
+
+// marks is what the decision path learned about one request and the log
+// reads back. Today it holds one fact, spec 012's: an allow this request
+// received on a space its caller neither owns nor holds a covering grant on.
+//
+// It is a holder on the context rather than a context value of its own
+// because the two ends are far apart and only one of them may know. What
+// makes an event administrative is a property of the answer, not of the
+// handler that acted on it, and a handler that carried the property along
+// would be a route that has to be told to record itself. A value cannot be
+// added to a context from inside a call, so the request carries the holder
+// and the decision writes into it.
+//
+// Nothing clears a mark. One administrative allow on a request is what the
+// request was, and a later question about the caller's own space does not
+// undo it.
+type marks struct{ administrative atomic.Bool }
+
+// WithMarks installs the record for one request. The API's first middleware
+// sets it on every route under /v1, before the verifier, so a question asked
+// anywhere on the request writes into the same record. A context with none
+// is a call outside a request, where nothing marks and nothing reads: the
+// reaper is the one that matters, and its events belong to no caller.
+func WithMarks(ctx context.Context) context.Context {
+	return context.WithValue(ctx, marksKey{}, &marks{})
+}
+
+// markAdministrative records one allow that neither ownership nor a grant
+// explains. It is unexported on purpose: the only caller is the decision
+// path below, and a handler that could set it is the thing this mechanism
+// exists to avoid.
+func markAdministrative(ctx context.Context) {
+	if m, ok := ctx.Value(marksKey{}).(*marks); ok {
+		m.administrative.Store(true)
+	}
+}
+
+// Administrative reports whether this request received such an allow, which
+// is what an event's detail carries as admin (spec 012). False outside a
+// request and false for every caller acting in its own space.
+func Administrative(ctx context.Context) bool {
+	m, ok := ctx.Value(marksKey{}).(*marks)
+	return ok && m.administrative.Load()
 }
 
 // RequestInfo reads what the authorizer learns about the request itself off

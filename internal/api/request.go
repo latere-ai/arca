@@ -54,7 +54,11 @@ func (a *API) requestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := a.identify(r)
 		w.Header().Set(Header, id)
-		ctx := auth.WithRequest(WithRequestID(r.Context(), id), auth.RequestInfo(r, id))
+		// The record the decision path writes into rides here too, on every
+		// route and before the verifier: it has to exist before the first
+		// question is asked, and a public link route asks questions like any
+		// other (spec 012).
+		ctx := auth.WithMarks(auth.WithRequest(WithRequestID(r.Context(), id), auth.RequestInfo(r, id)))
 		otel.SetAttributes(ctx, attribute.String("arca.request_id", id))
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
