@@ -1,6 +1,6 @@
 ---
 title: "Object store: the bucket contract, keys, integrity, presigned reads, multipart"
-status: testing
+status: complete
 track: core
 depends_on:
   - specs/001-architecture.md
@@ -8,7 +8,7 @@ depends_on:
 affects: [object/, internal/blob/, internal/config/, cmd/arcad/, .lateregate.yaml]
 effort: medium
 created: 2026-09-18
-updated: 2026-09-18
+updated: 2026-09-19
 author: changkun
 ---
 
@@ -47,11 +47,18 @@ Divergences from the design as drafted, each a decision rather than a gap:
 - `PutMultipart`, the server side part streamer, did not arrive. Its only
   caller is the workspace writeback of [[009-workspaces]], so it comes with
   that spec rather than as a method with no caller.
-- `blob.Options` carries two fields this spec does not name, `HTTPClient` and
-  `MaxAttempts`. Both are seams for a test: a client that trusts the
-  certificate of the endpoint it started, and one attempt so an injected
-  refusal is answered rather than waited on. Neither is configuration, and no
-  `ARCA_*` variable reaches either.
+- `blob.Options` carries five fields this spec does not name: `HTTPClient`,
+  `MaxAttempts`, `CopyLimit`, `CopyPartSize` and `PresignTTL`. Every one is a
+  seam for a test. `HTTPClient` is a client that trusts the certificate of
+  the endpoint a test started and `MaxAttempts` is one attempt, so an
+  injected refusal is answered rather than waited on. `CopyLimit` and
+  `CopyPartSize` lower the API's own maxima, so the range-by-range tail of
+  `Copy` runs against a real store on a small fixture rather than on a five
+  gibibyte one. `PresignTTL` shortens the life a signed download carries,
+  which criterion 6 needs: the refusal after an expiry cannot be proved
+  against a real store by waiting out the five minute constant, so a second
+  client signs for one second and the test outlives it. None of the five is
+  configuration, and no `ARCA_*` variable reaches any of them.
 - The degraded mode of criterion 4 is the client's half: a store that answers
   `NotImplemented` to the conditional create is retried once without it when
   the body can rewind, recorded on `S3.Unconditional`, and logged once per
@@ -374,3 +381,69 @@ lifecycle or replication configuration, which is the operator's
 | 10 | `AbortMultipart` on an already finished upload succeeds | the store tier |
 | 11 | `SetPublic` on a store without object ACLs returns `ErrNotSupported` and the read still answers | `internal/blob` test, plus [[005-files]]'s handler test |
 | 12 | `blob.Memory` and the MinIO client pass one shared table of behaviours | one test table run against both, in `internal/blob` |
+
+
+## Outcome
+
+Complete on 2026-09-19. The bucket is one package. `object/` holds the id,
+the key derivation, the planes and the checksum kinds; `internal/blob` holds
+the S3 client with `Memory` and `Counting` beside it; `internal/config`
+reads the eight variables; `arcad` runs the `bucket` readiness check.
+Nothing else in the tree builds a key, signs a URL, or speaks to the store.
+
+The headline change from the predecessor stands: a key is
+`<prefix><shard>/<object id>` and carries no path and no owner, so a move is
+one `UPDATE`, a superseded content stays addressable at its own key, and a
+failed write can be deleted without touching live bytes. Every consequence
+later specs rely on follows from that one decision.
+
+The last criterion to close was 6's expiry arm. `PresignGet` signs one key,
+one method and one life, and the first two were held against MinIO from the
+start; the third had no test, because the life a deployment signs is
+`PresignTTL`, five minutes, and no tier waits that out.
+`Options.PresignTTL` is the seam that exists for this criterion and for
+nothing else: a second client over the same bucket signs for one second,
+which is the shortest life the S3 API admits, and the test reads the URL
+once inside its life and once past it.
+
+Where each criterion is proved:
+
+| # | Proved by |
+|---|---|
+| 1 | `TestKeyPutsTheShardFromTheTailUnderThePrefix`, `TestParseKeyReadsBackTheIDAndRefusesTheRest`, and `FuzzKeyRoundTrip` |
+| 2 | `TestThePrefixGainsItsSlashAndRefusesAnythingElse` in `internal/config`, which names the variable in the refusal |
+| 3 | `TestStoreAConditionalCreateHoldsUnderARaceOfWriters` against MinIO, and the shared table of row 12 over `blob.Memory` |
+| 4 | `TestAStoreWithoutConditionalCreateRunsDegradedAndSaysSoOnce` and `TestAStreamedPutCannotBeRetriedWithoutTheCondition`, which is the client's half and the whole of what this spec owns; see the paragraph below |
+| 5 | `TestABodyCorruptedInFlightFailsThePutAndLeavesNoKey` over TLS against the in-process endpoint, where the store rejects the trailing digest, and `TestStoreABodyCorruptedInFlightFailsThePutAndLeavesNoKey` over plain HTTP against MinIO, where the ETag comparison catches it |
+| 6 | `TestStoreAPresignedReadIsOneKeyAndOneMethod` for the key and the method, and `TestStoreAPresignedReadIsRefusedAfterItsExpiry` for the expiry, both against MinIO |
+| 7 | `TestAReadThatFailsIsNotAMissingObject` and `TestEveryCallSurfacesTheStoresRefusal`, over a stub that answers an API error |
+| 8 | `TestManyKeysGoInOneCallPerThousand`, which counts the round trips at the endpoint and reads the per key failures back |
+| 9 | `TestStoreAListingPagesOnTheFlagAndNotOnAShortResult`, seeded past one page |
+| 10 | `TestStoreAnAbortOfAFinishedUploadSucceeds` |
+| 11 | `TestAStoreWithoutObjectACLsSaysSo`, with [[005-files]]' `TestAPublicObjectRedirectsToTheBaseThatCachesAndAHeadStillAnswersHeaders` for the read that still answers |
+| 12 | `TestMemoryHoldsTheTableEveryStoreHoldsTo`, `TestStoreOverPlainHTTPHoldsTheTableEveryStoreHoldsTo` and `TestStoreOverTLSHoldsTheTableEveryStoreHoldsTo` at the unit tier, and `TestStoreBlobHoldsTheTableEveryStoreHoldsTo` against MinIO: one table, four stores |
+
+Criterion 4 carries an obligation this spec does not own. The client half is
+proved above: a store that answers `NotImplemented` to the conditional
+create is retried once without it when the body can rewind, the run is
+recorded on `S3.Unconditional`, and the process logs it once. Naming that
+store on `arcad check` and on readiness is [[012-administration]]'s, which
+is where both are built, and that spec is open at `testing`; its `check`
+table carries no such row today, so the obligation is assigned there and
+owed there rather than already written. `S3.Unconditional` is the reading
+that spec's row will take, and nothing outside `internal/blob` calls it yet.
+
+Criterion 8 counts round trips at the endpoint rather than through
+`blob.Counting`: a wrapper over `Store` sees one call whatever the number of
+keys, and what the criterion is about is the calls the client makes to the
+store.
+
+One question stays open for the maintainer and does not block this spec:
+whether the store tier should run MinIO behind TLS, so both integrity
+mechanisms are exercised against a real store in one suite. Today the
+trailing digest is exercised over TLS against the in-process endpoint and
+the ETag comparison over plain HTTP against MinIO, and a body corrupted in
+flight is refused in both, which is what criterion 5 asks.
+
+`internal/blob` and `object` run green at the unit tier, and the store tier
+runs green with `make test-store`.
