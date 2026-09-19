@@ -68,10 +68,23 @@ type Decider interface {
 // Log.Append: an ordinary mutation has already happened when its event is
 // written, so a failed insert is a warning in the log and never a refusal to
 // the caller. It answers nothing for that reason.
+// Usage is the one read on this seam that answers no question about a write:
+// what the space holds right now, which a root listing reports beside its
+// page (spec 005). It is here rather than on a query set of its own because
+// the bytes are the ledger's number and nobody else's.
 type Ledger interface {
 	Charge(ctx context.Context, q store.Querier, owner string, delta int64, limit Limit) (int64, error)
 	Release(ctx context.Context, q store.Querier, owner string, bytes int64) (int64, error)
 	Append(ctx context.Context, q store.Querier, e Event)
+	Usage(ctx context.Context, q store.Querier, owner string) (Usage, error)
+}
+
+// Usage is what a space holds: the bytes the ledger of spec 010 counts and
+// the live paths under them. It is the shape of the `space` object of a root
+// listing, and a build whose ledger counts nothing answers zeroes.
+type Usage struct {
+	Bytes int64
+	Files int64
 }
 
 // Event is one row of the log. Action is a member of spec 010's closed
@@ -346,6 +359,10 @@ func (noLedger) Release(context.Context, store.Querier, string, int64) (int64, e
 }
 
 func (noLedger) Append(context.Context, store.Querier, Event) {}
+
+func (noLedger) Usage(context.Context, store.Querier, string) (Usage, error) {
+	return Usage{}, nil
+}
 
 // schemaReferences is the reference check over the schema, which reads every
 // table that holds an object id.

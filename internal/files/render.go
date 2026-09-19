@@ -65,9 +65,24 @@ type Starred struct {
 // common prefixes of spec 005 beside it, synthesised from the rows so a
 // browser can render a tree this server does not store.
 type Listing struct {
-	Entries    []Object `json:"entries"`
-	Prefixes   []string `json:"prefixes"`
-	NextCursor string   `json:"next_cursor,omitempty"`
+	Entries  []Object `json:"entries"`
+	Prefixes []string `json:"prefixes"`
+	// Space is what the whole space holds, present on a listing of a plane
+	// root and absent on every other. A caller listing the root of a space
+	// is asking what that space has, and the answer costs one query beside
+	// the page; deeper in the tree the number would answer a question nobody
+	// asked, because the ledger counts a space and not a subtree.
+	Space      *Space `json:"space,omitempty"`
+	NextCursor string `json:"next_cursor,omitempty"`
+}
+
+// Space is the usage of spec 010 as a root listing reports it: the bytes the
+// ledger counts and the live paths under them. It is the pair of numbers
+// spec 012's overview already carries per space, which is deliberate: an
+// owner and an administrator read one fact and not two.
+type Space struct {
+	Bytes int64 `json:"bytes"`
+	Files int64 `json:"files"`
 }
 
 // Manifest is what a materialize answers: one presigned URL per object of a

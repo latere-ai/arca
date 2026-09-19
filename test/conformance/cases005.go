@@ -51,6 +51,7 @@ func cases005() []testCase {
 			codes: []string{CodeNotFound}, run: case005Stars},
 		{name: "Materialize", group: GroupFiles, routes: append(append([]string{}, object...),
 			"GET /v1/files/materialize"), run: case005Materialize},
+		{name: "RootUsage", group: GroupUsage, routes: object, run: case005RootUsage},
 	}
 }
 
@@ -390,6 +391,48 @@ func case005Materialize(t *testing.T, s *session) {
 	for _, f := range list(m.json, "files") {
 		failIf(t, str(f, "url") == "", "a manifest entry carries no presigned url: %v", f)
 	}
+}
+
+// case005RootUsage: an owner reads what its own space holds off the root of
+// a plane, with no administrator's action and no route of its own. The
+// listing carries `space` beside `entries`, `bytes` from the usage ledger
+// and `files` from the live paths, and a listing below a root carries none,
+// because the ledger counts a space and not a subtree.
+//
+// The assertion is on the movement rather than on the totals. The space is
+// whatever the target already held, so what this fixes is that the numbers
+// are the space's and that a write the suite makes reaches them.
+func case005RootUsage(t *testing.T, s *session) {
+	owner := s.subject(t, Alice)
+	root := s.fileRoute(owner, "files") + "?list=1&limit=1"
+
+	before := expectStatus(t, s.call(t, Alice, http.MethodGet, root, ""), http.StatusOK)
+	held := obj(before.json, "space")
+	failIf(t, held == nil,
+		"a listing of the files plane root carries no space, and spec 005 puts the owner's usage there: %s", before.body)
+
+	const content = "the bytes this case puts\n"
+	path := s.filePath("root-usage/a.txt")
+	expectAWrite(t, s.put(t, Alice, path, content, "text/plain"))
+
+	after := expectStatus(t, s.call(t, Alice, http.MethodGet, root, ""), http.StatusOK)
+	grown := obj(after.json, "space")
+	failIf(t, grown == nil, "the second listing carries no space: %s", after.body)
+	failIf(t, num(grown, "bytes")-num(held, "bytes") < int64(len(content)),
+		"the space reported %d bytes and then %d after a write of %d, and the ledger counts what a write adds",
+		num(held, "bytes"), num(grown, "bytes"), len(content))
+	failIf(t, num(grown, "files")-num(held, "files") < 1,
+		"the space reported %d files and then %d after one write", num(held, "files"), num(grown, "files"))
+
+	// The same page is still the list envelope: a client that reads entries
+	// and next_cursor pages this route as it pages every other.
+	failIf(t, after.json["entries"] == nil, "the root listing answers a null entries: %s", after.body)
+
+	// A listing below the root carries none.
+	subtree := expectStatus(t, s.call(t, Alice, http.MethodGet,
+		s.fileRoute(owner, s.filePath("root-usage"))+"?list=1", ""), http.StatusOK)
+	failIf(t, subtree.json["space"] != nil,
+		"a listing below a plane root carries a space, and the ledger counts a space and not a subtree: %s", subtree.body)
 }
 
 // expectAWrite asserts a write of object bytes was taken: spec 013 answers

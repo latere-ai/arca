@@ -416,3 +416,13 @@ func (c *counted) Release(ctx context.Context, q store.Querier, owner string, by
 func (c *counted) Append(_ context.Context, _ store.Querier, e files.Event) {
 	c.memory.events = append(c.memory.events, e)
 }
+
+// Usage answers what the space holds. A session asks nothing of it; the
+// method is here because the seam spec 005's root listing reads is one
+// interface and this package binds the same one.
+func (c *counted) Usage(_ context.Context, _ store.Querier, owner string) (files.Usage, error) {
+	if c.refuse != nil {
+		return files.Usage{}, c.refuse
+	}
+	return files.Usage{Bytes: c.memory.usage[owner]}, nil
+}

@@ -9,7 +9,7 @@ depends_on:
 affects: [internal/files/, internal/api/, internal/store/, internal/config/, cmd/arcad/, test/e2e/]
 effort: large
 created: 2026-09-18
-updated: 2026-09-18
+updated: 2026-09-19
 author: changkun
 ---
 
@@ -285,6 +285,27 @@ render a tree Arca does not store.
 Trashed rows are absent. A cursor is a path, so a listing is stable
 under concurrent inserts and a caller can resume it tomorrow.
 
+A listing of a plane root, `GET /v1/files/{owner}/files?list=1` or the
+same for `workspaces`, carries `space` beside `entries`:
+
+```json
+{ "entries": [ … ], "prefixes": [ … ],
+  "space": {"bytes": 20481, "files": 3} }
+```
+
+`bytes` is the usage ledger of [[010-events-and-reaper]] and `files` the
+live paths of the space, trash excluded, which is the pair
+[[012-administration]]'s overview already reports per space. It is here
+because an owner asking what its own space holds should not need an
+administrator's action: the question is the `file.list` the listing
+already asks, the answer is about the space that question named, there
+is no new route and no new action. A listing deeper in the tree carries
+no `space`, because the ledger counts a space and not a subtree; a plane
+root is the one prefix that names a space rather than a subtree of one,
+which is why both plane roots answer the same pair. A counter that
+cannot be read is `storage_unavailable` and never a page reporting
+nothing, which a caller would read as an empty space.
+
 ### Move
 
 `POST` with `{"move_to": "<path>"}` changes a path and touches no
@@ -456,3 +477,4 @@ wire details of every route here ([[013-api]]).
 | 13 | A listing pages stably under concurrent inserts and synthesises directory prefixes | the store tier |
 | 14 | A row whose bytes are missing answers `500`, not `404` | handler test with `blob.Memory` emptied behind the row |
 | 15 | Every handler asks exactly one authorization question, with the action this spec names | the conformance rows of [[017-conformance-suite]] |
+| 16 | A listing of a plane root carries `space` with the ledger's bytes and the live paths, a listing below one carries none, and a counter that cannot be read is `storage_unavailable` | handler test over both planes; `test/conformance` `case005RootUsage` |

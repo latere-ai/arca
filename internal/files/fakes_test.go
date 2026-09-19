@@ -642,6 +642,23 @@ func (c *counted) Append(_ context.Context, _ store.Querier, e Event) {
 	c.memory.events = append(c.memory.events, e)
 }
 
+// Usage answers what the space holds the way the ledger over Postgres does:
+// the bytes off the counter and the live paths off the rows.
+func (c *counted) Usage(_ context.Context, _ store.Querier, owner string) (Usage, error) {
+	if c.refuse != nil {
+		return Usage{}, c.refuse
+	}
+	c.memory.mu.Lock()
+	defer c.memory.mu.Unlock()
+	held := Usage{Bytes: c.memory.usage[owner]}
+	for _, f := range c.memory.files {
+		if f.Owner == owner && f.DeletedAt == nil {
+			held.Files++
+		}
+	}
+	return held, nil
+}
+
 // actions answers the actions the log recorded, in order.
 func (m *memory) actions() []string {
 	var out []string

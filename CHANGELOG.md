@@ -19,6 +19,16 @@ refused before it is pushed.
   adds the `share.*` actions. The stub authorizer's new `-grants` flag is
   that row, for a deployment to check its own endpoint against.
 
+- An owner can read their own usage. A listing of a plane root, `GET
+  /v1/files/{owner}/files?list=1` or the same for `workspaces`, now
+  carries `space` beside `entries`: `{"bytes": N, "files": N}`, the bytes
+  the usage ledger counts and the live paths of the space, trash
+  excluded. It was only on `GET /v1/admin/overview` before, which takes
+  `space.admin`, so a console could not show a person what they hold
+  without an administrator's credential. There is no new route and no new
+  action: the question is the `file.list` the listing already asks. A
+  listing below a plane root carries no `space`.
+
 ## v0.1.1 - 2026-09-19
 
 The first release that publishes. `v0.1.0` was tagged with every note

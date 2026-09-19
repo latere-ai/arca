@@ -64,8 +64,26 @@ func (s *Service) list(w http.ResponseWriter, r *http.Request) {
 	for _, f := range page {
 		listing.Entries = append(listing.Entries, s.Render(f))
 	}
+	// A listing of a plane root reports what the space holds, so an owner
+	// reads its own usage without an administrator's action (spec 005). The
+	// question is the file.list already asked: the space is what that answer
+	// was about, and these are the counters of that space.
+	if root(t) {
+		usage, err := s.ledger.Usage(ctx, s.db.Querier(), t.Owner)
+		if err != nil {
+			api.WriteError(w, r, fault(ctx, "read what the space holds", err))
+			return
+		}
+		listing.Space = &Space{Bytes: usage.Bytes, Files: usage.Files}
+	}
 	write(w, http.StatusOK, listing)
 }
+
+// root reports whether a listing names a plane root, which is the whole of
+// what a root listing is: the path is a plane and nothing under it. Spec 005
+// admits a plane root as a prefix and refuses it as a path, so this is the
+// one listing that names a space rather than a subtree of one.
+func root(t Target) bool { return t.Path == string(t.Plane) }
 
 // materialize answers one space as a manifest of presigned URLs. It reads
 // one space and needs no lease, because there is no writer to exclude; the

@@ -85,6 +85,21 @@ type Space struct {
 	Bytes int64
 }
 
+// Usage is what one space holds, as its owner reads it off a root listing of
+// spec 005: the bytes the ledger counts and the live paths under them.
+//
+// Both are read from the tables that own them and neither is recomputed,
+// which is the rule spec 012's overview states. The ledger is the number a
+// platform bills; the sum over the rows is what the reconciliation pass
+// compares it against, and the two are allowed to differ until that pass
+// runs. Summing here would hide the drift the pass exists to report.
+type Usage struct {
+	// Bytes is the usage the ledger holds for the space.
+	Bytes int64
+	// Files is the live paths of the space, trash excluded.
+	Files int64
+}
+
 // Ledger counts the bytes a space holds.
 //
 // Every delta is applied inside the transaction of the write that moves the
@@ -104,6 +119,9 @@ type Ledger interface {
 	// Read answers what the ledger says the space holds. A space with no row
 	// holds nothing.
 	Read(ctx context.Context, q store.Querier, owner string) (int64, error)
+	// Usage answers the bytes and the live paths of one space, for the root
+	// listing of spec 005 an owner reads its own usage off.
+	Usage(ctx context.Context, q store.Querier, owner string) (Usage, error)
 	// Recompute sums the rows that hold the space's bytes, which is what the
 	// counter is checked against once per reaper run.
 	Recompute(ctx context.Context, q store.Querier, owner string) (int64, error)
@@ -195,6 +213,26 @@ func (ledger) Read(ctx context.Context, q store.Querier, owner string) (int64, e
 		return 0, fmt.Errorf("events: read the usage of %q: %w", owner, err)
 	}
 	return bytes, nil
+}
+
+// Usage answers the bytes and the live paths of one space, in one statement
+// and one round trip, so a listing that reports them costs one query beside
+// its page.
+//
+// The bytes are the ledger's row and the paths are counted off the rows,
+// which is the split of spec 012's overview: one number is billed and the
+// other is what the space looks like. A space with no ledger row holds
+// nothing, and one with no path counts none.
+func (ledger) Usage(ctx context.Context, q store.Querier, owner string) (Usage, error) {
+	var u Usage
+	err := q.QueryRow(ctx, `
+		SELECT COALESCE((SELECT bytes FROM space_usage WHERE owner = $1), 0),
+		       (SELECT COUNT(*) FROM files WHERE owner = $1 AND deleted_at IS NULL)`,
+		owner).Scan(&u.Bytes, &u.Files)
+	if err != nil {
+		return Usage{}, fmt.Errorf("events: read what %q holds: %w", owner, err)
+	}
+	return u, nil
 }
 
 // Recompute sums the rows that hold the space's bytes.
