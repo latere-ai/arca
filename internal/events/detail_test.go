@@ -8,7 +8,6 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"os"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -75,10 +74,7 @@ var reapKinds = []string{
 func TestEventDetailIsMetadataOnly(t *testing.T) {
 	root := moduleRoot(t)
 	built := map[string]bool{}
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return err
-		}
+	err := walkSources(root, func(path string) error {
 		file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
 		if err != nil {
 			return fmt.Errorf("read %s: %w", path, err)
