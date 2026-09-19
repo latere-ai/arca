@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
@@ -65,6 +66,14 @@ type Options struct {
 	// budget rather than on a five gibibyte fixture. Neither is
 	// configuration, and no ARCA_* variable reaches either.
 	CopyLimit, CopyPartSize int64
+	// PresignTTL is how long a signed download stays valid. Zero is
+	// PresignTTL, the constant spec 015 fixes, which is what a deployment
+	// runs. It is a seam for a test and nothing else: criterion 6 of spec
+	// 003 requires a presigned GET refused after its expiry, and a tier
+	// cannot wait five minutes for one, so it signs a second client's URL
+	// with a second's life and outlives it. It is not configuration, and no
+	// ARCA_* variable reaches it.
+	PresignTTL time.Duration
 }
 
 // S3 is the bucket over the S3 API.
@@ -91,6 +100,9 @@ type S3 struct {
 	// copyLimit and copyPartSize are what Copy branches on, resolved from
 	// the options once so the call site reads one field and not a default.
 	copyLimit, copyPartSize int64
+
+	// presignTTL is the life PresignGet signs, resolved the same way.
+	presignTTL time.Duration
 }
 
 // S3 is a Store.
@@ -140,7 +152,17 @@ func NewS3(ctx context.Context, o Options) (*S3, error) {
 		trailing:     !strings.HasPrefix(o.Endpoint, "http://"),
 		copyLimit:    orDefault(o.CopyLimit, DefaultCopyLimit),
 		copyPartSize: orDefault(o.CopyPartSize, DefaultCopyPartSize),
+		presignTTL:   orDefaultTTL(o.PresignTTL, PresignTTL),
 	}, nil
+}
+
+// orDefaultTTL reads a life an option left at zero as the constant it stands
+// for. It is orDefault over a duration, which that one's int64 cannot carry.
+func orDefaultTTL(value, fallback time.Duration) time.Duration {
+	if value > 0 {
+		return value
+	}
+	return fallback
 }
 
 // orDefault reads a bound an option left at zero as the default it stands for.
@@ -370,7 +392,7 @@ func (s *S3) PresignGet(ctx context.Context, key string, o PresignOptions) (stri
 	if o.Filename != "" {
 		input.ResponseContentDisposition = aws.String(fmt.Sprintf("attachment; filename=%q", o.Filename))
 	}
-	req, err := s.presign.PresignGetObject(ctx, input, s3.WithPresignExpires(PresignTTL))
+	req, err := s.presign.PresignGetObject(ctx, input, s3.WithPresignExpires(s.presignTTL))
 	if err != nil {
 		return "", fmt.Errorf("blob: presign %q: %w", key, err)
 	}

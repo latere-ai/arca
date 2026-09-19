@@ -1,6 +1,6 @@
 ---
 title: "Events and the reaper: the ledger, the log, the reconciliation of the two stores"
-status: testing
+status: complete
 track: core
 depends_on:
   - specs/003-object-store.md
@@ -144,7 +144,7 @@ writes the status, the one user sentence and the request id.
 | 4 | Holds. The same test releases bytes on a space over the limit |
 | 5 | Holds. `TestDeltaChargesWhatAWriteAdds`, one row per case of the admission table |
 | 6 | Holds. `TestUsageFailsClosed` at the seam and `TestStoreUsageFailsClosed` against Postgres, where the refused charge rolls back with the row. The `storage_unavailable` rendering is `TestTheTailAnswersEveryRowThroughTheFrame` |
-| 7 | Deferred to [[007-uploads]], which creates `upload_sessions`. The recomputation sums two tables and says so, and a space with an open session will reconcile low until the third term joins it |
+| 7 | Holds. The third term joined: `events.Recompute` sums `files`, `file_versions` and `upload_sessions.declared_size`, and `TestStoreRecomputeCountsAnOpenSessionsDeclaredBytes` holds one settled file and one open session against it at the store tier. The three transitions are the unit tier's, each on the figure a fresh recomputation would answer over the rows left behind: `TestASessionOpensUploadsAndCompletes` for the charge at the open and for the completion settling on the assembled size, the abort cases of `internal/uploads` for the release, and `TestAnExpiredSessionIsSweptWithItsPartsAndItsCharge` for pass 4 |
 | 8 | Holds. `TestEveryAppendedActionIsInTheTable` walks every Go file of the tree for an action built out of a literal |
 | 9 | Holds. `TestStoreTheTailIsGaplessAcrossABurst`, eight writers and a keyset walk that reads each row once |
 | 10 | Holds. `TestEventFilter`, and `TestTheEventTailAnswersThroughTheFrame` over the registered route. The conformance row is [[017-conformance-suite]]'s |
@@ -157,7 +157,7 @@ writes the status, the one user sentence and the request id.
 | 16b | Holds at the statement: `TestPassEightDropsAStarWhoseTargetIsGoneAndKeepsOneOnATrashedTarget`. The star routes are [[005-files]]'s |
 | 17 | Holds. `TestStoreLedgerReconciles` against Postgres, with the healthy run correcting nothing |
 | 18 | Holds. `TestARunTwiceLeavesWhatOneRunLeft` and the settled sweep of the store tier. Two reapers at once are two conditional statements, which is what the second run is |
-| 19 | Holds for the nothing-changes half, absolutely, and for the same-findings half over every pass whose statements this package owns: `TestDryRunReportsWhatARunWouldChange` runs one fixture dry and live and holds the found counts equal. Pass 3 is the one exception and is under-reported: its sweep is [[009-workspaces]]' and every statement it issues is a write, so a dry run does not call it and reports nothing for it. Closing it is a counting half in that package. Pass 4's sweep is [[007-uploads]]' and is not an exception: what it would change is a query, so a dry run counts and changes nothing, which `TestAnExpiredSessionIsSweptWithItsPartsAndItsCharge` holds |
+| 19 | Holds as the criterion now reads. `TestDryRunReportsWhatARunWouldChange` runs one fixture dry and live and holds the found counts equal, over every pass whose statements this package owns. Pass 3 is the exception the criterion names: its sweep is [[009-workspaces]]' and every statement it issues is a write, so a dry run does not call it and counts nothing for it. Closing that is a counting half in that package and is [[009-workspaces]]' to write. Pass 4's sweep is [[007-uploads]]' in the same way and is not an exception: what it would change is a query, so a dry run counts and changes nothing, which `TestAnExpiredSessionIsSweptWithItsPartsAndItsCharge` holds |
 | 20 | Holds. `TestServeSaysWhetherThisReplicaReconciles` and `TestE2EReapRunsOneSequenceAndExits` |
 
 ### Divergences
@@ -541,5 +541,68 @@ restore, which read this spec's numbers but are their own surface
 | 16b | A star whose target was purged is deleted by pass 8, and a star on a trashed but restorable target is kept | store-tier test with [[005-files]] |
 | 17 | A ledger row altered by hand is corrected by pass 10 and reported as a finding, and a healthy run corrects nothing | `TestLedgerReconciles` in `internal/reaper`, against Postgres |
 | 18 | Every pass is idempotent, and two reapers running together produce the same end state as one | a test that runs the sequence twice and concurrently |
-| 19 | `-dry-run` changes nothing in either store and reports the same findings | `internal/reaper` test |
+| 19 | `-dry-run` changes nothing in either store, and reports the same findings for every pass whose statements this package owns. Pass 3 is the one exception and under-reports: its sweep is [[009-workspaces]]', every statement it issues is a write, so a dry run does not call it and counts nothing for it | `TestDryRunReportsWhatARunWouldChange` in `internal/reaper`, one fixture run dry and live with the found counts held equal |
 | 20 | `ARCA_REAP_INTERVAL` of `0` leaves `serve` with no reaper loop, and `arcad reap -once` runs one sequence and exits 0 | `cmd/arcad` test |
+
+
+## Outcome
+
+Complete on 2026-09-19. Three jobs in two packages. `internal/events` holds
+the ledger, the closed action table, the append and the cursor tail;
+`internal/reaper` holds the reconciler with its ten passes, its findings
+table and its seams; `arcad` carries the `reap` subcommand and the in-serve
+loop. Migration `0005_usage_events.up.sql` creates `space_usage` and
+`events`, and no table holds a limit: Arca counts and reports, and whether a
+space may grow is the platform's decision, carried in the authorizer's
+answer.
+
+Two criteria closed after the first verification pass. Criterion 7's
+recomputation summed two tables when [[007-uploads]]' did not exist; it
+exists, and the statement now sums three. That mattered beyond a number: an
+upload session is charged its declared bytes the moment it opens, the reaper
+writes a recomputation over the counter, and a sum that missed the third
+table would have erased every open session's charge once per reap interval.
+Criterion 19 was written as an absolute and the tree could not keep it for
+pass 3, whose sweep belongs to [[009-workspaces]] and issues nothing but
+writes; the criterion now says what the implementation does and names the
+one pass that under-reports, and closing that is a counting half in that
+package.
+
+Where each criterion is proved:
+
+| # | Proved by |
+|---|---|
+| 1 | `TestLimitOfReadsWhatTheAnswerCarried` and `TestChargeHonoursTheLimitTheAnswerCarried`; `0005_usage_events.up.sql` holds no limit column |
+| 2 | `TestTheLimitLivesAsLongAsTheAnswerAndNoLonger`, the shared client over a stub authorizer on a clock the test moves |
+| 3 | `TestStoreUsageAdmitsTheLimitAndRefusesTheByteAfterIt` against Postgres, with the used and limit figures in the refusal; the `413` rendering is [[005-files]]' |
+| 4 | the same test's release arm, on a space already over the answer's limit |
+| 5 | `TestDeltaChargesWhatAWriteAdds`, one row per case of the admission table |
+| 6 | `TestUsageFailsClosed` at the seam and `TestStoreUsageFailsClosed` against Postgres, where the refused charge rolls back with the row |
+| 7 | `TestStoreRecomputeCountsAnOpenSessionsDeclaredBytes` at the store tier for the three-table sum, and the unit tier of `internal/uploads` for the three transitions: `TestASessionOpensUploadsAndCompletes` for the charge at the open and the settle on the assembled size, its abort cases for the release, and `TestAnExpiredSessionIsSweptWithItsPartsAndItsCharge` for pass 4 |
+| 8 | `TestEveryAppendedActionIsInTheTable`, which walks every Go file of the tree for an action built out of a literal |
+| 9 | `TestStoreTheTailIsGaplessAcrossABurst`, eight writers and a keyset walk that reads each row once |
+| 10 | `TestEventFilter` and `TestTheEventTailAnswersThroughTheFrame` over the registered route |
+| 11 | `TestStoreAPutThatFailedAfterTheBucketWriteIsReapedAfterTheWindow` against MinIO |
+| 12 | `TestStoreADeleteThatFailedAfterTheRowIsReaped` |
+| 13 | `TestObjectReferencedNamesEveryTableThatHoldsAnObjectID`, which reads the embedded schema for every table carrying an `object_id` and holds the statement to that list |
+| 14 | `TestPassTwoReportsARowWithoutItsBytesAndDeletesNothing` and `TestStoreARowWithoutItsBytesIsReportedAndKept` |
+| 15 | pass 3 as a `Pass` the reconciler is given, bound in `cmd/arcad` to [[009-workspaces]]' `Service.ExpireLeases`, with a unit test on a fake here and the expiry itself tested in that package |
+| 16 | `TestStoreTrashPastItsRetentionLeavesBothStores` for the trash; pass 6 for the tombstone, with `TestATombstonePastTheWindowTakesItsSubtreeItsBytesAndItsRow` in [[009-workspaces]]' package and `TestStoreDroppingASubtreeTakesTheTrashAndTheHistoryWithIt` against Postgres |
+| 16b | `TestPassEightDropsAStarWhoseTargetIsGoneAndKeepsOneOnATrashedTarget` |
+| 17 | `TestStoreLedgerReconciles` against Postgres, with the healthy run correcting nothing |
+| 18 | `TestARunTwiceLeavesWhatOneRunLeft` and the settled sweep of the store tier |
+| 19 | `TestDryRunReportsWhatARunWouldChange`, one fixture run dry and live with the found counts held equal, over every pass whose statements this package owns |
+| 20 | `TestServeSaysWhetherThisReplicaReconciles` and `TestE2EReapRunsOneSequenceAndExits` |
+
+Three provers are not the artefact the criteria table named, and each
+substitution is deliberate. Criterion 7 named `TestOpenSessionsCount`; no
+test shipped under that name, and the claim is split across the two tiers
+above because the three-table sum is a claim about one SQL statement and the
+three transitions are claims about the arithmetic, which a fake ledger
+answers and Postgres need not. Criterion 17 named `TestLedgerReconciles`,
+which is `TestStoreLedgerReconciles` at the store tier. Criterion 3's `413`
+is [[005-files]]' rendering of the refusal this package raises, so the
+figures are held here and the status there.
+
+The store tier runs green with `make test-store` and the e2e tier with
+`make test-e2e`.

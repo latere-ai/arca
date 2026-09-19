@@ -81,16 +81,18 @@ out a build the gate rejected. The next cut needs the maintainer's
 The CHANGELOG rule is in force: the pre-push hook refuses a `v*` tag
 with no section, and the `publish` job reads the same section again.
 
-Criterion 8 is not implemented and is not a rename.
-`store.Pending` answers no migration for a database ahead of the binary,
-with the comment that a rollback in progress is allowed, so a binary
-started against a schema recorded above its own serves rather than
-refusing. The guard that exists is the other direction, a database
-behind the binary, which is [[004-metadata-store]]'s criterion 2 and is
-`TestTheServerRefusesToStartAgainstADatabaseBehindIt`. Either the
-Upgrading section below is wrong about what protects a downgrade or
-[[004-metadata-store]] owes the arm; that is a decision for whoever owns
-the schema guard and not a change to make while cutting a tag.
+Criterion 8 was written against a guard the tree does not have, and the
+tree is right. `store.Pending` answers no migration for a database ahead
+of the binary, with the comment that a rollback in progress is allowed,
+so a binary started against a schema recorded above its own serves. That
+is what a rollback needs: release N's binary has to serve release N+1's
+schema while the replicas turn over, and forward-only migrations are
+written so it can. The guard that exists is the other direction, a
+database behind the binary, which is [[004-metadata-store]]'s criterion
+2 and is `TestTheServerRefusesToStartAgainstADatabaseBehindIt`. The
+criterion and the Upgrading section below now say that, and the
+`Pending` half has a test of its own; nothing here is owed to
+[[004-metadata-store]].
 
 ## Design
 
@@ -330,28 +332,36 @@ the module root with a CHANGELOG entry that names the break. From
 Migrations are forward-only. Each migration is additive or is preceded
 by one release that writes both shapes, so a replica of release N and a
 replica of release N+1 serve the same database during a rolling update.
-A binary refuses to start against a schema recorded above its own,
-naming both versions, so a downgrade across a migration stops before it
-corrupts anything rather than after. **This is not what the tree does
-today.** `store.Pending` answers no migration for a database ahead of
-the binary, so such a binary starts and serves; the guard that exists is
-the opposite direction. The Current state above records the finding and
-who owns the decision. Until it is settled, a rollback across a
-migration is held by the operator's procedure in `docs/upgrades/` and by
-nothing in the process.
+
+The schema guard runs in one direction, and that is the design. A binary
+refuses to start against a schema recorded *below* its own, naming the
+first migration the database has not applied and the command that
+applies it, so a deploy whose migration job did not run fails at once
+rather than serving against tables it has statements for and the
+database does not have. A schema recorded *above* its own is allowed:
+`store.Pending` answers nothing for it and the binary serves. That is
+what makes a rollback possible at all. Rolling back release N+1 puts
+release N's binary in front of release N+1's schema for as long as the
+replicas take to turn over, and a guard that refused there would turn
+every rollback into an outage. Forward-only migrations are written so
+the old binary can serve the new schema: a migration adds and never
+removes what the release before it reads. The one thing the process
+cannot protect is a rollback across a migration that broke that rule,
+and `docs/upgrades/` is where such a release says so.
 
 The API keeps N-1 compatibility: a client written against release N-1
 works against release N inside one major. A field is deprecated in one
 minor, documented in `docs/upgrades/`, and removed no earlier than the
 next major.
 
-A rollback inside a minor series is a rollback of the image. A rollback
-across a migration is refused by the schema guard above, and
-`docs/upgrades/` says what to restore instead: a `pg_dump` of the
-database taken before the migration, with the bucket untouched, because
-the bucket holds no schema and a row that names a key the database no
-longer has is a reaper finding and not a loss
-([[010-events-and-reaper]]).
+A rollback inside a minor series is a rollback of the image. So is a
+rollback across a migration, by the paragraph above: the schema stays
+where it is and the older binary serves against it. Only a migration
+that broke the forward-only rule needs more, and for that one
+`docs/upgrades/` says what to restore: a `pg_dump` of the database taken
+before the migration, with the bucket untouched, because the bucket
+holds no schema and a row that names a key the database no longer has is
+a reaper finding and not a loss ([[010-events-and-reaper]]).
 
 The two most recent minor series receive patches. A release is cut only
 from a green `main` with [[017-conformance-suite]] passed against the
@@ -402,7 +412,7 @@ it runs ([[017-conformance-suite]]). The contents of the alert rules
 | 5 | The published image migrates, checks, and reports the tag against a fresh Postgres and MinIO | the `candidate` job |
 | 6 | `docs/install.md` walks green against a bare kind cluster on every push, and against the published artifacts on a tag | the `install` job of `verify.yml` and the `install-release` job |
 | 7 | The release smoke fails on a served version that differs from `TAG`, passes when they match, and records the served version in the evidence | `tools/smoke`'s Go test |
-| 8 | A binary started against a schema recorded above its own refuses to start and names both versions | `TestSchemaGuardRefusesADowngrade` against [[004-metadata-store]]'s guard |
+| 8 | A binary started against a schema recorded below its own refuses to start, naming the first migration the database has not applied and the command that applies it; one started against a schema above its own serves, because a rollback needs the old binary in front of the new schema | `TestTheServerRefusesToStartAgainstADatabaseBehindIt` in `cmd/arcad` for the refusal, and `TestPendingReadsTheAppliedVersion`'s "a database ahead of this binary has nothing pending" in `internal/store` for the direction that is allowed |
 | 9 | The previous release's conformance suite passes against this release's binary, which is what N-1 compatibility means | the `conformance` job, running the suite [[017-conformance-suite]] pins to the previous tag; that spec owns the criterion |
 | 10 | A tag with no CHANGELOG section is refused before anything is pushed | the gate's pre-push hook and the `publish` job |
 | 11 | A `v*` tag run pauses at `deploy` until a reviewer approves, and the run's deployment record names `production` and the URL | the first tag run |

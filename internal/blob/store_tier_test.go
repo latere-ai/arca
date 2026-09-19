@@ -202,6 +202,52 @@ func TestStoreAPresignedReadIsOneKeyAndOneMethod(t *testing.T) {
 	}
 }
 
+// TestStoreAPresignedReadIsRefusedAfterItsExpiry is the third refusal of
+// criterion 6 of spec 003: the signature carries a life, and the store is
+// what enforces it.
+//
+// The life a deployment signs is PresignTTL, five minutes, which no test can
+// wait out. Options.PresignTTL is the seam that exists for this criterion: a
+// second client over the same bucket signs for one second, which is the
+// shortest life the S3 API admits, and the test outlives it. The ordinary
+// client wrote the key, so what expires is the signature and not the object.
+func TestStoreAPresignedReadIsRefusedAfterItsExpiry(t *testing.T) {
+	store, prefix := tier(t)
+	key := prefix + "expiring"
+	body := []byte("the bytes a stale redirect no longer points at")
+	if _, err := store.Put(t.Context(), key, bytes.NewReader(body), int64(len(body)), PutOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	brief, err := NewS3(t.Context(), Options{
+		Bucket:    envOr("E2E_S3_BUCKET", "arca-test"),
+		Endpoint:  os.Getenv("E2E_S3_ENDPOINT"),
+		Region:    "us-east-1",
+		AccessKey: envOr("E2E_S3_KEY", "minioadmin"),
+		SecretKey: envOr("E2E_S3_SECRET", "minioadmin"),
+		PathStyle: true, PresignTTL: time.Second,
+	})
+	if err != nil {
+		t.Fatalf("open the store: %v", err)
+	}
+	url, err := brief.PresignGet(t.Context(), key, PresignOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The URL is good while it lives, so what the second request reads is
+	// the expiry and not a signature the store never accepted.
+	if status, _, read := fetch(t, http.MethodGet, url); status != http.StatusOK || !bytes.Equal(read, body) {
+		t.Fatalf("the presigned read answered %d %q inside its life", status, read)
+	}
+	time.Sleep(2 * time.Second)
+	if status, _, read := fetch(t, http.MethodGet, url); status != http.StatusForbidden {
+		t.Fatalf("the presigned read answered %d %q past its life, want 403", status, read)
+	}
+	// The object itself is untouched: the ordinary client still reads it.
+	if _, _, err := store.Get(t.Context(), key); err != nil {
+		t.Fatalf("the expiry took the object with it: %v", err)
+	}
+}
+
 // fetch sends one request and answers the status, the headers, and the
 // body.
 func fetch(t *testing.T, method, url string) (int, http.Header, []byte) {

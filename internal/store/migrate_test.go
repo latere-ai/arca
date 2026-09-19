@@ -91,6 +91,26 @@ func TestPendingReadsTheAppliedVersion(t *testing.T) {
 			t.Fatalf("Pending = %v, %v", pending, err)
 		}
 	})
+	t.Run("a database ahead of this binary has nothing pending", func(t *testing.T) {
+		// A rollback in progress is allowed: the old binary has to serve
+		// against the new schema while the replicas turn over, and a
+		// forward-only migration is written so it can (spec 016). The guard
+		// that refuses is the other direction, a database behind the binary,
+		// which is spec 004's criterion 2.
+		files, err := migrationFiles()
+		if err != nil {
+			t.Fatal(err)
+		}
+		newest, err := versionOf(files[len(files)-1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		q := &fakeQuerier{row: values(newest+1, false)}
+		pending, err := Pending(t.Context(), q)
+		if err != nil || len(pending) != 0 {
+			t.Fatalf("Pending = %v, %v", pending, err)
+		}
+	})
 	t.Run("an empty version table has applied nothing", func(t *testing.T) {
 		q := &fakeQuerier{row: failing(pgx.ErrNoRows)}
 		if pending, err := Pending(t.Context(), q); err != nil || len(pending) == 0 {
