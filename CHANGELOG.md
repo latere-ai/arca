@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.1.5 - 2026-09-19
+
 - **The kind stack's arcad becomes ready.** Its overlay gave arcad an
   authorizer URL with a path the stub authorizer never served: the shared
   stub decides at its root, and the e2e harness hands arcad the bare
