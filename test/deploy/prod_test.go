@@ -198,6 +198,37 @@ func TestProdKeepsCredentialsInSecrets(t *testing.T) {
 	}
 }
 
+// TestProdServesPublicObjectsThroughTheCDN: the server the cutover replaces
+// redirected a public object to a CDN, and an installation that sets no base
+// answers the ordinary presigned redirect instead. Nothing fails when the
+// value is missing, which is why it is asserted: every public link that
+// already exists would quietly start resolving somewhere else.
+//
+// Only the server is checked. The reaper serves no redirect, so a value there
+// would be configuration nothing reads.
+func TestProdServesPublicObjectsThroughTheCDN(t *testing.T) {
+	found := false
+	for _, d := range read(t, "deploy/prod") {
+		if d.named() != "arcad" || d.kind() != "Deployment" {
+			continue
+		}
+		for _, c := range d.containers() {
+			for _, e := range c.items("env") {
+				if e.text("name") != "ARCA_PUBLIC_CDN_URL" {
+					continue
+				}
+				found = true
+				if got := e.text("value"); !strings.HasPrefix(got, "https://") {
+					t.Errorf("deploy/prod sets ARCA_PUBLIC_CDN_URL to %q, want an https base", got)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Error("deploy/prod sets no ARCA_PUBLIC_CDN_URL; a public object would stop redirecting to the CDN the replaced service used")
+	}
+}
+
 // TestProdIsDeclaredToTheGate proves the two entries that make the overlay
 // legal are both present. Either one alone is wrong: skip without overlays
 // stops the gate reading the addresses, so a document naming one is
@@ -244,6 +275,13 @@ func TestProdNamesOnlyAddressesTheFamilyAlreadyUses(t *testing.T) {
 		"api.latere.ai",
 		// platformd's internal Service, which no ingress names.
 		"platformd-internal.latere.svc.cluster.local",
+		// The bucket's CDN edge, which a public object redirects to. No
+		// manifest of the family serves it because DigitalOcean does: it is
+		// the Spaces CDN in front of the same bucket this installation
+		// reads, and it is the address the replaced service already
+		// redirected to, read from its live configuration rather than
+		// chosen here.
+		"cdn.latere.ai",
 	}
 	seen := map[string]bool{}
 	err := filepath.WalkDir(filepath.Join(root(t), "deploy/prod"), func(p string, e os.DirEntry, err error) error {

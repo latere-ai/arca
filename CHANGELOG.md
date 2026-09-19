@@ -6,6 +6,15 @@ refused before it is pushed.
 
 ## Unreleased
 
+- **A public object still redirects to the CDN after the cutover.** The
+  production overlay sets `ARCA_PUBLIC_CDN_URL`, which the service it
+  replaces served public objects from. An installation that leaves the
+  base empty answers the ordinary presigned redirect instead, and nothing
+  fails when it does, so every public link that already existed would have
+  quietly started resolving somewhere else. The value is not a credential
+  and sits beside the origin in the overlay rather than in a Secret; a
+  test fails the tree when it is absent.
+
 - A grantee is reachable under an external authorizer. Every question
   about a file, an upload session or a workspace now carries `grant`, the highest live grant
   the caller holds on a prefix of the resource's path, read from Arca's
