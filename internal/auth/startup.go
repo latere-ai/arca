@@ -39,7 +39,9 @@ type Options struct {
 	AdminSubjects   []string
 	// Grants and Links are the two tables the owner policy reads, which
 	// arrive with spec 008. Both nil is an installation that has issued
-	// neither, which is every installation until then.
+	// neither, which is every installation until then. Grants is read in
+	// either mode: it also fills the resource's grant, which an operator's
+	// endpoint reads a grantee by (spec 006).
 	Grants GrantLookup
 	Links  LinkResolver
 	// HTTP sends the discovery reads and the authorizer's calls. An
@@ -90,7 +92,7 @@ func Start(ctx context.Context, o Options) (*Identity, error) {
 		// ARCA_ADMIN_SUBJECTS is read here and read nowhere else; with an
 		// authorizer set it is read and unused, because an administrator is
 		// then whoever that endpoint says.
-		id.Authorizer = NewAuthorizer(&OwnerPolicy{Admins: o.AdminSubjects, Grants: o.Grants, Links: o.Links})
+		id.Authorizer = NewAuthorizer(&OwnerPolicy{Admins: o.AdminSubjects, Grants: o.Grants, Links: o.Links}).WithGrants(o.Grants)
 		id.Authorizer.decided = source(o.Decided, "owner_policy")
 		return id, nil
 	}
@@ -103,7 +105,7 @@ func Start(ctx context.Context, o Options) (*Identity, error) {
 	if err != nil {
 		return nil, err
 	}
-	id.Authorizer = NewAuthorizer(asking)
+	id.Authorizer = NewAuthorizer(asking).WithGrants(o.Grants)
 	id.Authorizer.decided = source(o.Decided, "authorizer")
 	id.Mode = ModeAuthorizer
 	return id, nil
