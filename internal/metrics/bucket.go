@@ -184,6 +184,18 @@ func (b *bucket) AbortMultipart(ctx context.Context, key, uploadID string) error
 	})
 }
 
+// Copy is the object move of spec 019. Spec 018's op vocabulary has no
+// member for it, and a value outside a closed vocabulary is not recorded, so
+// the call passes through with its span and no counter. It is a call a
+// migration makes and never one a request makes, so a series over it would
+// read as flat for the life of an installation.
+func (b *bucket) Copy(ctx context.Context, from, to string, o blob.PutOptions) (blob.Object, error) {
+	ctx, end := otel.Start(ctx, "bucket.copy")
+	obj, err := b.inner.Copy(ctx, from, to, o)
+	end(err)
+	return obj, err
+}
+
 // SetPublic is the object ACL. Spec 018's op vocabulary has no member for
 // it, and a value outside a closed vocabulary is not recorded, so the call
 // passes through with its span and no counter.

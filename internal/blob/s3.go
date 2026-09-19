@@ -57,6 +57,14 @@ type Options struct {
 	// runs; a test that injects a refusal sets one, so the refusal is
 	// answered once rather than waited on.
 	MaxAttempts int
+	// CopyLimit is the largest source Copy moves in one call, and
+	// CopyPartSize is the range one part of the tail above it carries. Zero
+	// is DefaultCopyLimit and DefaultCopyPartSize, the API's own maxima,
+	// which is what a deployment runs. Both are a seam for a test: a tier
+	// lowers them so the tail runs against a real store inside a test's time
+	// budget rather than on a five gibibyte fixture. Neither is
+	// configuration, and no ARCA_* variable reaches either.
+	CopyLimit, CopyPartSize int64
 }
 
 // S3 is the bucket over the S3 API.
@@ -79,6 +87,10 @@ type S3 struct {
 	// degraded mode spec 012's check reports and this client logs once.
 	unconditional atomic.Bool
 	warnOnce      sync.Once
+
+	// copyLimit and copyPartSize are what Copy branches on, resolved from
+	// the options once so the call site reads one field and not a default.
+	copyLimit, copyPartSize int64
 }
 
 // S3 is a Store.
@@ -121,12 +133,22 @@ func NewS3(ctx context.Context, o Options) (*S3, error) {
 		log = slog.Default()
 	}
 	return &S3{
-		client:   client,
-		presign:  s3.NewPresignClient(client),
-		bucket:   o.Bucket,
-		log:      log,
-		trailing: !strings.HasPrefix(o.Endpoint, "http://"),
+		client:       client,
+		presign:      s3.NewPresignClient(client),
+		bucket:       o.Bucket,
+		log:          log,
+		trailing:     !strings.HasPrefix(o.Endpoint, "http://"),
+		copyLimit:    orDefault(o.CopyLimit, DefaultCopyLimit),
+		copyPartSize: orDefault(o.CopyPartSize, DefaultCopyPartSize),
 	}, nil
+}
+
+// orDefault reads a bound an option left at zero as the default it stands for.
+func orDefault(value, fallback int64) int64 {
+	if value > 0 {
+		return value
+	}
+	return fallback
 }
 
 // Put writes the bytes under key and answers what the store holds.
@@ -263,12 +285,19 @@ func (s *S3) Get(ctx context.Context, key string) (io.ReadCloser, Object, error)
 
 // Head reads what the store holds about the key, without its body.
 func (s *S3) Head(ctx context.Context, key string) (Object, error) {
+	return s.head(ctx, "head", key)
+}
+
+// head is the read behind Head, with the operation the error names as an
+// argument: a Copy reads its source through it, and a caller of Copy that
+// meets ErrNotFound reads which key the store does not hold.
+func (s *S3) head(ctx context.Context, op, key string) (Object, error) {
 	out, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(key),
 	})
 	if err != nil {
-		return Object{}, classify("head", key, err)
+		return Object{}, classify(op, key, err)
 	}
 	return Object{
 		Size:        aws.ToInt64(out.ContentLength),

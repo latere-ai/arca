@@ -119,10 +119,13 @@ down:
 # tools/migrate-drive is here too. The row copy of spec 019 runs between two
 # databases and reaches no bucket, and where its rewrite rules are proved
 # against a fake, what Drive's schema and Arca's admit is proved only here.
+# tools/move-objects follows it: the object move runs the two commands of
+# step 3 of the cutover in order, against both services, which is the only
+# place the manifest that couples them is proved end to end.
 test-store: up
 	$(TIER_ENV) $(GO) test -tags=tiers -race -count=1 -run '^TestStore' \
 		./internal/blob/... ./internal/store/... ./internal/events/... ./internal/reaper/... \
-		./internal/files/... ./internal/uploads/... ./tools/migrate-drive/...
+		./internal/files/... ./internal/uploads/... ./tools/migrate-drive/... ./tools/move-objects/...
 
 # The e2e tier: arcad as a process against the stack and the stubs.
 test-e2e: up build build-stubs

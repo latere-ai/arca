@@ -5,7 +5,7 @@ track: core
 depends_on:
   - specs/001-architecture.md
   - specs/002-repository-scaffold.md
-affects: [internal/, cmd/arcad/, deploy/prod/, tools/migrate-drive/, specs/]
+affects: [internal/, cmd/arcad/, deploy/prod/, tools/migrate-drive/, tools/move-objects/, docs/, specs/]
 effort: xlarge
 created: 2026-09-18
 updated: 2026-09-19
@@ -43,7 +43,8 @@ until it is deleted.
 ## Current state
 
 Phases 0 through 8 are done: v0.1.0 is cut and the deck's specs are at
-`testing` or `complete`. Phase 9 has one part built and one part blocked.
+`testing` or `complete`. Phase 9's two commands are built and the
+cutover has not run.
 
 `tools/migrate-drive` is in the tree on 2026-09-19, the row copy step 3
 of the cutover names. It reads Drive's database, applies every rewrite
@@ -55,13 +56,17 @@ which runs the tool between two Postgres databases in the store tier of
 [[014-test-stubs-and-tiers]] (`make test-store`). The operator's
 procedure is the "Migrating from Drive" section of `docs/operations.md`.
 
-Building it found one thing this spec had wrong, and criterion 4 is
-blocked on it. **Drive's bucket keys are not derivable from an id**, so
-the bytes row of "The data" below does not hold and the cutover needs an
-object move it does not yet plan. The finding is written into that row.
-Nothing about it changes the row copy, which is complete and verified on
-its own terms; what it changes is that the routes cannot switch on the
-copy's report alone.
+Building it found one thing this spec had wrong. **Drive's bucket keys
+are not derivable from an id**, so the bytes row of "The data" below did
+not hold and the cutover needs an object move the spec did not plan. The
+finding is written into that row, and `tools/move-objects` is the answer
+to it, in the tree on 2026-09-19: it reads the manifest `migrate-drive
+-manifest` writes and copies each object to its id's key, server side,
+inside one bucket. Criterion 4 is two criteria now, the rows and the
+bytes, and `TestStoreTheTwoCommandsOfStepThreeLeaveEveryByteAtItsObjectIDsKey`
+in `tools/move-objects/store_tier_test.go` runs both commands in order
+against Postgres and MinIO. The operator's procedure for both is the
+"Migrating from Drive" section of `docs/operations.md`.
 
 ## Design
 
@@ -109,10 +114,10 @@ metadata in one Postgres database. Neither is copied.
 
 | Store | Cutover |
 |---|---|
-| bytes | **blocked, found 2026-09-19.** This row said none: deploy Arca with `ARCA_BUCKET_PREFIX=drive/` against the same bucket, because a key derives from an id and the ids do not change. It does not hold. Drive derives a key from the owner and the path, `drive/{owner}/{path}` with a random suffix on a versioned write (`space.storageKey` in `drive/internal/handler/handler.go`), and Arca derives one from an object id, `<prefix><shard>/<id>` ([[003-object-store]], whose own arrival table already names the divergence). A Drive key holds no id to keep, so `object.ParseKey("drive/", "drive/u-…/files/x")` is an error and `migrate-drive` mints a fresh object id per distinct key it reads. `TestADriveKeyHoldsNoObjectIDToKeep` holds the two shapes to that. Invariant 8 of [[001-architecture]] is what the copy has to satisfy and not what makes it free: satisfying it costs an object move, one bucket write per distinct key, from Drive's key to `<prefix><shard>/<id>`. That move is not designed here, and until it is, criterion 4 cannot be proved and the routes of step 4 cannot switch. Decision 2 below, that the prefix stays `drive/`, survives the finding: the prefix is still configuration, and it is the keys under it that have to move |
-| metadata | Arca owns a fresh database. `tools/migrate-drive` copies every table in one transaction per table with one rewrite: the owner columns `u-<id>` become `<issuer>|<id>` and `o-<id>` become the subject the platform's identity provider assigns that organization, read from a mapping the platform exports as JSON or CSV. The tool is idempotent, verifies row counts and a sample of checksums, and refuses to run against a database that already holds rows. Built and in the tree on 2026-09-19; the operator's procedure is `docs/operations.md`. It also refuses, before any write, an organization no mapping names, a path in a plane this spec gives no rule for, two workspaces that collide once the kind is dropped, and a key outside the prefix |
+| bytes | **one copy per key, found 2026-09-19 and built the same day.** This row said none: deploy Arca with `ARCA_BUCKET_PREFIX=drive/` against the same bucket, because a key derives from an id and the ids do not change. It does not hold. Drive derives a key from the owner and the path, `drive/{owner}/{path}` with a random suffix on a versioned write (`space.storageKey` in `drive/internal/handler/handler.go`), and Arca derives one from an object id, `<prefix><shard>/<id>` ([[003-object-store]], whose own arrival table already names the divergence). A Drive key holds no id to keep, so `object.ParseKey("drive/", "drive/u-…/files/x")` is an error and `migrate-drive` mints a fresh object id per distinct key it reads. `TestADriveKeyHoldsNoObjectIDToKeep` holds the two shapes to that. Invariant 8 of [[001-architecture]] is what the copy has to satisfy and not what makes it free: satisfying it costs an object move, one bucket copy per distinct key, from Drive's key to `<prefix><shard>/<id>`. The tool is `tools/move-objects`, designed in "The object move" below and in the tree on 2026-09-19; it reads the manifest `migrate-drive -manifest` writes and is step 3's second command. Decision 2 below, that the prefix stays `drive/`, survives the finding: the prefix is still configuration, and it is the keys under it that have to move |
+| metadata | Arca owns a fresh database. `tools/migrate-drive` copies every table in one transaction per table with one rewrite: the owner columns `u-<id>` become `<issuer>|<id>` and `o-<id>` become the subject the platform's identity provider assigns that organization, read from a mapping the platform exports as JSON or CSV, or derived as `authz.Subject(<-org-issuer>, <id>)` where the platform follows that rule rather than assigning a subject per organization, which is a flag and not a file. The two are alternatives and naming both is a command line to correct. The tool is idempotent, verifies row counts and a sample of checksums, and refuses to run against a database that already holds rows. Built and in the tree on 2026-09-19; the operator's procedure is `docs/operations.md`. It also refuses, before any write, an organization neither a mapping nor an organization issuer names, a path in a plane this spec gives no rule for, two workspaces that collide once the kind is dropped, and a key outside the prefix |
 | the ledger | copied as is. The event enum is **not** a superset, found 2026-09-19: `internal/events` names eleven actions and Drive's `CHECK` named thirteen, and the two Drive has that Arca does not are `share_resolved` and `quota_exceeded`, both belonging to features this spec removes. Arca's schema carries no `CHECK` on the column, so the rows copy and read; what they do not do is pass `events.Action.Valid`, which only an append checks. `migrate-drive` counts them under "actions outside Arca's vocabulary" rather than rewriting them, because which action they become, if any, is the maintainer's call. `attach`, `sync` and `release` rows from the withdrawn sandbox auto-mount are history, not a reason to keep the mount |
-| what is removed | the tool does not copy the `quotas`, `webhooks`, `agent_visibility` and `admin_audit` tables, drops the workspace kind and `agent_access` and rewrites the `repos/<name>/` plane to `workspaces/<name>/`, and drops grants whose grantee is a role, a team or an email address, reporting each dropped row count. Share requests are not a table of Drive's: they are the `pending` and `denied` statuses of the `shares` table, and the tool drops and counts those under that name. Two drops this row did not name and the tool found it had to make: a link or public grant above `read`, which the `shares_token_is_read_only` constraint of [[008-shares-and-links]] refuses and which the tool will not silently downgrade; and `memory/`, which folds to `files/memory/` per "what is removed" below. A path in any plane with no rule here, `agents/` among them, refuses the run rather than landing a row no route can reach |
+| what is removed | the tool does not copy the `quotas`, `webhooks`, `agent_visibility` and `admin_audit` tables, drops the workspace kind and `agent_access` and rewrites the `repos/<name>/` plane to `workspaces/<name>/`, and drops grants whose grantee is a role, a team or an email address, reporting each dropped row count. Share requests are not a table of Drive's: they are the `pending` and `denied` statuses of the `shares` table, and the tool drops and counts those under that name. Two drops this row did not name and the tool found it had to make: a link or public grant above `read`, which the `shares_token_is_read_only` constraint of [[008-shares-and-links]] refuses and which the tool will not silently downgrade; and `memory/`, which folds to `files/memory/` per "what is removed" below. `agents/` folds to `files/agents/` in the space it was already in, counted as `agents_folded`, which is the maintainer's decision of 2026-09-19 and the zones row of "what is removed" below; the objects do not move for the fold, because a key derives from an object id and carries no path. A path in any plane with no rule here refuses the run rather than landing a row no route can reach |
 
 The cutover itself:
 
@@ -126,12 +131,21 @@ The cutover itself:
    report is read, not skimmed: it names every dropped row, and it names
    the bytes finding on every run.
 
-   - The objects move to their new keys. `tools/migrate-drive` writes,
-     beside its report, a manifest of every distinct Drive key it read
-     and the object id it minted for it; `tools/move-objects`, proposed
-     below and not built, reads that manifest and copies each object to
-     its id's key. Step 4 does not begin until the move's own
-     verification holds and criterion 4 is proved.
+   - The objects move to their new keys, in the second command of the
+     step:
+
+     ```sh
+     go run ./tools/migrate-drive -source … -target … -issuer … \
+       -org-subjects orgs.json -manifest manifest.tsv
+     go run ./tools/move-objects -manifest manifest.tsv \
+       -bucket … -endpoint … -region … -prefix drive/
+     ```
+
+     The first writes the manifest of every distinct Drive key it read
+     and the object id it minted for it, and completes it only when its
+     verification holds; the second reads that manifest and copies each
+     object to its id's key. Step 4 does not begin until the move's
+     report is clean and both halves of criterion 4 are proved.
 4. The origin's routes for the storage prefixes switch from Drive's
    service to Arca's. The console's Storage section, which calls the
    origin, follows without a change. Drive's own host answers a redirect
@@ -142,10 +156,11 @@ The cutover itself:
    the origin with a narrowed personal key, refused a write with reason
    `grant`.
 
-### The object move, proposed 2026-09-19
+### The object move
 
-> For the maintainer's review before it is built. The row copy is done;
-> this is the half the bytes finding added.
+Decided by the maintainer on 2026-09-19 and built the same day: one
+server-side copy of every object at the cutover, the source keys deleted
+at the sunset, and Arca's id-derived keys unchanged.
 
 Drive's key is `drive/<owner>/<path>`, with `@<12 hex>` appended on a
 versioned write; Arca's is `<prefix><shard>/<id>`. Every row the copy
@@ -157,23 +172,32 @@ network twice and the cost is one request per distinct key.
 
 | Piece | Design |
 |---|---|
-| the manifest | `migrate-drive` gains `-manifest <path>`: one line per distinct source key, `<drive key>\t<object id>\t<size>\t<checksum>`, written before the tables commit and complete only when the report says verified. It is the one artefact that ties a row to a byte, and the move refuses to run without it |
-| `tools/move-objects` | reads the manifest, and for each line issues `CopyObject` from the source key to `id.Key(prefix)` with `If-None-Match: *` on the destination, then `Head`s the destination and compares size and checksum to the line. Idempotent: a destination that exists with the right size and checksum is a skip, so a killed run resumes. Concurrency bounded by a flag, default 16. A dry run `Head`s every source and writes nothing. Exit 1 on any mismatch, naming the key |
-| `blob.Blob` | gains `Copy(ctx, from, to string, o PutOptions) (Object, error)` with the S3 call, the fake, and the counter; one interface method, tested in the store tier against MinIO |
-| the source keys | left in place until the sunset. The move never deletes; the reaper does not read `drive/<owner>/` keys because they carry no id (`object.ParseKey` refuses them), so they are invisible to the sweep and to Arca. Step 4 of the sunset deletes them by listing the prefix and skipping every key the manifest maps, after criterion 4 has held for the smoke |
-| public objects | Drive stamped `public-read` on the source key; `CopyObject` does not carry an ACL, so the move re-stamps the destination through `SetPublic` for every row the copy marked public |
-| the multipart tail | a Drive object above 5 GiB cannot be copied in one `CopyObject`; the move uses `UploadPartCopy` for those, which the SDK offers. At Drive's current sizes this branch is expected to run zero times; it is written and tested against MinIO so the number is not a guess |
+| the manifest | `migrate-drive -manifest <path>`: one line per distinct source key, tab separated, `<drive key>\t<object id>\t<size>\t<checksum>\t<public>`, under a header naming the format, its version and the bucket prefix, and closed by a `#complete <count>` trailer. The ids are minted in the preflight, so the body is written before the first table commits and every id the copy hands out is one the file already names; the trailer is appended only when the verification holds, and the move refuses a file without it. A dry run writes none: it commits nothing for a manifest to be the record of. One key two rows describe differently takes the live file's size and checksum, and the disagreement is counted; a key with no object behind it, which is an open upload's destination, is counted and left off, because its parts are invisible to a listing until the upload completes. The format is `tools/internal/manifest`, read by the copy that writes it and the move that consumes it and by nothing that serves a request |
+| `tools/move-objects` | reads the manifest and, for each line, `Head`s `id.Key(prefix)` first, because the store the family runs neither honours the conditional copy nor refuses it. A destination already holding the line's size and checksum is a skip, so a killed run resumes and a finished run repeats; one holding other bytes is a mismatch and is never overwritten. Otherwise it copies and `Head`s the destination back. What it verifies is what a store can answer: the size always, and the checksum where the line carries a label a store reports, which a sha256 the predecessor computed and a composite label are not; those keys are counted and named as verified on size alone rather than passed off as checked. Flags `-manifest`, `-bucket`, `-endpoint`, `-region`, `-prefix`, `-path-style`, `-concurrency` (16), `-dry-run`; the credentials come from `ARCA_BUCKET_ACCESS_KEY` and `ARCA_BUCKET_SECRET_KEY`, so no secret reaches a command line. A dry run reads both ends of every line and writes nothing. The report counts copied, skipped, mismatched and failed and names every key of the last two; exit 0 clean, 1 on any mismatch, failure or refusal, 2 on a flag, which is what `migrate-drive` exits |
+| `blob.Store` | gains `Copy(ctx, from, to string, o PutOptions) (Object, error)` with the S3 call, the map, the counter and the metrics decorator; one interface method, tested in the store tier against MinIO. It reads the source once for its size and its media type, so a copy is two round trips and not one |
+| the source keys | left in place until the sunset. The move never deletes; the reaper does not read `drive/<owner>/` keys because they carry no id (`object.ParseKey` refuses them), so they are invisible to the sweep and to Arca. Step 4 of the sunset deletes them by the manifest that named them, after criterion 4b has held and the smoke of step 5 with it |
+| public objects | Drive stamped `public-read` on the source key; `CopyObject` does not carry an ACL, so the move re-stamps the destination through `SetPublic` for every line the copy marked public. A store that holds no object ACLs and serves publicity through a bucket policy answers `ErrNotSupported`, which spec 003 has a caller carry on from, so the move counts it rather than failing the key |
+| the multipart tail | a Drive object above 5 GiB cannot be copied in one `CopyObject`; the move uses `UploadPartCopy` for those, under the same conditional on the completion, and aborts the upload on any failure, because copied parts carry no session row for a sweep to find. At Drive's current sizes this branch is expected to run zero times. The two bounds it branches at are options rather than constants, so the store tier reaches it on a twelve mebibyte fixture rather than a five gibibyte one; neither is configuration and no `ARCA_*` variable reaches either |
 | order | copy rows (step 3) with the manifest, run the move, verify, then switch routes. The rows point at ids from the moment they are written, so nothing reads Arca before the move completes; Drive is read-only throughout, so the source keys do not change under the copy |
 
-Criterion 4 splits into its two halves: the rows (the copy's report) and
-the bytes (the move's verification, every manifest line `Head`ed at its
-destination with the right size and checksum). Both are recorded in the
-Outcome with their dates.
+Criterion 4 splits into its two halves, the rows and the bytes, and the
+table below carries them as two rows with what proves each.
 
-What this costs: one request per distinct key, minutes to an hour at the
-counts a `-dry-run` will print from production. What it avoids: teaching
-Arca to read two key shapes, which would put Drive's owner-and-path
-addressing into the core forever.
+What this costs: at most four requests per distinct key, a read of the
+destination, a read of the source, the copy, and a read of the
+destination back, minutes to an hour at the counts a `-dry-run` will
+print from production. What it avoids: teaching Arca to read two key
+shapes, which would put Drive's owner-and-path addressing into the core
+forever.
+
+One finding the build made, recorded here because the move rests on it:
+**the MinIO the stack pins neither honours `If-None-Match: *` on a
+`CopyObject` nor refuses it, it overwrites**, where it does honour the
+same condition on the completion of a copied tail. So the guard is not
+what makes the move idempotent on every store, and the move reads its
+destination before it copies instead. `TestStoreTheConditionalCopyIsNotHonouredByEveryStore`
+in `internal/blob/store_tier_test.go` holds the store to whichever of the
+three answers it gives.
 
 There is no window in which both serve writes, so there is nothing to
 reconcile afterwards, and no window in which either serves stale reads.
@@ -216,8 +240,17 @@ The same day, once the smoke of step 5 holds:
    banner and a pointer to Arca; the console keeps calling the section
    Storage.
 4. Drive's database is dropped. The row copy is verified before the
-   routes switch (criterion 4), and the bucket, which holds every byte,
+   routes switch (criterion 4a), and the bucket, which holds every byte,
    is untouched, so there is nothing a retained database would recover.
+5. The source keys of the manifest are deleted. The move never deletes,
+   so every `drive/<owner>/<path>` key the copy read is still in the
+   bucket, holding a second copy of bytes that are now readable at their
+   object id's key. The manifest is the list: its first field is every
+   key to delete, and no other key in the bucket is touched, which is
+   what makes this safe to run against a bucket Arca is already serving
+   from. It runs only after the smoke of step 5 holds, so a byte the
+   move got wrong is still at its source key until a person has read one
+   through the origin.
 
 ### What is removed, and why
 
@@ -235,7 +268,7 @@ already retired or moved before Arca existed.
 |---|---|---|---|
 | a stored quota per space, `PUT /v1/quotas/{owner}`, the `quotas` table, `ARCA_DEFAULT_QUOTA_BYTES`, `quota.read` and `quota.write` | a free tier on a service that decided access itself, 2026-07 | a limit is a plan, and a plan is the platform's. A core that also holds a limit is a second decision-maker | Arca keeps counting: bytes per space in the ledger, on the admin overview and in the authorizer question. When the authorizer's answer carries `limits.quota_bytes`, Arca refuses a write past it for the answer's ttl, one comparison on a field the family contract already has ([[010-events-and-reaper]]) |
 | outbound webhooks: `/v1/webhooks`, the `webhooks` table and its delivery lease, `ARCA_WEBHOOK_SIGNING_KEY`, four `webhook.*` actions, the delivery worker, the sink stub | "events leave the building", spec DR-19, 2026-08 | no consumer exists and none is planned. A delivery system with leases, retries, retirement and signing is a service of its own for nobody | the event log stays and is tailed by cursor with `event.read`; a consumer that needs push subscribes to the log from its own side. Spec number 011 is retired unused |
-| provenance zones: the human-only `files/` and agent-only `agents/` split, and the rule that a machine may not write where a person curates | a founder requirement of 2026-07-11, spec DR-14 | the rule was decided from `principal_type`, a claim read for meaning, which invariant 5 forbids; and the separation was never used | one rule in the platform's authorizer over subject, plane and path; the question already carries all three |
+| provenance zones: the human-only `files/` and agent-only `agents/` split, and the rule that a machine may not write where a person curates | a founder requirement of 2026-07-11, spec DR-14 | the rule was decided from `principal_type`, a claim read for meaning, which invariant 5 forbids; and the separation was never used | one rule in the platform's authorizer over subject, plane and path; the question already carries all three. The rows land under `files/agents/` in the space they were already in, which the maintainer decided on 2026-09-19: with the rule gone they are files like any other file, under a prefix that says who wrote them. `migrate-drive` rewrites them and counts each one as `agents_folded`, because a path that was invisible to the space's owner is now in their own plane |
 | the `repos/` plane, workspace `kind: repo`, the Repos tab of the console's Storage section | Drive as the checkout of a repository whose history lived on Origo, spec DR-26 | Origo is the repository service and the console gets its own Repos section over it; a checked-out tree a sandbox needs is a workspace or the sandbox's own disk | none in Arca. `tools/migrate-drive` rewrites the `repos/<name>/` slugs to `workspaces/<name>/` and drops the kind |
 | the `memory/` plane as a plane of its own | agent memory files with ETag conditional writes, spec 000 | conditional writes are a files feature; a plane that differs from `files/` only in its name is a convention, not a design | `memory/` stays a prefix under `files/` that agents use by convention; `If-Match` and `If-None-Match` work on every object |
 | the admin surface beyond an overview and restore: per-space file and share listings for administrators, the moderation delete route | operator governance of a hosted product, spec DR-09 | an administrator reads a space through the same routes as its owner, with `space.admin` answered by the authorizer; a moderation delete is `DELETE /v1/files/...` on a space the caller does not own; audit rows are the event log | the overview and cross-space restore stay in [[012-administration]] |
@@ -322,7 +355,8 @@ limit variables join the configuration table
 | 1 | Every spec of the deck at `complete` names in its Outcome the Drive files it inherited and the commit that brought each | the Outcomes, read by a test in `tools/specindex` |
 | 2 | No file in this repository carries a line copied from Drive without the licence notice and without a spec that names it | the `license` gate and criterion 1 |
 | 3 | `tools/migrate-drive` is idempotent, refuses a non-empty target, rewrites every owner column, and verifies counts and checksums | **Holds, 2026-09-19.** `TestStoreMigrateDrive*` in `tools/migrate-drive/store_tier_test.go`, run by `make test-store` against two Postgres databases the tier creates: one holds Drive's schema from `testdata/drive_schema.sql` and the fixture, one holds Arca's migrations. The four cases are the copy of every table, the refusal of a second run, the dry run that leaves the target empty, and the refusal of a missing mapping. The rewrite rules and the dependency order are proved against a fake in the unit tier beside it |
-| 4 | After the copy, every object Drive listed is listed by Arca under the same path with the same version history, and every byte reads through Arca with the same checksum | **Blocked, 2026-09-19.** The row half holds: the copy's report verifies the counts and a sample of checksums, and the store tier proves the paths and the version history arrive. The byte half cannot be proved by this tool, because Drive's keys are not derivable from an id and the bytes are not at the keys the copied rows name. See the bytes row of "The data". The criterion holds once the object move is designed, built and run, and the routes of step 4 do not switch before it |
+| 4a | The rows. After the copy, every object Drive listed is listed by Arca under the same path with the same version history | **Holds, 2026-09-19.** The copy's report verifies the counts and a sample of checksums, and `TestStoreMigrateDriveCopiesEveryTableSpec019Names` in `tools/migrate-drive/store_tier_test.go` proves the paths and the version history arrive against Drive's schema and Arca's |
+| 4b | The bytes. After the move, every byte reads through Arca at the key its object id derives, with the size and, where a store reports one, the label the rows carry | **Holds in the tier, 2026-09-19; run in production at the cutover.** `TestStoreTheTwoCommandsOfStepThreeLeaveEveryByteAtItsObjectIDsKey` in `tools/move-objects/store_tier_test.go` seeds Drive-shaped keys into MinIO, runs the row copy with `-manifest`, runs the move, and reads every object back through the id-derived key with the bytes its source key held, including a key with a character outside a path's alphabet and a public one; a second move skips every key, which is the resume. The move's own report is what records the production run, and what an operator reads before step 4. Both halves are recorded in the Outcome with their dates |
 | 5 | Drive refuses every write during the copy | Drive's read-only flag and its test, in Drive's repository |
 | 6 | The origin routes the storage prefixes to Arca and nothing routes to Drive | the origin's route table and the release smoke |
 | 7 | Every consumer in the table above is repointed by a commit that names this spec | `git log --grep` in each repository, listed in the Outcome |

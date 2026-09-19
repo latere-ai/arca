@@ -13,6 +13,7 @@ import (
 // The method names Counting keys its counters on.
 const (
 	MethodPut               = "Put"
+	MethodCopy              = "Copy"
 	MethodGet               = "Get"
 	MethodHead              = "Head"
 	MethodDelete            = "Delete"
@@ -94,6 +95,16 @@ func (c *Counting) Put(ctx context.Context, key string, body io.Reader, size int
 		return Written{}, err
 	}
 	return c.inner.Put(ctx, key, body, size, o)
+}
+
+// Copy counts and forwards. The object move of spec 019 asserts the negative
+// through it: a run that never deletes leaves MethodDelete and
+// MethodDeleteMany at zero.
+func (c *Counting) Copy(ctx context.Context, from, to string, o PutOptions) (Object, error) {
+	if err := c.enter(MethodCopy); err != nil {
+		return Object{}, err
+	}
+	return c.inner.Copy(ctx, from, to, o)
 }
 
 // Get counts and forwards.

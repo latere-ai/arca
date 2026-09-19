@@ -6,24 +6,33 @@ package main
 import (
 	"fmt"
 	"strings"
+
+	"latere.ai/x/pkg/authz"
 )
 
 // Rewriter turns Drive's spelling of a space into Arca's. It holds the issuer
-// every personal subject is prefixed with and the mapping the platform
-// exported for its organizations, and it decides nothing else.
+// every personal subject is prefixed with, the issuer an organization's
+// subject is prefixed with where the platform mints one by rule, and the
+// mapping it exported where it does not. It decides nothing else.
 type Rewriter struct {
-	issuer string
-	orgs   map[string]string
+	issuer    string
+	orgIssuer string
+	orgs      map[string]string
 }
 
-// NewRewriter answers a rewriter over one issuer and one mapping. A nil
-// mapping is an empty one: every organization then refuses in the preflight,
-// which is the answer an operator who forgot -org-subjects needs.
-func NewRewriter(issuer string, orgs map[string]string) Rewriter {
+// NewRewriter answers a rewriter over the two issuers and the mapping.
+//
+// An orgIssuer is a platform whose identity provider assigns an organization
+// the subject authz.Subject(orgIssuer, <drive organization id>), which is a
+// rule and not a table, so the mapping file is unnecessary. Empty falls back
+// to the mapping, and a nil mapping is an empty one: every organization then
+// refuses in the preflight, which is the answer an operator who named neither
+// needs.
+func NewRewriter(issuer, orgIssuer string, orgs map[string]string) Rewriter {
 	if orgs == nil {
 		orgs = map[string]string{}
 	}
-	return Rewriter{issuer: strings.TrimSuffix(issuer, "/"), orgs: orgs}
+	return Rewriter{issuer: issuer, orgIssuer: orgIssuer, orgs: orgs}
 }
 
 // Address is Drive's spelling of a space, built from the pair its schema
@@ -45,14 +54,18 @@ func Address(ownerType, ownerID string) (string, error) {
 func Organization(address string) (string, bool) { return strings.CutPrefix(address, "o-") }
 
 // Subject answers the subject a Drive address becomes. A personal address
-// takes the issuer; an organization takes the subject the platform's identity
-// provider assigns it, which only the mapping knows, so an unmapped one is an
-// error and never a guess.
+// takes the issuer. An organization takes the subject the platform's identity
+// provider assigns it: authz.Subject over the organization issuer where the
+// platform mints one by rule, and the mapping otherwise, which only the
+// platform's export knows, so an unmapped one is an error and never a guess.
 func (r Rewriter) Subject(address string) (string, error) {
 	if id, ok := strings.CutPrefix(address, "u-"); ok {
-		return r.issuer + "|" + id, nil
+		return authz.Subject(r.issuer, id), nil
 	}
 	if id, ok := Organization(address); ok {
+		if r.orgIssuer != "" {
+			return authz.Subject(r.orgIssuer, id), nil
+		}
 		subject, ok := r.orgs[id]
 		if !ok {
 			return "", fmt.Errorf("migrate-drive: no subject is mapped to the organization %s", id)
@@ -75,24 +88,49 @@ func (r Rewriter) Owner(ownerType, ownerID string) (string, error) {
 // Principal answers the subject a principal id addresses. Drive's created_by,
 // actor_id and principal_id columns hold a principal and never an
 // organization, so they reach no mapping.
-func (r Rewriter) Principal(id string) string { return r.issuer + "|" + id }
+func (r Rewriter) Principal(id string) string { return authz.Subject(r.issuer, id) }
 
 // planes maps the leading segment of a Drive path to the plane spec 019
-// leaves it in. Four planes become two: files/ and workspaces/ stay, memory/
-// folds into files/ as a convention prefix rather than a plane of its own, and
+// leaves it in. Five planes become two: files/ and workspaces/ stay, memory/
+// folds into files/ as a convention prefix rather than a plane of its own,
 // repos/ becomes workspaces/, because a checked-out tree is a workspace like
-// any other and a repository's history lives on a git host.
+// any other and a repository's history lives on a git host, and agents/ folds
+// into files/ too.
+//
+// The agents/ fold is the maintainer's decision of 2026-09-19. The plane
+// existed to keep a machine out of where a person curates, a rule spec 019
+// removes because it was decided from a claim read for meaning. With the rule
+// gone the rows are files like any other file, in the same space, under a
+// prefix that says who wrote them.
 var planes = map[string]string{
 	"files":      "files/",
 	"memory":     "files/memory/",
+	agentsPlane:  "files/agents/",
 	"repos":      "workspaces/",
 	"workspaces": "workspaces/",
+}
+
+// agentsPlane is the retired zone whose rows fold under files/. The copy
+// counts the fold by name, because it is access a person did not have
+// yesterday: a path that was invisible to them is now in their own plane.
+const agentsPlane = "agents"
+
+// NoteAgentsFolded is what the report counts a folded row under.
+const NoteAgentsFolded = "agents_folded"
+
+// Folded reports whether a Drive path is one of the retired agents/ zone, so
+// the copy counts what it moved rather than moving it silently.
+func Folded(path string) bool {
+	plane, _, _ := strings.Cut(path, "/")
+	return plane == agentsPlane
 }
 
 // Path answers where a Drive path lands. A path whose plane spec 019 gives no
 // rule for is an error rather than a guess: Arca has two planes, a row outside
 // them is a row no route can reach, and which plane such a path belongs in is
-// the maintainer's decision and not this tool's.
+// the maintainer's decision and not this tool's. The bucket key does not
+// change with the plane: a key derives from an object id and carries no path
+// (spec 003), which is what makes a fold a row rewrite.
 //
 // The rewrite reads the leading segment and nothing else, so it serves a file
 // path, a share's subtree prefix and an event's path alike, with or without a

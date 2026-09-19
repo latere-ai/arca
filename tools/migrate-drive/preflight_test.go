@@ -11,15 +11,23 @@ import (
 
 // clean is a source the preflight holds over: no organization outside the
 // mapping, no plane without a rule, no colliding slug, no key outside the
-// prefix.
+// prefix, and one key the manifest lists.
 func clean() *fake {
 	return newFake(
 		answer{"SELECT DISTINCT owner_id", [][]any{{mappedOrg}}},
 		answer{"split_part(path, '/', 1)", [][]any{{"files"}, {"memory"}, {"repos"}, {"workspaces"}}},
 		answer{"HAVING count(*) > 1", [][]any{}},
 		answer{"strpos(storage_key", [][]any{{int64(0)}}},
+		answer{"true AS live", [][]any{{cleanKey, int64(10), cleanSHA, false, true}}},
 	)
 }
+
+// The one object the clean source holds: a live file, its key, and the digest
+// its row carries.
+const (
+	cleanKey = "drive/u-11111111-1111-4111-8111-111111111111/files/notes.md"
+	cleanSHA = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+)
 
 func TestAPreflightOverACleanSourceHolds(t *testing.T) {
 	if err := Preflight(t.Context(), testRunPair(clean(), emptyTarget(), false)); err != nil {
@@ -45,13 +53,24 @@ func TestAnUnmappedOrganizationRefusesBeforeAnyWrite(t *testing.T) {
 
 func TestAPlaneWithNoRuleRefusesBeforeAnyWrite(t *testing.T) {
 	f := clean()
-	replace(f, "split_part(path, '/', 1)", [][]any{{"files"}, {"agents"}})
+	replace(f, "split_part(path, '/', 1)", [][]any{{"files"}, {"sandboxes"}})
 	err := Preflight(t.Context(), testRunPair(f, emptyTarget(), false))
 	if err == nil {
 		t.Fatal("a plane spec 019 gives no rule for is a refusal")
 	}
-	if !strings.Contains(err.Error(), "agents") {
+	if !strings.Contains(err.Error(), "sandboxes") {
 		t.Errorf("the refusal names no plane: %v", err)
+	}
+}
+
+// TestTheAgentsPlaneNoLongerRefusesTheRun is the maintainer's decision of
+// 2026-09-19: the retired zone has a rule now, so its rows fold under files/
+// rather than stopping the copy before it begins.
+func TestTheAgentsPlaneNoLongerRefusesTheRun(t *testing.T) {
+	f := clean()
+	replace(f, "split_part(path, '/', 1)", [][]any{{"files"}, {"agents"}})
+	if err := Preflight(t.Context(), testRunPair(f, emptyTarget(), false)); err != nil {
+		t.Fatalf("the agents plane refused the run: %v", err)
 	}
 }
 
@@ -95,7 +114,7 @@ func TestEveryReasonIsAnsweredAtOnce(t *testing.T) {
 		{"22222222-2222-4222-8222-222222222222"},
 		{"33333333-3333-4333-8333-333333333333"},
 	})
-	replace(f, "split_part(path, '/', 1)", [][]any{{"agents"}})
+	replace(f, "split_part(path, '/', 1)", [][]any{{"sandboxes"}})
 	replace(f, "HAVING count(*) > 1", [][]any{{"principal", "9f1", "site"}})
 	replace(f, "strpos(storage_key", [][]any{{int64(2)}})
 	err := Preflight(t.Context(), testRunPair(f, emptyTarget(), false))

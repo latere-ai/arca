@@ -176,7 +176,7 @@ var at = time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
 // testRewriter is the rewrite every case reads, over the issuer the family's
 // tests use and one mapped organization.
 func testRewriter() Rewriter {
-	return NewRewriter("https://issuer.example", map[string]string{
+	return NewRewriter("https://issuer.example", "", map[string]string{
 		"11111111-1111-4111-8111-111111111111": "https://issuer.example|org-acme",
 	})
 }

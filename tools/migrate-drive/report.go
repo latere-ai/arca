@@ -18,7 +18,19 @@ import (
 type Report struct {
 	Source, Target string
 	Issuer, Prefix string
-	DryRun         bool
+	// OrgIssuer is what -org-issuer named, and is empty where the
+	// organizations came from a mapping file instead.
+	OrgIssuer string
+	DryRun    bool
+
+	// ManifestPath is where -manifest put the file that ties a row to a
+	// byte, ManifestKeys is how many distinct source keys it lists, and
+	// ManifestComplete says the trailer was written, which only a verified
+	// copy earns. The move of spec 019 reads all three off the file itself;
+	// they are here so an operator reads them off the report.
+	ManifestPath     string
+	ManifestKeys     int
+	ManifestComplete bool
 
 	order  []string
 	tables map[string]*TableReport
@@ -117,8 +129,10 @@ func (r *Report) Write(w io.Writer) {
 	_, _ = fmt.Fprintf(head, "source\t%s\n", r.Source)
 	_, _ = fmt.Fprintf(head, "target\t%s\n", r.Target)
 	_, _ = fmt.Fprintf(head, "issuer\t%s\n", r.Issuer)
+	_, _ = fmt.Fprintf(head, "organizations\t%s\n", r.organizations())
 	_, _ = fmt.Fprintf(head, "prefix\t%s\n", r.Prefix)
 	_, _ = fmt.Fprintf(head, "mode\t%s\n", mode)
+	_, _ = fmt.Fprintf(head, "manifest\t%s\n", r.manifestLine())
 	flush(head)
 
 	fmt.Fprintf(&b, "\n")
@@ -139,6 +153,33 @@ func (r *Report) Write(w io.Writer) {
 
 	fmt.Fprintf(&b, "\nthe bytes\n%s\n", indent(BytesFinding))
 	_, _ = io.WriteString(w, b.String())
+}
+
+// organizations is the header block's row for where an organization's subject
+// came from, which is a rule or a file and never both.
+func (r *Report) organizations() string {
+	if r.OrgIssuer == "" {
+		return "the subjects of -org-subjects"
+	}
+	return r.OrgIssuer + "|<drive organization id>, derived from -org-issuer"
+}
+
+// manifestLine is the manifest's row of the header block: where the file is,
+// how many keys it lists, and whether it is complete. A run with no -manifest
+// says so and names the flag, because a copy without one is a copy whose
+// bytes nothing can move.
+func (r *Report) manifestLine() string {
+	switch {
+	case r.ManifestPath == "":
+		return "none; -manifest <path> writes the file tools/move-objects reads"
+	case r.DryRun:
+		return fmt.Sprintf("%s would list %d keys, and a dry run writes no file", r.ManifestPath, r.ManifestKeys)
+	case r.ManifestComplete:
+		return fmt.Sprintf("%s, %d keys, complete", r.ManifestPath, r.ManifestKeys)
+	default:
+		return fmt.Sprintf("%s, %d keys, not complete; the copy did not verify and the move will refuse it",
+			r.ManifestPath, r.ManifestKeys)
+	}
 }
 
 // flush writes a column block out. The writer under it is the report's own
@@ -182,9 +223,15 @@ const BytesFinding = `Drive wrote a key from an owner and a path, drive/<owner>/
 Arca derives a key from an object id, <prefix><shard>/<id> (spec 003). A
 Drive key therefore carries no id to copy, and this run mints a fresh
 object id for each distinct key it read. The rows are complete and the
-bytes are not reachable at the ids they now name: the bucket prefix alone
-does not carry them over. Spec 019 records this as the blocking finding
-for its criterion 4. Do not switch the routes on this report alone.`
+bytes are not yet reachable at the ids they now name: the bucket prefix
+alone does not carry them over. The objects move next, in one server side
+copy per key:
+
+  go run ./tools/move-objects -manifest <path> -bucket <bucket> -prefix <prefix>
+
+That reads the manifest this run wrote and copies each key to its object
+id's key. Criterion 4 of spec 019 has two halves, the rows and the bytes;
+this report is the first. Do not switch the routes on this report alone.`
 
 // indent puts two spaces in front of every line of a block.
 func indent(block string) string {

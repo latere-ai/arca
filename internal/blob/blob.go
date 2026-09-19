@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 // Package blob is the bucket behind one interface. Every call Arca makes
-// against an S3 compatible store is here and nowhere else: put, get, head,
-// delete, presign, multipart, the object ACL, and the bucket probe.
+// against an S3 compatible store is here and nowhere else: put, copy, get,
+// head, delete, presign, multipart, the object ACL, and the bucket probe.
 //
 // Keys are opaque here. The package object derives them from an object id,
 // so this package knows nothing about who owns a byte or what path it sits
@@ -26,6 +26,13 @@ type Store interface {
 	// rather than served: with a fresh id per write of content, a collision
 	// is a fault and never an overwrite. A size below zero means unknown.
 	Put(ctx context.Context, key string, body io.Reader, size int64, o PutOptions) (Written, error)
+	// Copy moves the bytes of one key to another inside the bucket, server
+	// side, and answers what the destination holds. The destination carries
+	// the same If-None-Match: * as a put, and a source above the API's single
+	// copy maximum is moved range by range. The call carries no ACL: the
+	// object move of spec 019 re-stamps a public destination through
+	// SetPublic.
+	Copy(ctx context.Context, from, to string, o PutOptions) (Object, error)
 	// Get opens the object's body. The caller closes it.
 	Get(ctx context.Context, key string) (io.ReadCloser, Object, error)
 	// Head reads what the store holds about an object, without its body.

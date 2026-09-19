@@ -42,6 +42,11 @@ func TestTheFlagsThatHaveToHold(t *testing.T) {
 				"-issuer", "https://issuer.example", "-prefix", "/"},
 			[]string{"-prefix", "cannot be empty"},
 		},
+		{
+			[]string{"-source", "postgres://a", "-target", "postgres://b",
+				"-issuer", "https://issuer.example", "-org-issuer", "orgs.example"},
+			[]string{"-org-issuer", "not an absolute URL"},
+		},
 	} {
 		var out, errs bytes.Buffer
 		if code := cli(t.Context(), c.args, &out, &errs); code != exitRefused {
@@ -52,6 +57,28 @@ func TestTheFlagsThatHaveToHold(t *testing.T) {
 				t.Errorf("%v: the refusal holds no %q: %s", c.args, text, errs.String())
 			}
 		}
+	}
+}
+
+// TestTheTwoWaysToNameAnOrganizationsSubjectAreAlternatives holds the flag
+// pair to what it is: a file the platform exports, or a rule it follows, and
+// never both, because a run given both would have to decide which wins.
+func TestTheTwoWaysToNameAnOrganizationsSubjectAreAlternatives(t *testing.T) {
+	var out, errs bytes.Buffer
+	args := []string{
+		"-source", unreachable, "-target", unreachable, "-issuer", "https://issuer.example",
+		"-org-subjects", "orgs.json", "-org-issuer", "https://orgs.example",
+	}
+	if code := cli(t.Context(), args, &out, &errs); code != exitUsage {
+		t.Fatalf("exit %d, want %d", code, exitUsage)
+	}
+	for _, text := range []string{"-org-subjects", "-org-issuer"} {
+		if !strings.Contains(errs.String(), text) {
+			t.Errorf("the message names no %s: %s", text, errs.String())
+		}
+	}
+	if out.Len() != 0 {
+		t.Errorf("a command line that was refused printed a report: %s", out.String())
 	}
 }
 
