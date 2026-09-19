@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.1.6 - 2026-09-19
+
 - **The conformance suite reaches the bucket from outside the cluster.** A
   read above the inline threshold answers a redirect to a presigned URL and
   a multipart part goes to a presigned PUT, both signed for the bucket
