@@ -220,9 +220,12 @@ define check-line
 endef
 
 # The object the printed requests write and read. The owner is the dev
-# subject as spec 006 renders it, escaped for one path segment, and the
-# path sits under the files plane root of spec 013.
-DEV_OWNER_PATH = http%3A%2F%2Flocalhost%3A$(DEV_ISSUER_PORT)%7Cdev
+# subject as spec 006 renders it, <issuer>|dev, escaped for one path
+# segment: the slashes first and then the colons, because the escape of a
+# slash carries no colon. It is derived from the issuer URL rather than
+# spelled again, so a run that moves the issuer moves the path with it. The
+# path itself sits under the files plane root of spec 013.
+DEV_OWNER_PATH = $(subst :,%3A,$(subst /,%2F,$(DEV_ISSUER_URL)))%7Cdev
 DEV_OBJECT_PATH = /v1/files/$(DEV_OWNER_PATH)/files/hello.txt
 
 # token-line mints a token for the dev subject at the stub issuer and
