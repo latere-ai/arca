@@ -89,10 +89,19 @@ func (a *Authorizer) granted(ctx context.Context, res authz.Resource) (authz.Res
 // spec 006's table gives it and `authorizer.File.Grant` renders.
 const GrantField = "grant"
 
-// carriesGrant reports whether a kind carries the field. A file and a
-// workspace name a subtree a grant can cover; a share, a link, an event and
-// a space are powers over a space rather than over a subtree of it, so no
-// grant reaches their actions and a field there would be read as if one did.
+// carriesGrant reports whether a kind carries the field. A file, an upload
+// and a workspace name a subtree a grant can cover; a share, a link, an
+// event and a space are powers over a space rather than over a subtree of
+// it, so no grant reaches their actions and a field there would be read as
+// if one did.
+//
+// The upload is here because upload.write sits on the write rung's ladder.
+// An object at or below the inline bound reaches the grantee through
+// file.write and a larger one through this question, so leaving it out
+// would have admitted a grantee's small writes and refused the same
+// grantee's large ones.
 func carriesGrant(kind string) bool {
-	return kind == authorizer.KindFile || kind == authorizer.KindWorkspace
+	return kind == authorizer.KindFile ||
+		kind == authorizer.KindUpload ||
+		kind == authorizer.KindWorkspace
 }

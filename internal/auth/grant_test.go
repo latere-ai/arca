@@ -46,6 +46,12 @@ func aWorkspace(id string) authz.Resource {
 	return authorizer.Workspace{ID: id, Owner: alice, Slug: "build"}.Resource()
 }
 
+// anUpload is the resource of a multipart write, which a grantee holding
+// write reaches through upload.write when the object is too large to inline.
+func anUpload() authz.Resource {
+	return authorizer.Upload{Owner: alice, Path: "files/reports/q3.pdf"}.Resource()
+}
+
 // aShare is the resource of a question no grant reaches.
 func aShare(id string) authz.Resource {
 	return authorizer.Share{
@@ -86,6 +92,14 @@ func TestTheQuestionCarriesTheCallersGrant(t *testing.T) {
 		// A share, a link, an event and a space are powers over a space and
 		// not over a subtree of it, so no grant reaches their actions and the
 		// table is not read at all.
+		// upload.write is on the write rung's ladder, so a grantee's
+		// multipart write carries the rung the same way a small write does.
+		// Without it a grantee's writes would be admitted below the inline
+		// bound and refused above it.
+		{"a grantee's multipart write", auth.PermissionWrite, anUpload(), carol, "write",
+			alice + " " + carol + " files/reports/q3.pdf"},
+		{"a stranger's multipart write", auth.PermissionNone, anUpload(), carol, "",
+			alice + " " + carol + " files/reports/q3.pdf"},
 		{"a share", auth.PermissionManage, aShare("01J8R5"), carol, "", ""},
 		// The three public link routes carry no caller, and a table read for
 		// nobody would answer for nobody.
@@ -109,6 +123,8 @@ func TestTheQuestionCarriesTheCallersGrant(t *testing.T) {
 				action = authorizer.ActionWorkspaceRead
 			case authorizer.KindShare:
 				action = authorizer.ActionShareRead
+			case authorizer.KindUpload:
+				action = authorizer.ActionUploadWrite
 			}
 			if _, err := a.Decide(serving(c.subject), action, c.resource); err != nil {
 				t.Fatalf("the question was refused: %v", err)

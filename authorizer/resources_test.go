@@ -20,7 +20,7 @@ var filled = map[string]interface{ Resource() authz.Resource }{
 		ID: "01J8R4", Owner: "https://issuer.example|9ab3", Path: "files/reports/q3.pdf",
 		Plane: "files", Size: Bytes(48213), From: "files/drafts/q3.pdf", Grant: "write",
 	},
-	KindUpload:    Upload{Owner: "https://issuer.example|9ab3", Path: "files/video/keynote.mp4", Size: Bytes(1 << 30)},
+	KindUpload:    Upload{Owner: "https://issuer.example|9ab3", Path: "files/video/keynote.mp4", Size: Bytes(1 << 30), Grant: "write"},
 	KindShare:     Share{ID: "01J8R5", Owner: "https://issuer.example|9ab3", Path: "files/reports", Grantee: "https://issuer.example|4c1d", Permission: "read"},
 	KindLink:      Link{ID: "01J8R6", Owner: "https://issuer.example|9ab3", Path: "files/reports"},
 	KindWorkspace: Workspace{ID: "01J8R7", Owner: "https://issuer.example|9ab3", Slug: "build", Grant: "read"},

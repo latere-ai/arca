@@ -67,12 +67,19 @@ type Upload struct {
 	Owner string
 	Path  string
 	Size  *int64
+	// Grant is the rung the caller holds on a prefix of Path, filled and
+	// left empty on the same terms as a file's. upload.write is on the
+	// write rung's ladder, so a grantee writing an object too large to
+	// inline asks this question and not [File]'s; without the field the
+	// ladder would name an action no question could ever satisfy.
+	Grant string
 }
 
 // Resource renders the upload as the envelope carries it.
 func (u Upload) Resource() authz.Resource {
 	return authz.NewResource(KindUpload, "", fields(
 		field{"owner", u.Owner}, field{"path", u.Path}, size(u.Size),
+		field{"grant", u.Grant},
 	))
 }
 

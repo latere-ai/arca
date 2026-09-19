@@ -137,7 +137,7 @@ to this one. Twenty-three actions over seven kinds.
 | Kind | Actions | Resource fields |
 |---|---|---|
 | `File` | `file.read`, `file.write`, `file.delete`, `file.list`, `file.restore` | `id` (absent on a write that creates), `owner`, `path`, `plane` (`files` or `workspaces`), `size`, `grant` (absent where the caller holds none) |
-| `Upload` | `upload.write` | `owner`, `path`, `size` |
+| `Upload` | `upload.write` | `owner`, `path`, `size`, `grant` (absent where the caller holds none) |
 | `Share` | `share.create`, `share.read`, `share.list`, `share.revoke` | `id`, `owner`, `path`, `grantee`, `permission` |
 | `Link` | `link.create`, `link.read`, `link.revoke` | `id`, `owner`, `path` |
 | `Workspace` | `workspace.create`, `workspace.read`, `workspace.write`, `workspace.delete`, `workspace.list`, `workspace.attach`, `workspace.sync`, `workspace.restore` | `id`, `owner`, `slug`, `grant` (absent where the caller holds none) |
