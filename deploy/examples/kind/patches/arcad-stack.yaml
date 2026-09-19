@@ -26,4 +26,11 @@ spec:
             - name: ARCA_PUBLIC_URL
               value: http://localhost:30180
             - name: ARCA_AUTHORIZER_URL
-              value: http://arca-stubs:8082/authorize
+              # The stub decides at its root, POST /{$}, and nowhere else,
+              # which is also the URL the e2e harness hands arcad. This
+              # overlay once gave it a path the stub never served, so the
+              # probe met a 404, the client reported the authorizer
+              # unavailable, and /readyz answered 503 for as long as the pod
+              # lived; three release runs were lost to it. test/deploy asks
+              # the stub the probe at this URL with this bearer.
+              value: http://arca-stubs:8082

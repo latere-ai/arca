@@ -5,12 +5,18 @@ package deploy
 
 import (
 	"fmt"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"latere.ai/x/pkg/authz"
+
+	"latere.ai/x/arca/authorizer"
+	arcastub "latere.ai/x/arca/test/stubs/authorizer"
 )
 
 // kustomizations returns every kustomization.yaml of the deploy tree, keyed
@@ -401,5 +407,58 @@ func TestTheKindStubExpectsTheBearerArcadSends(t *testing.T) {
 		// One source: the stub reads the Secret key arcad reads.
 	case stubToken != arcadToken:
 		t.Fatalf("the stub expects %q and arcad sends %q", stubToken, arcadToken)
+	}
+}
+
+// TestTheKindStubAnswersAtTheURLArcadIsGiven asks the stub authorizer, as
+// the binary builds it, the probe question at the URL and with the bearer
+// the kind overlay gives arcad. It is the readiness check the overlay has
+// to pass, run here without a cluster.
+//
+// Three release runs were lost to this pairing. The shared stub decides at
+// POST /{$}, the root and nothing else, and the e2e harness hands arcad the
+// bare listener URL; the overlay handed it a path the stub never served,
+// so the probe met a 404, the client reported the authorizer unavailable,
+// and /readyz answered 503 for as long as the pod lived. Before that the
+// bearer was named in two places too. Both are one question here: the stub
+// must answer the probe at that path, with that bearer, with a deny.
+func TestTheKindStubAnswersAtTheURLArcadIsGiven(t *testing.T) {
+	var authorizerURL, bearer string
+	for _, d := range read(t, "deploy/examples/kind") {
+		switch {
+		case d.kind() == "Secret" && d.named() == "arcad-auth":
+			bearer = d.at("stringData").text("ARCA_AUTHORIZER_TOKEN")
+		case d.kind() == "Deployment" && d.named() == "arcad":
+			for _, c := range d.containers() {
+				for _, e := range c.items("env") {
+					if e.text("name") == "ARCA_AUTHORIZER_URL" {
+						authorizerURL = e.text("value")
+					}
+				}
+			}
+		}
+	}
+	if authorizerURL == "" || bearer == "" {
+		t.Fatalf("the kind overlay gives arcad url %q and bearer %q; both are needed", authorizerURL, bearer)
+	}
+	u, err := url.Parse(authorizerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The stub as the binary builds it, with the bearer the overlay's
+	// stubs container reads from the same Secret key.
+	stub := arcastub.NewHandler(arcastub.WithToken(bearer))
+	srv := httptest.NewServer(stub.Handler())
+	defer srv.Close()
+
+	client, err := authz.NewClient(authz.Options{URL: srv.URL + u.Path, Token: bearer, HTTP: srv.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = authz.Check(t.Context(), client, authorizer.ActionSpaceAdmin, authorizer.KindSpace)
+	if err != nil {
+		t.Fatalf("the stub does not answer the probe at %q with the overlay's bearer: %v; "+
+			"arcad's authorizer readiness check fails the same way on kind", u.Path, err)
 	}
 }

@@ -6,6 +6,18 @@ refused before it is pushed.
 
 ## Unreleased
 
+- **The kind stack's arcad becomes ready.** Its overlay gave arcad an
+  authorizer URL with a path the stub authorizer never served: the shared
+  stub decides at its root, and the e2e harness hands arcad the bare
+  listener URL, so the tier that would have caught it never could. Every
+  probe met a 404, the client reported the authorizer unavailable, and
+  `/readyz` answered 503 for as long as the pod lived with nothing logged.
+  Three release runs were lost to it and to a bearer named in two places
+  before it. The overlay now gives the root, and a test asks the stub, as
+  the binary builds it, the probe question at the overlay's URL with the
+  overlay's bearer, so both the path and the bearer are held by execution
+  rather than by a second copy of either value.
+
 ## v0.1.4 - 2026-09-19
 
 - **A signature that meets a connection reset is retried.** Each signature
