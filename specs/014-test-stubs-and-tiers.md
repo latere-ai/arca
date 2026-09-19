@@ -40,13 +40,18 @@ anywhere.
 
 Built and in the tree on 2026-09-18, phase 1 of [[019-migration-from-drive]],
 as far as the specs it stands on reach. `test/stubs` holds the two stubs and
-the `arca-stubs` binary, `compose.yaml` holds the stack, the Makefile holds
+the `arca-stubs` binary, `Dockerfile.stubs` builds the image of them that
+v0.1.1's build job pushed, `compose.yaml` holds the stack, the Makefile holds
 one target per tier and `make run`, `internal/blob` and `internal/store` have
 their store tier, `test/e2e` runs `arcad` as a process, and `verify.yml` has
 one job per service tier. The commits are `b4671bf` (the stubs), `3204b35`
 (the stack and the targets), `df9c1ca` (the two tiers), `4663ec3` (the jobs
 and the documents) and `c099323` (the test that holds the jobs to the table
-below). The gate passes at each of them.
+below). The gate passes at each of them. On 2026-09-19 `make run` gained its
+sixth and seventh steps, the `arcad check` of [[012-administration]] and a
+put and a read of one object through [[013-api]]'s route, and `TestMakeRun`
+and `TestMakeRunSideBySide` hold the target to the seven and to the
+derivation two checkouts run side by side on.
 
 What arrived from Drive is `test/e2e/harness_test.go` and
 `docker-compose.yml`: the skip on the `E2E_` variables, the shared harness,
@@ -63,11 +68,21 @@ Divergences from the design as drafted:
 - `make down` stops the stack and keeps its volumes, and `make clean` removes
   the project with them. `make down -v` is not a make idiom: a target takes
   no flags.
-- The coverage floor is enforced over the unit tier. The shared gate reads
-  several profiles, but the shared workflow that runs it takes no input for
-  them, so each tier job uploads its profile as an artifact instead and the
-  floor is the unit tier's, which every package clears. Reading three
-  profiles in one run needs a change to `latere-ai/ci`.
+- The coverage floor is enforced over the unit tier, and criterion 11 is
+  open on a change this repository cannot make. The gate's `cover` takes
+  `-profile` once per tier, but the reusable workflow that runs it,
+  `latere-ai/ci/.github/workflows/lateregate.yml@v1`, takes `go_version`,
+  `test_os` and `runs_on` and nothing else, and its gate job runs `go tool
+  lateregate ${{ matrix.gate }}` with no seam for an argument.
+  `.lateregate.yaml` is not a way round it: the profiles are read from the
+  flag and the configuration has no key for them. So each tier job uploads
+  its profile as an artifact instead and the floor is the unit tier's, which
+  every package clears. Closing it is two halves in `latere-ai/ci` and this
+  caller: an input on `lateregate.yml`, `cover_profiles`, naming the
+  artifacts to download before the `cover` gate and append to that one
+  gate's invocation as repeated `-profile=` flags; and `needs: [store,
+  e2e]` on this repository's `gate` job, without which the artifacts do not
+  exist when the gate runs.
 - `make up` waits for facts of its own rather than for `compose up --wait`:
   only one of the two container engines has that flag, and a contributor with
   either should get the same stack.
@@ -76,24 +91,17 @@ Divergences from the design as drafted:
   reproducible without changing `latere.ai/x/pkg/authkit/issuertest`; what a
   verifier's key-set check is pointed at is an issuer signing the other
   algorithm.
-- `make run` runs five of its seven steps: the stack, the stubs, the
-  migrations, the server, and the token. `arcad check` is
-  [[012-administration]]'s and the `curl` that puts an object is
-  [[013-api]]'s, so what the run prints today is the address, the token, and
-  a request against the probes.
 - The tier variables are `E2E_DATABASE_URL`, `E2E_S3_ENDPOINT`, `E2E_S3_KEY`,
   `E2E_S3_SECRET` and `E2E_S3_BUCKET`, as this spec's table names them.
-- `Dockerfile.stubs` is not in the tree, though this spec's `affects` names
-  it. The image is [[016-release-and-installation]]'s to publish and nothing
-  yet installs from one; the binary it would wrap is here, and the tiers run
-  it from the checkout.
 
-Criteria 1, 3, 5, 6, 7 and 12 hold in the tree. Criterion 2's `check` half is
-[[012-administration]]'s, criterion 4's limits half is
-[[010-events-and-reaper]]'s, criterion 10's `check` half is the same, and
-criteria 8, 9 and 11 wait on `make run` reaching its seventh step, on a test
-that runs two checkouts at once, and on the pipeline reading three profiles.
-This spec moves to `complete` when those land.
+Every criterion but one holds in the tree, each verified against the file or
+the test its row names. The halves that waited on another spec have landed:
+[[012-administration]]'s `check` is what criteria 2 and 10 read, and
+[[010-events-and-reaper]]'s byte limit is what criterion 4 reads through the
+conformance case that puts a limit on the stub's answer. Criterion 11 is the
+one item open, and it is a `latere-ai/ci` change and not this repository's,
+as the coverage bullet above says with the input it needs. This spec moves to
+`complete` when that lands.
 
 ## Design
 
@@ -159,8 +167,15 @@ values from them, and passes those to the server it starts.
 | Tier | Command | Needs | Runs |
 |---|---|---|---|
 | unit | `go tool lateregate test` | the Go toolchain | the gate, every push |
-| store | `go test -tags=tiers -run '^TestStore' ./internal/blob/... ./internal/store/...` | `E2E_DATABASE_URL`, `E2E_S3_ENDPOINT` | `make test-store`, and one CI job |
+| store | `go test -tags=tiers -run '^TestStore'` over the packages that reach a store | `E2E_DATABASE_URL`, `E2E_S3_ENDPOINT` | `make test-store`, and one CI job |
 | e2e | `go test -tags=tiers -run '^TestE2E' ./test/e2e/...` | the same | `make test-e2e`, and one CI job |
+
+Which packages the store tier covers is not written here. `make test-store`
+names the list a contributor runs and the `store` job of `verify.yml` names
+the list CI runs, and `TestWorkflowJobsMatchTheTable` asserts the job's,
+which is the one place a reader checks it against. A list printed in this
+spec as well would be a third copy, and the copy nothing fails on is the one
+that goes stale.
 
 Two selectors, both needed. The build tag keeps every file that reaches
 a service out of the untagged suite, which is why `hermetic.allow` in
@@ -205,10 +220,17 @@ must be minted before anything can be written:
    `ARCA_ADMIN_SUBJECTS` holding the rendered `<issuer>|dev`, and the
    bucket and database of the stack; wait for `/readyz`.
 6. `arcad check` against the running installation, so the first thing a
-   contributor sees is four `ok` lines ([[012-administration]]).
+   contributor sees is the five `ok` lines of [[012-administration]]'s
+   table: the bucket, the database, the issuer, the authorizer, and the
+   public URL. A failed requirement is printed and does not stop the run.
 7. Mint a token for `dev` at the issuer's `/mint` and print `export
-   ARCA_URL=... ARCA_TOKEN=...`, a `curl` that puts one object, and a
-   `curl` that reads it back.
+   ARCA_URL=... ARCA_TOKEN=...`, a `curl` that puts one object under the
+   caller's own space, and a `curl` that reads it back. The owner in the
+   path is the subject as [[006-identity]] renders it, escaped for one path
+   segment.
+
+Steps 6 and 7 are asked of the running server, so they run beside it rather
+than after it: the server takes the foreground and they follow readiness.
 
 `make run-down` stops the server and the stubs and leaves the stack up,
 so a failed run is debuggable. `make clean` removes the compose project
@@ -235,12 +257,13 @@ free for a public repository and give each job a fresh machine.
 
 | Job | Steps |
 |---|---|
-| `store` | checkout, Go, `docker compose up -d --wait`, `go test -tags=tiers -race -run '^TestStore' -covermode=atomic -coverprofile=store.out ./internal/blob/... ./internal/store/...`, upload the profile |
-| `e2e` | the same stack, `go test -tags=tiers -race -run '^TestE2E' -covermode=atomic -coverprofile=e2e.out ./test/e2e/...`, upload the profile |
+| `store` | checkout, Go, `make up`, `go test -tags=tiers -race -run '^TestStore' -covermode=atomic -coverprofile=store.out` over the packages `TestWorkflowJobsMatchTheTable` holds the job to, upload the profile |
+| `e2e` | the same stack, `make build build-stubs`, `go test -tags=tiers -race -run '^TestE2E' -covermode=atomic -coverprofile=e2e.out ./test/e2e/...`, upload the profile |
 
-The `gate` job reads the two profiles beside its own and enforces the
+The `gate` job is to read the two profiles beside its own and enforce the
 bar over all three, so the number in the log is the number a reader of
-this spec expects. Both jobs run on every push and every pull request.
+this spec expects; what stands in the way is criterion 11 above. Both jobs
+run on every push and every pull request.
 Neither is self-hosted: the service Arca replaces ran its equivalent on
 one company's VM for a warm cache and a private repository, and neither
 reason survives.
@@ -271,11 +294,11 @@ tier asserts, which every other spec's acceptance criteria own.
 | 2 | The authorizer stub denies the probe resource for every subject and every flag combination, and records the action and resource fields of each request | `TestAuthorizerStub`, and [[012-administration]]'s `check` test |
 | 3 | The issuer stub mints a token carrying `authorization_details`, an `iat` of a chosen age, and an ES256 signature under `-alg es256` | `TestIssuerStub` |
 | 4 | The authorizer stub's `-limits` reaches the server as the space's byte limit, and a write past it is refused for the answer's `ttl` | `TestAuthorizerStub`, and [[010-events-and-reaper]]'s limit test |
-| 5 | `go test ./...` on a clean clone with no services is green, and every tier test skips with the remediation in its message | `TestTiersSkipWithoutServices`, run with the variables cleared |
+| 5 | `go test ./...` on a clean clone with no services is green, and every tier test skips with the remediation in its message | `TestStoreTheTierSkipsWithoutTheStack` in `internal/blob`, `internal/store`, `internal/files` and `internal/uploads`, and `TestE2ETheTierSkipsWithoutTheStack` |
 | 6 | No file in the untagged suite dials a socket or forks a process, and `hermetic.allow` is empty | the `hermetic` gate |
-| 7 | Every tier binds `:0`, keeps files under `t.TempDir()`, uses a schema and a bucket prefix of its own, and leaves neither behind | `TestTiersAreIsolated`, plus a bucket listing after the store tier |
-| 8 | `make run` on a clean clone completes the seven steps, `arcad check` prints four `ok` lines, and the printed `curl` puts and reads one object | `TestMakeRun` in the e2e tier |
-| 9 | Two clones run `make run` at once without a port or volume collision | `TestMakeRunSideBySide` |
+| 7 | Every tier binds `:0`, keeps files under `t.TempDir()`, uses a schema and a bucket prefix of its own, and leaves neither behind | each tier's harness: `tier` in the store packages and `start`, `schema` and `bucketPrefix` in `test/e2e`, each sweeping in `t.Cleanup`, with the bucket listing at the end of `TestE2ECheckPassesAgainstTheStack` proving the prefix is empty afterwards |
+| 8 | `make run` on a clean clone completes the seven steps, `arcad check` prints five `ok` lines, and the printed `curl` puts and reads one object | `TestMakeRun`, reading the `run` target; `TestE2ECheckPassesAgainstTheStack` for the five lines and `TestE2EAPutRoundTripsAndAReadAboveTheBoundaryRedirects` for the round trip, both against a running stack |
+| 9 | Two clones run `make run` at once without a port or volume collision | `TestMakeRunSideBySide`, reading the derivation in the Makefile and `compose.yaml` |
 | 10 | One e2e test drives `arcad` as a process: the subcommands, the two listeners, the probes, and `check` | `TestE2EBinary` |
-| 11 | Coverage over the three profiles is at least 90% for every package, `test/stubs` included | the `cover` gate with three `-profile` flags |
+| 11 | Coverage over the three profiles is at least 90% for every package, `test/stubs` included | the `cover` gate with three `-profile` flags. Open: the reusable workflow takes no input to pass them, so the floor is the unit tier's. See Current state |
 | 12 | `verify.yml` has one job per service tier with the command from the table, on hosted runners | `TestWorkflowJobsMatchTheTable`, reading `verify.yml` |
