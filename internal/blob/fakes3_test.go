@@ -15,6 +15,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -36,6 +37,10 @@ type fakeS3 struct {
 	srv       *httptest.Server
 	overTLS   bool
 	corruptor func([]byte) []byte
+	// partCopyWithoutLabel answers a part copy with no label, which is a
+	// store that took the range and said nothing a completion can name it
+	// by. Only a test asks for it.
+	partCopyWithoutLabel bool
 
 	mu      sync.Mutex
 	objects map[string]fakeObject
@@ -178,6 +183,10 @@ func (f *fakeS3) serve(w http.ResponseWriter, r *http.Request) {
 	switch operation {
 	case "PutObject":
 		f.putObject(w, r, key)
+	case "CopyObject":
+		f.copyObject(w, r, key)
+	case "UploadPartCopy":
+		f.uploadPartCopy(w, r, q)
 	case "GetObject":
 		f.getObject(w, r, key)
 	case "HeadObject":
@@ -222,10 +231,14 @@ func (f *fakeS3) operation(r *http.Request, key string, q map[string][]string) s
 		return "CompleteMultipartUpload"
 	case r.Method == http.MethodDelete && has("uploadId"):
 		return "AbortMultipartUpload"
+	case r.Method == http.MethodPut && has("uploadId") && r.Header.Get(copySourceHeader) != "":
+		return "UploadPartCopy"
 	case r.Method == http.MethodPut && has("uploadId"):
 		return "UploadPart"
 	case r.Method == http.MethodPut && has("acl"):
 		return "PutObjectAcl"
+	case r.Method == http.MethodPut && r.Header.Get(copySourceHeader) != "":
+		return "CopyObject"
 	case r.Method == http.MethodPut:
 		return "PutObject"
 	case r.Method == http.MethodGet:
@@ -262,6 +275,117 @@ func (f *fakeS3) putObject(w http.ResponseWriter, r *http.Request, key string) {
 	f.objects[key] = fakeObject{data: data, contentType: r.Header.Get("Content-Type"), etag: etag}
 	w.Header().Set("ETag", `"`+etag+`"`)
 	w.WriteHeader(http.StatusOK)
+}
+
+// The headers a server side copy names its source and its range with.
+const (
+	copySourceHeader      = "X-Amz-Copy-Source"
+	copySourceRangeHeader = "X-Amz-Copy-Source-Range"
+	metadataDirective     = "X-Amz-Metadata-Directive"
+)
+
+// copyObject moves the bytes of one key to another without a body, refusing a
+// destination that exists when the copy carries the conditional create and a
+// source the endpoint does not hold.
+func (f *fakeS3) copyObject(w http.ResponseWriter, r *http.Request, key string) {
+	from, err := f.copySource(r)
+	if err != nil {
+		f.refuse(w, r, http.StatusBadRequest, "InvalidArgument")
+		return
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	source, held := f.objects[from]
+	if !held {
+		f.refuseLocked(w, r, http.StatusNotFound, "NoSuchKey")
+		return
+	}
+	if _, exists := f.objects[key]; exists && r.Header.Get("If-None-Match") == "*" {
+		f.refuseLocked(w, r, http.StatusPreconditionFailed, "PreconditionFailed")
+		return
+	}
+	copied := fakeObject{data: bytes.Clone(source.data), contentType: source.contentType, etag: source.etag}
+	if strings.EqualFold(r.Header.Get(metadataDirective), "REPLACE") {
+		copied.contentType = r.Header.Get("Content-Type")
+	}
+	f.objects[key] = copied
+	f.writeLocked(w, http.StatusOK, fmt.Sprintf(
+		`<CopyObjectResult><ETag>&quot;%s&quot;</ETag></CopyObjectResult>`, copied.etag))
+}
+
+// uploadPartCopy takes one range of a source as a part of an open upload.
+func (f *fakeS3) uploadPartCopy(w http.ResponseWriter, r *http.Request, q map[string][]string) {
+	from, err := f.copySource(r)
+	if err != nil {
+		f.refuse(w, r, http.StatusBadRequest, "InvalidArgument")
+		return
+	}
+	id := q["uploadId"][0]
+	number, _ := strconv.Atoi(q["partNumber"][0])
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	source, held := f.objects[from]
+	if !held {
+		f.refuseLocked(w, r, http.StatusNotFound, "NoSuchKey")
+		return
+	}
+	parts, open := f.parts[id]
+	if !open {
+		f.refuseLocked(w, r, http.StatusNotFound, "NoSuchUpload")
+		return
+	}
+	start, end, err := byteRange(r.Header.Get(copySourceRangeHeader), len(source.data))
+	if err != nil {
+		f.refuseLocked(w, r, http.StatusBadRequest, "InvalidRange")
+		return
+	}
+	body := bytes.Clone(source.data[start : end+1])
+	parts[int32(number)] = body
+	if f.partCopyWithoutLabel {
+		f.writeLocked(w, http.StatusOK, `<CopyPartResult></CopyPartResult>`)
+		return
+	}
+	sum := md5.Sum(body) //nolint:gosec // the label the store reports
+	f.writeLocked(w, http.StatusOK, fmt.Sprintf(
+		`<CopyPartResult><ETag>&quot;%s&quot;</ETag></CopyPartResult>`, hex.EncodeToString(sum[:])))
+}
+
+// copySource reads the key a copy names, which the caller escapes the way a
+// path is escaped and which carries the bucket in front of it.
+func (f *fakeS3) copySource(r *http.Request) (string, error) {
+	raw := strings.TrimPrefix(r.Header.Get(copySourceHeader), "/")
+	key, err := url.PathUnescape(raw)
+	if err != nil {
+		return "", err
+	}
+	rest, ok := strings.CutPrefix(key, "bucket/")
+	if !ok {
+		return "", fmt.Errorf("the source %q names another bucket", key)
+	}
+	return rest, nil
+}
+
+// byteRange reads the inclusive range a part copy names, or the whole object
+// when it names none.
+func byteRange(header string, size int) (start, end int64, err error) {
+	if header == "" {
+		return 0, int64(size) - 1, nil
+	}
+	first, last, ok := strings.Cut(strings.TrimPrefix(header, "bytes="), "-")
+	if !ok {
+		return 0, 0, fmt.Errorf("the range %q is not bytes=<first>-<last>", header)
+	}
+	if start, err = strconv.ParseInt(first, 10, 64); err != nil {
+		return 0, 0, err
+	}
+	if end, err = strconv.ParseInt(last, 10, 64); err != nil {
+		return 0, 0, err
+	}
+	if start < 0 || end >= int64(size) || start > end {
+		return 0, 0, fmt.Errorf("the range %q is outside an object of %d bytes", header, size)
+	}
+	return start, end, nil
 }
 
 // body reads the request body, decoding the aws-chunked framing and

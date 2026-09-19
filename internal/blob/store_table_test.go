@@ -92,6 +92,44 @@ func runStoreTable(t *testing.T, open func(t *testing.T) storeUnderTest) {
 		}
 	})
 
+	t.Run("a copy lands the bytes at another key and leaves the source", func(t *testing.T) {
+		s := open(t)
+		from, to := s.prefix+"copy-source", s.prefix+"copy-destination"
+		body := []byte("the bytes one object moves with")
+		if _, err := s.store.Put(t.Context(), from, bytes.NewReader(body), int64(len(body)), PutOptions{ContentType: "text/markdown"}); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+		copied, err := s.store.Copy(t.Context(), from, to, PutOptions{})
+		if err != nil {
+			t.Fatalf("Copy: %v", err)
+		}
+		if copied.Size != int64(len(body)) {
+			t.Errorf("the destination is %d bytes, want %d", copied.Size, len(body))
+		}
+		if copied.ContentType != "text/markdown" {
+			t.Errorf("the destination carries %q, want the source's media type", copied.ContentType)
+		}
+		rc, held, err := s.store.Get(t.Context(), to)
+		if err != nil {
+			t.Fatalf("Get the destination: %v", err)
+		}
+		defer func() { _ = rc.Close() }()
+		if got, _ := io.ReadAll(rc); !bytes.Equal(got, body) {
+			t.Fatalf("the destination holds %q", got)
+		}
+		if held.Size != int64(len(body)) {
+			t.Errorf("the destination reads back as %d bytes", held.Size)
+		}
+		// A move never deletes. The source keys go at the sunset of spec
+		// 019 and not with the copy.
+		if source, err := s.store.Head(t.Context(), from); err != nil || source.Size != int64(len(body)) {
+			t.Fatalf("the copy changed the source: %+v, %v", source, err)
+		}
+		if _, err := s.store.Copy(t.Context(), s.prefix+"copy-of-nothing", s.prefix+"copy-nowhere", PutOptions{}); !errors.Is(err, ErrNotFound) {
+			t.Errorf("a copy of a missing source = %v", err)
+		}
+	})
+
 	t.Run("a missing key is not found", func(t *testing.T) {
 		s := open(t)
 		key := s.prefix + "never-written"

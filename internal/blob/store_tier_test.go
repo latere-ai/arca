@@ -302,6 +302,216 @@ func TestStoreAnAbortOfAFinishedUploadSucceeds(t *testing.T) {
 	}
 }
 
+// The bounds the copy cases run the tail under. A source above five
+// gibibytes is what the API refuses in one call, and a fixture of that size
+// is minutes of a store's time for a branch six lines long, so the tier
+// lowers the two bounds instead and copies twelve mebibytes in three ranges.
+// Five mebibytes is the smallest part a real store accepts for any part but
+// the last, so the part size is that and the limit is just above it.
+const (
+	tierCopyPartSize = 5 << 20
+	tierCopyLimit    = tierCopyPartSize + 1
+	tierCopySize     = 12 << 20
+)
+
+// tierCopying opens a client whose copy branches at the tier's bounds rather
+// than at the API's.
+func tierCopying(t *testing.T) (*S3, string) {
+	t.Helper()
+	endpoint, reason := stackEndpoint()
+	if reason != "" {
+		t.Skip(reason)
+	}
+	store, err := NewS3(t.Context(), Options{
+		Bucket:       envOr("E2E_S3_BUCKET", "arca-test"),
+		Endpoint:     endpoint,
+		Region:       "us-east-1",
+		AccessKey:    envOr("E2E_S3_KEY", "minioadmin"),
+		SecretKey:    envOr("E2E_S3_SECRET", "minioadmin"),
+		PathStyle:    true,
+		CopyLimit:    tierCopyLimit,
+		CopyPartSize: tierCopyPartSize,
+	})
+	if err != nil {
+		t.Fatalf("open the store: %v", err)
+	}
+	prefix := fmt.Sprintf("test-%d-%d/", time.Now().UnixNano(), os.Getpid())
+	t.Cleanup(func() { sweep(t, store, prefix) })
+	return store, prefix
+}
+
+// TestStoreACopyMovesASmallObjectServerSide is the one call branch of the
+// object move of spec 019 against a real store: the bytes arrive at the
+// destination and the source is untouched, with no body crossing the
+// network, which is what a server side copy is for.
+func TestStoreACopyMovesASmallObjectServerSide(t *testing.T) {
+	store, prefix := tier(t)
+	from, to := prefix+"drive/u-1/files/notes.md", prefix+"1f/small"
+	body := []byte("the bytes one object moves with")
+	if _, err := store.Put(t.Context(), from, bytes.NewReader(body), int64(len(body)), PutOptions{ContentType: "text/markdown"}); err != nil {
+		t.Fatal(err)
+	}
+
+	copied, err := store.Copy(t.Context(), from, to, PutOptions{})
+	if err != nil {
+		t.Fatalf("Copy: %v", err)
+	}
+	if copied.Size != int64(len(body)) || copied.ContentType != "text/markdown" {
+		t.Errorf("the destination is %+v", copied)
+	}
+	head, err := store.Head(t.Context(), to)
+	if err != nil || head.Size != int64(len(body)) {
+		t.Fatalf("Head the destination = %+v, %v", head, err)
+	}
+	// The label a single copy carries is the digest of the whole object, so
+	// the destination reads back under the label the copy answered.
+	if head.ETag != copied.ETag {
+		t.Errorf("the copy answered %q and the store holds %q", copied.ETag, head.ETag)
+	}
+	rc, _, err := store.Get(t.Context(), to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rc.Close() }()
+	if got, _ := io.ReadAll(rc); !bytes.Equal(got, body) {
+		t.Fatalf("the destination reads back as %q", got)
+	}
+	if _, err := store.Head(t.Context(), from); err != nil {
+		t.Fatalf("the copy removed the source: %v", err)
+	}
+}
+
+// TestStoreACopyOfAPublicObjectIsStampedAndNotCarried holds the move's rule
+// for a public row against a real store: a copy carries no ACL, so the
+// destination is stamped afterwards, and a store that holds no object ACLs
+// says so rather than failing the move.
+func TestStoreACopyOfAPublicObjectIsStampedAndNotCarried(t *testing.T) {
+	store, prefix := tier(t)
+	from, to := prefix+"drive/u-1/files/avatar.png", prefix+"1f/public"
+	body := []byte("the bytes of a public object")
+	if _, err := store.Put(t.Context(), from, bytes.NewReader(body), int64(len(body)), PutOptions{ContentType: "image/png"}); err != nil {
+		t.Fatal(err)
+	}
+	// The MinIO the stack pins answers NotImplemented to an object ACL and
+	// offers bucket policies instead, which spec 003 has blob report as
+	// ErrNotSupported. The source is stamped where the store stamps at all,
+	// and the move's re-stamp of the destination is read the same way.
+	stamped := store.SetPublic(t.Context(), from, true)
+	if stamped != nil && !errors.Is(stamped, ErrNotSupported) {
+		t.Fatalf("SetPublic on the source = %v", stamped)
+	}
+
+	copied, err := store.Copy(t.Context(), from, to, PutOptions{})
+	if err != nil {
+		t.Fatalf("Copy: %v", err)
+	}
+	if copied.ContentType != "image/png" {
+		t.Errorf("the destination carries %q", copied.ContentType)
+	}
+	switch err := store.SetPublic(t.Context(), to, true); {
+	case stamped == nil && err != nil:
+		t.Fatalf("the re-stamp of the destination = %v on a store that stamps", err)
+	case stamped != nil && !errors.Is(err, ErrNotSupported):
+		t.Fatalf("the re-stamp of the destination = %v on a store without object ACLs", err)
+	}
+	rc, _, err := store.Get(t.Context(), to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rc.Close() }()
+	if got, _ := io.ReadAll(rc); !bytes.Equal(got, body) {
+		t.Fatalf("the destination reads back as %q", got)
+	}
+}
+
+// TestStoreACopyAboveTheLimitGoesThroughTheTail is the multipart branch
+// against a real store, at the bounds tierCopying lowers so a twelve
+// mebibyte fixture reaches it.
+func TestStoreACopyAboveTheLimitGoesThroughTheTail(t *testing.T) {
+	store, prefix := tierCopying(t)
+	from, to := prefix+"drive/u-1/files/big.bin", prefix+"1f/tailed"
+	body := bytes.Repeat([]byte("z"), tierCopySize)
+	if _, err := store.Put(t.Context(), from, bytes.NewReader(body), int64(len(body)), PutOptions{ContentType: "application/octet-stream"}); err != nil {
+		t.Fatal(err)
+	}
+
+	copied, err := store.Copy(t.Context(), from, to, PutOptions{})
+	if err != nil {
+		t.Fatalf("Copy through the tail: %v", err)
+	}
+	if copied.Size != int64(len(body)) {
+		t.Errorf("the destination is %d bytes, want %d", copied.Size, len(body))
+	}
+	// Two ranges of five mebibytes and a remainder, assembled, so the store
+	// labels the destination the way it labels an upload in parts.
+	if !strings.HasSuffix(copied.ETag, "-3") {
+		t.Errorf("the label is %q, want the composite of three parts", copied.ETag)
+	}
+	head, err := store.Head(t.Context(), to)
+	if err != nil || head.Size != int64(len(body)) {
+		t.Fatalf("Head the destination = %+v, %v", head, err)
+	}
+	rc, _, err := store.Get(t.Context(), to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rc.Close() }()
+	got, err := io.ReadAll(rc)
+	if err != nil || !bytes.Equal(got, body) {
+		t.Fatalf("the destination reads back as %d bytes, %v", len(got), err)
+	}
+	if _, err := store.Head(t.Context(), from); err != nil {
+		t.Fatalf("the tail removed the source: %v", err)
+	}
+}
+
+// TestStoreTheConditionalCopyIsNotHonouredByEveryStore records what the
+// stack's MinIO answers to If-None-Match: * on a copy, which is the finding
+// the object move of spec 019 rests its resume on.
+//
+// The store neither honours the condition nor refuses it: it overwrites. So
+// a move cannot read a refusal as "the destination is already there" and
+// cannot read a success as "it was not". It reads the destination instead,
+// which is what tools/move-objects does before it copies anything. The
+// completion of a copied tail is the other half of the finding: the same
+// store does hold to the condition there.
+func TestStoreTheConditionalCopyIsNotHonouredByEveryStore(t *testing.T) {
+	store, prefix := tierCopying(t)
+	from, to := prefix+"drive/u-1/files/notes.md", prefix+"1f/contended"
+	body := []byte("the first bytes")
+	if _, err := store.Put(t.Context(), from, bytes.NewReader(body), int64(len(body)), PutOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	held := []byte("the bytes already at the destination")
+	if _, err := store.Put(t.Context(), to, bytes.NewReader(held), int64(len(held)), PutOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	switch _, err := store.Copy(t.Context(), from, to, PutOptions{}); {
+	case errors.Is(err, ErrPreconditionFailed):
+		t.Log("the store honours the conditional copy")
+	case err == nil:
+		t.Log("the store ignores the conditional copy and overwrites; the move reads the destination first")
+	default:
+		t.Fatalf("the conditional copy = %v", err)
+	}
+	if store.Unconditional() {
+		t.Error("a copy recorded the store as refusing the condition, which is a third answer again")
+	}
+
+	big, bigTo := prefix+"drive/u-1/files/big.bin", prefix+"1f/contended-tail"
+	large := bytes.Repeat([]byte("z"), tierCopySize)
+	if _, err := store.Put(t.Context(), big, bytes.NewReader(large), int64(len(large)), PutOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Copy(t.Context(), big, bigTo, PutOptions{}); err != nil {
+		t.Fatalf("the first tail: %v", err)
+	}
+	if _, err := store.Copy(t.Context(), big, bigTo, PutOptions{}); !errors.Is(err, ErrPreconditionFailed) {
+		t.Errorf("the second tail onto the same key = %v, want ErrPreconditionFailed", err)
+	}
+}
+
 // TestStoreTheTierSkipsWithoutTheStack is criterion 5 of spec 014: a tier
 // whose variables are unset skips with the remediation in its message.
 func TestStoreTheTierSkipsWithoutTheStack(t *testing.T) {

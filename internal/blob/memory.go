@@ -127,6 +127,35 @@ func (m *Memory) Put(_ context.Context, key string, body io.Reader, _ int64, o P
 	return Written{Size: int64(len(data)), SHA256: hex.EncodeToString(sum[:]), ETag: etag}, nil
 }
 
+// Copy moves the bytes of one key to another, refusing a destination the
+// store already holds.
+//
+// Publicity does not travel with the bytes, the way an object ACL does not
+// travel with a CopyObject: the object move of spec 019 re-stamps the
+// destination through SetPublic, and this store keeps that rule, so a test of
+// the move against the map proves what it proves against a bucket.
+func (m *Memory) Copy(_ context.Context, from, to string, o PutOptions) (Object, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	source, held := m.objects[from]
+	if !held {
+		return Object{}, fmt.Errorf("blob: copy the source %q: %w", from, ErrNotFound)
+	}
+	if _, exists := m.objects[to]; exists {
+		return Object{}, fmt.Errorf("blob: copy %q: %w", to, ErrPreconditionFailed)
+	}
+	copied := memoryObject{
+		data:        bytes.Clone(source.data),
+		contentType: source.contentType,
+		etag:        source.etag,
+	}
+	if o.ContentType != "" {
+		copied.contentType = o.ContentType
+	}
+	m.objects[to] = copied
+	return object(copied), nil
+}
+
 // Get opens the object's body.
 func (m *Memory) Get(_ context.Context, key string) (io.ReadCloser, Object, error) {
 	m.mu.Lock()
