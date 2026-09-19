@@ -162,7 +162,7 @@ identity:
   # asks through latere.ai/x/pkg/authz, so both waivers are gone and the
   # real rules run.
 
-# The database shape of the family: specs/infrastructure/database-pooling.md in latere-ai/specs
+# The database shape: which endpoint the serving path connects on.
 postgres:
   # Direct until this repository's cutover release reads ARCA_DATABASE_POOL_URL.
   role: direct
