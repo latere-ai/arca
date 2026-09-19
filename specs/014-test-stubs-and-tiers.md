@@ -299,6 +299,17 @@ tier asserts, which every other spec's acceptance criteria own.
 | 7 | Every tier binds `:0`, keeps files under `t.TempDir()`, uses a schema and a bucket prefix of its own, and leaves neither behind | each tier's harness: `tier` in the store packages and `start`, `schema` and `bucketPrefix` in `test/e2e`, each sweeping in `t.Cleanup`, with the bucket listing at the end of `TestE2ECheckPassesAgainstTheStack` proving the prefix is empty afterwards |
 | 8 | `make run` on a clean clone completes the seven steps, `arcad check` prints five `ok` lines, and the printed `curl` puts and reads one object | `TestMakeRun`, reading the `run` target; `TestE2ECheckPassesAgainstTheStack` for the five lines and `TestE2EAPutRoundTripsAndAReadAboveTheBoundaryRedirects` for the round trip, both against a running stack |
 | 9 | Two clones run `make run` at once without a port or volume collision | `TestMakeRunSideBySide`, reading the derivation in the Makefile and `compose.yaml` |
-| 10 | One e2e test drives `arcad` as a process: the subcommands, the two listeners, the probes, and `check` | `TestE2EBinary` |
+| 10 | One e2e test drives `arcad` as a process: the subcommands, the two listeners, the probes, and `check` | `TestE2EBinaryServesItsProbesAgainstBothStores`, with `TestE2EMigrateIsIdempotent`, `TestE2EAnUnknownSubcommandIsAUsageError` and `TestE2ECheckPassesAgainstTheStack` for the subcommands beside `serve` |
 | 11 | Coverage over the three profiles is at least 90% for every package, `test/stubs` included | the `cover` gate with three `-profile` flags. Open: the reusable workflow takes no input to pass them, so the floor is the unit tier's. See Current state |
 | 12 | `verify.yml` has one job per service tier with the command from the table, on hosted runners | `TestWorkflowJobsMatchTheTable`, reading `verify.yml` |
+
+Criterion 8 is three assertions rather than one, because no test runs `make
+run`: the target needs the whole stack and starts a server of its own beside
+the tier's. `TestMakeRun` holds the target to the seven steps by the command
+each runs, and the two steps that reach a running installation are held where
+one is running: the five `ok` lines by `TestE2ECheckPassesAgainstTheStack`
+and the put and the read by
+`TestE2EAPutRoundTripsAndAReadAboveTheBoundaryRedirects`. That the printed
+requests work as printed against the run's own installation is checked by
+hand whenever `make run` changes; on 2026-09-19 the put answered `201` with
+the object's checksum and the read answered its bytes.
