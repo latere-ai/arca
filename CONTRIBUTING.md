@@ -11,7 +11,7 @@ stores; without one, the gate and the unit suite still run.
 
 ```sh
 make       # the quality gate: formatting, linting, the suite, coverage, the specs
-make run   # Postgres, MinIO, the stubs, the migrations, and arcad, in that order
+make run   # Postgres, MinIO, the stubs, the migrations, arcad, and a check of it
 ```
 
 `make` needs only the Go toolchain and git. Everything it pins comes from

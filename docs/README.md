@@ -20,14 +20,17 @@ make run
 ```
 
 It builds `arcad` and the test stubs, starts Postgres and MinIO from
-`compose.yaml` with the bucket created, applies the migrations, starts the
-server, and prints the address and a token minted at the stub issuer. The
-ports derive from the directory name, so two clones run side by side, and
+`compose.yaml` with the bucket created, applies the migrations, and starts
+the server. Once the server is ready it runs `arcad check` against it, so
+you see one line per requirement of the installation, and then prints the
+address, a token minted at the stub issuer, and two requests: one that
+writes an object to your own space and one that reads it back. The ports
+derive from the directory name, so two clones run side by side, and
 everything is published on loopback.
 
 | Command | |
 |---|---|
-| `make run` | the stack, the stubs, the migrations, and the server, in that order |
+| `make run` | the stack, the stubs, the migrations, the server, the check against it, and the token and the two requests to try it with, in that order |
 | `make run-down` | stops the server and the stubs and leaves the stack up, so a failed run is debuggable |
 | `make up`, `make down` | the stack alone |
 | `make test-conformance` | the conformance suite against an installation it brings up on the stack: every route of the [API spec](../specs/013-api.md) this build answers, every error code it can provoke, and the pagination and conditional requests that spec fixes. It runs against any other installation with `-url` and a token |
