@@ -126,10 +126,12 @@ The cutover itself:
    report is read, not skimmed: it names every dropped row, and it names
    the bytes finding on every run.
 
-   - The objects move to their new keys, one bucket write per distinct
-     key. This has no design and no tool as of 2026-09-19, and it is
-     what the bytes row of "The data" records. Step 4 does not begin
-     until it has run and criterion 4 holds.
+   - The objects move to their new keys. `tools/migrate-drive` writes,
+     beside its report, a manifest of every distinct Drive key it read
+     and the object id it minted for it; `tools/move-objects`, proposed
+     below and not built, reads that manifest and copies each object to
+     its id's key. Step 4 does not begin until the move's own
+     verification holds and criterion 4 is proved.
 4. The origin's routes for the storage prefixes switch from Drive's
    service to Arca's. The console's Storage section, which calls the
    origin, follows without a change. Drive's own host answers a redirect
@@ -139,6 +141,39 @@ The cutover itself:
    maintainer's smoke: one object put through the console, read through
    the origin with a narrowed personal key, refused a write with reason
    `grant`.
+
+### The object move, proposed 2026-09-19
+
+> For the maintainer's review before it is built. The row copy is done;
+> this is the half the bytes finding added.
+
+Drive's key is `drive/<owner>/<path>`, with `@<12 hex>` appended on a
+versioned write; Arca's is `<prefix><shard>/<id>`. Every row the copy
+writes carries an id the copy minted, so every byte has to be reachable
+at that id's key before a read through Arca can succeed. The move is a
+server-side copy inside one bucket, which S3 and every store the family
+runs (Spaces, MinIO) answer with `CopyObject`, so no byte crosses the
+network twice and the cost is one request per distinct key.
+
+| Piece | Design |
+|---|---|
+| the manifest | `migrate-drive` gains `-manifest <path>`: one line per distinct source key, `<drive key>\t<object id>\t<size>\t<checksum>`, written before the tables commit and complete only when the report says verified. It is the one artefact that ties a row to a byte, and the move refuses to run without it |
+| `tools/move-objects` | reads the manifest, and for each line issues `CopyObject` from the source key to `id.Key(prefix)` with `If-None-Match: *` on the destination, then `Head`s the destination and compares size and checksum to the line. Idempotent: a destination that exists with the right size and checksum is a skip, so a killed run resumes. Concurrency bounded by a flag, default 16. A dry run `Head`s every source and writes nothing. Exit 1 on any mismatch, naming the key |
+| `blob.Blob` | gains `Copy(ctx, from, to string, o PutOptions) (Object, error)` with the S3 call, the fake, and the counter; one interface method, tested in the store tier against MinIO |
+| the source keys | left in place until the sunset. The move never deletes; the reaper does not read `drive/<owner>/` keys because they carry no id (`object.ParseKey` refuses them), so they are invisible to the sweep and to Arca. Step 4 of the sunset deletes them by listing the prefix and skipping every key the manifest maps, after criterion 4 has held for the smoke |
+| public objects | Drive stamped `public-read` on the source key; `CopyObject` does not carry an ACL, so the move re-stamps the destination through `SetPublic` for every row the copy marked public |
+| the multipart tail | a Drive object above 5 GiB cannot be copied in one `CopyObject`; the move uses `UploadPartCopy` for those, which the SDK offers. At Drive's current sizes this branch is expected to run zero times; it is written and tested against MinIO so the number is not a guess |
+| order | copy rows (step 3) with the manifest, run the move, verify, then switch routes. The rows point at ids from the moment they are written, so nothing reads Arca before the move completes; Drive is read-only throughout, so the source keys do not change under the copy |
+
+Criterion 4 splits into its two halves: the rows (the copy's report) and
+the bytes (the move's verification, every manifest line `Head`ed at its
+destination with the right size and checksum). Both are recorded in the
+Outcome with their dates.
+
+What this costs: one request per distinct key, minutes to an hour at the
+counts a `-dry-run` will print from production. What it avoids: teaching
+Arca to read two key shapes, which would put Drive's owner-and-path
+addressing into the core forever.
 
 There is no window in which both serve writes, so there is nothing to
 reconcile afterwards, and no window in which either serves stale reads.
