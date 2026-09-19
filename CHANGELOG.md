@@ -21,6 +21,15 @@ tag carries the same service with the two release files fixed.
   own ports and entrypoint. A test holds the file to what the workflow
   builds.
 
+- `tools/migrate-drive`, the row copy of spec 019: it reads the
+  predecessor's database, rewrites every owner to a subject, drops what
+  did not arrive and counts each dropped row, writes one transaction per
+  table, refuses a target that already holds rows, and verifies counts
+  and a sample of checksums. Building it found that the predecessor's
+  bucket keys hold no object id, so the bytes need a move the cutover
+  has yet to plan; the spec records the finding and the tool mints a
+  fresh id per key and says so.
+
 Everything `v0.1.0`'s section says applies to this tag.
 
 ## v0.1.0 - 2026-09-19
