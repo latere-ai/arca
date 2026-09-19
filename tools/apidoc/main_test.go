@@ -17,7 +17,7 @@ import (
 	"latere.ai/x/arca/authorizer"
 )
 
-// TestTheCommittedDocumentIsCurrent is criterion 13 of spec 013: the file at
+// TestTheCommittedDocumentIsCurrent is criterion 13a of spec 013: the file at
 // api/openapi.yaml equals a fresh generation, so a route added without
 // running `make openapi` does not reach main. It is the drift test the
 // predecessor carried, over a route table that is a declaration rather than
