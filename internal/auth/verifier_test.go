@@ -5,6 +5,7 @@ package auth_test
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -175,10 +176,6 @@ func TestTheVerifierRefusesToStartOnABadDeployment(t *testing.T) {
 		{"an issuer listed twice", auth.VerifierOptions{
 			Issuers: []string{iss.URL(), iss.URL() + "/"}, Audience: audience,
 		}, "twice"},
-		{"an issuer that does not answer", auth.VerifierOptions{
-			Issuers: []string{"https://127.0.0.1:1/nowhere"}, Audience: audience,
-			HTTP: &http.Client{Timeout: time.Second},
-		}, "ARCA_OIDC_ISSUERS"},
 		{"an issuer that is not a URL", auth.VerifierOptions{
 			Issuers: []string{"::not a url"}, Audience: audience,
 		}, "is not a URL"},
@@ -215,14 +212,20 @@ func TestAnHTTPIssuerOffLoopbackNeedsTheVariable(t *testing.T) {
 		t.Fatalf("an http issuer on loopback was refused: %v", err)
 	}
 	// Off loopback the same scheme needs the variable, and with it the
-	// start-up gets as far as reading the issuer, which is the refusal that
-	// proves the scheme check passed.
-	_, err := auth.NewVerifier(t.Context(), auth.VerifierOptions{
+	// start-up gets as far as reading the issuer: the verifier is built, and
+	// what fails is the readiness check against an issuer that is not there
+	// rather than the scheme.
+	v, err := auth.NewVerifier(t.Context(), auth.VerifierOptions{
 		Issuers: []string{"http://issuer.example"}, Audience: audience, Insecure: true,
 		HTTP: &http.Client{Timeout: 2 * time.Second},
+		Log:  slog.New(slog.DiscardHandler), WarmRetry: time.Hour, WarmRetryMax: time.Hour,
 	})
+	if err != nil {
+		t.Fatalf("the scheme was still refused with the variable set: %v", err)
+	}
+	err = v.Check(t.Context())
 	if err == nil {
-		t.Fatal("an issuer that does not exist was accepted")
+		t.Fatal("an issuer that does not exist passed the issuers check")
 	}
 	if strings.Contains(err.Error(), "ARCA_OIDC_INSECURE_ISSUERS") {
 		t.Errorf("the scheme was still refused with the variable set: %v", err)
@@ -306,20 +309,27 @@ func TestMiddlewareAdmitsAndRefuses(t *testing.T) {
 }
 
 // TestAWarmFailureNamesTheVariable: an issuer that answers its discovery
-// document and then goes away is a start-up failure naming ARCA_OIDC_ISSUERS,
-// not a replica that starts and refuses every token.
+// document and then goes away leaves a verifier that is built and not ready.
+// The failure is on the readiness check named issuers, where it names
+// ARCA_OIDC_ISSUERS, and not on the start-up: a replica that exited here
+// would crash-loop through an outage its own configuration is right about.
 func TestAWarmFailureNamesTheVariable(t *testing.T) {
 	iss := issuer(t)
 	url := iss.URL()
 	iss.Close()
-	_, err := auth.NewVerifier(context.Background(), auth.VerifierOptions{
+	v, err := auth.NewVerifier(context.Background(), auth.VerifierOptions{
 		Issuers: []string{url}, Audience: audience, HTTP: &http.Client{Timeout: 2 * time.Second},
+		Log: slog.New(slog.DiscardHandler), WarmRetry: time.Hour, WarmRetryMax: time.Hour,
 	})
+	if err != nil {
+		t.Fatalf("an issuer that is not there stopped the verifier being built: %v", err)
+	}
+	err = v.Check(context.Background())
 	if err == nil {
-		t.Fatal("the verifier started against an issuer that is not there")
+		t.Fatal("the issuers check passes against an issuer that is not there")
 	}
 	if !strings.Contains(err.Error(), "ARCA_OIDC_ISSUERS") {
-		t.Errorf("the refusal is %q and does not name the variable", err)
+		t.Errorf("the check reports %q and does not name the variable", err)
 	}
 }
 

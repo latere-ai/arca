@@ -4,8 +4,13 @@
 package auth_test
 
 import (
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"latere.ai/x/pkg/authkit/issuertest"
 	"latere.ai/x/pkg/authz/stub"
@@ -142,4 +147,141 @@ func TestTheVerifierStartedByStartIsTheOneTheNodeRuns(t *testing.T) {
 	if id.Verifier.Audience() != audience {
 		t.Errorf("the audience is %q, want %q", id.Verifier.Audience(), audience)
 	}
+}
+
+// gatedIssuer is the family's stub issuer behind a gate a test opens and
+// closes. The URL never moves, so a test takes the issuer away and puts it
+// back the way a cluster does while the issuer's pod is not up yet, and a
+// closed gate answers 503 rather than refusing the connection, which is the
+// same verdict a warm reads from an issuer that is not there.
+type gatedIssuer struct {
+	*issuertest.Server
+	open atomic.Bool
+}
+
+// gated starts one, closed.
+func gated(t *testing.T) *gatedIssuer {
+	t.Helper()
+	front := httptest.NewUnstartedServer(nil)
+	g := &gatedIssuer{Server: issuertest.NewHandler(
+		issuertest.WithIssuer("http://"+front.Listener.Addr().String()),
+		issuertest.WithDefaultAudience(audience),
+	)}
+	stub := g.Handler()
+	front.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !g.open.Load() {
+			http.Error(w, "the issuer is not there", http.StatusServiceUnavailable)
+			return
+		}
+		stub.ServeHTTP(w, r)
+	})
+	front.Start()
+	t.Cleanup(front.Close)
+	return g
+}
+
+// quiet is a logger a test does not read.
+func quiet() *slog.Logger { return slog.New(slog.DiscardHandler) }
+
+// awaitWarm waits for the issuers check to pass.
+func awaitWarm(t *testing.T, id *auth.Identity) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if err := id.Verifier.Check(t.Context()); err == nil {
+			return
+		} else if time.Now().After(deadline) {
+			t.Fatalf("the issuer came back and the check never passed: %v", err)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// TestStartWarmsBestEffort is spec 006's warm-up row and spec 002's issuers
+// check together: the warm is an optimisation and not a gate, so the three
+// states it can be in are a replica that serves, a replica that serves and
+// is ready, and a replica that serves and is not.
+//
+// A failed warm that exited would make every installation's start
+// order-dependent on its issuer and would crash-loop a replica through a
+// transient issuer outage, which is what the kind stack of spec 016 hit.
+func TestStartWarmsBestEffort(t *testing.T) {
+	t.Run("the issuer answers at start", func(t *testing.T) {
+		iss := gated(t)
+		iss.open.Store(true)
+		id, err := auth.Start(t.Context(), auth.Options{
+			Issuers: []string{iss.URL()}, Audience: audience, Log: quiet(),
+		})
+		if err != nil {
+			t.Fatalf("the node would not start: %v", err)
+		}
+		if err := id.Verifier.Check(t.Context()); err != nil {
+			t.Errorf("the issuers check fails against an issuer that answered: %v", err)
+		}
+		if len(iss.Requests()) == 0 {
+			t.Error("the node started without reading the issuer, so the warm did nothing")
+		}
+	})
+
+	t.Run("the issuer answers later", func(t *testing.T) {
+		iss := gated(t)
+		id, err := auth.Start(t.Context(), auth.Options{
+			Issuers: []string{iss.URL()}, Audience: audience, Log: quiet(),
+			WarmRetry: 5 * time.Millisecond, WarmRetryMax: 20 * time.Millisecond,
+		})
+		if err != nil {
+			t.Fatalf("an issuer that is not up yet stopped the node: %v", err)
+		}
+		if err := id.Verifier.Check(t.Context()); err == nil {
+			t.Fatal("the issuers check passes while no issuer has answered")
+		}
+		iss.open.Store(true)
+		awaitWarm(t, id)
+	})
+
+	t.Run("the issuer never answers", func(t *testing.T) {
+		var log strings.Builder
+		iss := gated(t)
+		// The retry is left at its default here, which is the schedule a
+		// deployment runs on: the first is a second away, so nothing has
+		// retried by the time the check below reads the verdict.
+		id, err := auth.Start(t.Context(), auth.Options{
+			Issuers: []string{iss.URL()}, Audience: audience,
+			Log: slog.New(slog.NewTextHandler(&log, nil)),
+		})
+		if err != nil {
+			t.Fatalf("an issuer that is not there stopped the node: %v", err)
+		}
+		// One line in the developer register, naming the variable to fix.
+		if got := log.String(); !strings.Contains(got, "ARCA_OIDC_ISSUERS") {
+			t.Errorf("the start-up log is %q and does not name the variable", got)
+		}
+		time.Sleep(50 * time.Millisecond)
+		err = id.Verifier.Check(t.Context())
+		if err == nil {
+			t.Fatal("the issuers check passes against an issuer that is not there")
+		}
+		if !strings.Contains(err.Error(), "ARCA_OIDC_ISSUERS") {
+			t.Errorf("the check reports %q, which does not name the variable", err)
+		}
+	})
+
+	// The warm is what saves the first request a discovery, not what makes a
+	// token verifiable: the shared validator fetches on the first token of an
+	// issuer it has not read. The retry here is an hour, so nothing in the
+	// background can have warmed it.
+	t.Run("the first request pays the discovery the warm did not", func(t *testing.T) {
+		iss := gated(t)
+		id, err := auth.Start(t.Context(), auth.Options{
+			Issuers: []string{iss.URL()}, Audience: audience, Log: quiet(),
+			WarmRetry: time.Hour, WarmRetryMax: time.Hour,
+		})
+		if err != nil {
+			t.Fatalf("an issuer that is not up yet stopped the node: %v", err)
+		}
+		iss.open.Store(true)
+		if _, err := id.Verifier.Verify(iss.Mint(issuertest.Claims{Sub: "9ab3"})); err != nil {
+			t.Fatalf("the first request did not pay for the discovery the warm missed: %v", err)
+		}
+	})
 }

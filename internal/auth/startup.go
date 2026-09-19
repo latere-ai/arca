@@ -6,6 +6,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -57,6 +58,13 @@ type Options struct {
 	// owner policy decides in process and makes no call to observe.
 	// Optional.
 	Decided func(source, outcome string)
+	// Log receives the line a failed start-up warm writes and the line the
+	// warm that finally succeeds writes. slog's default when nil.
+	Log *slog.Logger
+	// WarmRetry and WarmRetryMax bound the retry of a failed start-up warm:
+	// the first delay and the ceiling it doubles to. DefaultWarmRetry and
+	// DefaultWarmRetryMax when zero.
+	WarmRetry, WarmRetryMax time.Duration
 }
 
 // Identity is what the node holds once spec 006 is wired: who a caller is,
@@ -68,9 +76,15 @@ type Identity struct {
 }
 
 // Start builds the two and refuses to start on anything spec 006 says is a
-// start-up failure: an issuer that does not answer or names an unusable
-// scheme, and an authorizer URL with no bearer. Every refusal names the
-// variable, so a deployment is fixed rather than guessed at.
+// start-up failure: no issuer, an issuer that names an unusable scheme, and
+// an authorizer URL with no bearer. Every refusal names the variable, so a
+// deployment is fixed rather than guessed at.
+//
+// An issuer that does not answer is not one of them. It is a warm that
+// failed, which [NewVerifier] turns into one log line, a background retry
+// and a readiness check that fails until an issuer answers: a replica whose
+// issuer is a moment late must not decide the order an installation starts
+// in, and a transient outage must not crash-loop it.
 //
 // It is the only place the two are built, so a node, a test tier and the
 // check command all get the same wiring.
@@ -81,6 +95,7 @@ func Start(ctx context.Context, o Options) (*Identity, error) {
 	}
 	verifier, err := NewVerifier(ctx, VerifierOptions{
 		Issuers: o.Issuers, Audience: o.Audience, Insecure: o.InsecureIssuers, HTTP: client,
+		Log: o.Log, WarmRetry: o.WarmRetry, WarmRetryMax: o.WarmRetryMax,
 	})
 	if err != nil {
 		return nil, err

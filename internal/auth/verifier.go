@@ -7,12 +7,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"latere.ai/x/pkg/authkit/jwt"
@@ -27,6 +29,15 @@ const DefaultAudience = "arca"
 
 // DefaultFetchTimeout bounds one start-up read of an issuer.
 const DefaultFetchTimeout = 10 * time.Second
+
+// DefaultWarmRetry is the first delay between warms after the start-up one
+// failed, and DefaultWarmRetryMax the ceiling the delay doubles to. An
+// issuer that comes up a second after this process does is warm about a
+// second later, and one that stays away costs one read every half minute.
+const (
+	DefaultWarmRetry    = time.Second
+	DefaultWarmRetryMax = 30 * time.Second
+)
 
 // Caller is a verified bearer. Subject is the rendered subject every owner
 // field, every event, every lease holder and every authorizer request
@@ -57,6 +68,13 @@ type VerifierOptions struct {
 	Insecure bool
 	HTTP     *http.Client
 	CacheTTL time.Duration
+	// Log receives the one line a failed start-up warm writes and the one
+	// line a later warm writes when it succeeds. slog's default when nil.
+	Log *slog.Logger
+	// WarmRetry and WarmRetryMax bound the retry of a start-up warm that
+	// failed: the first delay, and the ceiling it doubles to.
+	// DefaultWarmRetry and DefaultWarmRetryMax when zero.
+	WarmRetry, WarmRetryMax time.Duration
 }
 
 // Verifier verifies a bearer against the listed issuers. It is one
@@ -71,13 +89,30 @@ type Verifier struct {
 	audience  string
 	issuers   []string
 	validator *jwt.Validator
+	// warm is the last warm's verdict, stored whole so a reader sees either
+	// a failure or its absence and never half of a swap. It is what the
+	// readiness check named issuers reports.
+	warm atomic.Pointer[warmResult]
 }
+
+// warmResult is one warm's verdict: nil err once every listed issuer has
+// answered, and the joined failure until then.
+type warmResult struct{ err error }
 
 // NewVerifier builds the verifier and warms it: every issuer's discovery
 // document and key set is read once at start, so the first request a replica
-// serves does not pay for a discovery, and an issuer that does not answer is
-// a deployment to fix rather than a stream of 401s to read in a log. The
-// refusal names the variable.
+// serves does not pay for a discovery.
+//
+// A warm that fails is not a start-up failure. The shared validator's Warm
+// is a report and not a verdict, and it fetches on the first token of an
+// issuer it has not read, so a replica whose issuer is not up yet serves
+// everything that carries no bearer and pays for the discovery on the first
+// request that does. Exiting instead would make every installation's start
+// order-dependent on its issuer and would crash-loop a replica through a
+// transient outage. The failure is one line in the developer register, a
+// retry in the background, and a readiness check named issuers that fails
+// until a warm succeeds, so the replica stays out of rotation while it
+// cannot verify (spec 006).
 //
 // Afterwards nothing here fetches on a request path. The shared validator
 // caches each set for its TTL, refreshes on an unknown kid under its own
@@ -133,10 +168,77 @@ func NewVerifier(ctx context.Context, o VerifierOptions) (*Verifier, error) {
 		// code of its own.
 		ReadsGrants: true,
 	})
-	if err := v.validator.Warm(ctx); err != nil {
-		return nil, fmt.Errorf("ARCA_OIDC_ISSUERS: %w", err)
+	log := o.Log
+	if log == nil {
+		log = slog.Default()
+	}
+	if err := v.warmOnce(ctx); err != nil {
+		log.WarnContext(ctx, "no issuer answered its discovery document at start; the readiness check issuers fails until one does, and the first request that carries a bearer pays for the discovery",
+			"variable", "ARCA_OIDC_ISSUERS", "issuers", v.issuers, "error", err)
+		go v.warmLoop(ctx, delayOr(o.WarmRetry, DefaultWarmRetry), delayOr(o.WarmRetryMax, DefaultWarmRetryMax), log)
 	}
 	return v, nil
+}
+
+// warmOnce reads every issuer's discovery document and key set once and
+// records the verdict where Check reads it. The failure names the variable,
+// because a probe that says which variable is wrong is a deployment fixed
+// rather than guessed at.
+func (v *Verifier) warmOnce(ctx context.Context) error {
+	err := v.validator.Warm(ctx)
+	if err != nil {
+		err = fmt.Errorf("ARCA_OIDC_ISSUERS: %w", err)
+	}
+	v.warm.Store(&warmResult{err: err})
+	return err
+}
+
+// warmLoop warms again until one succeeds or ctx ends. The delay doubles
+// from retry to max, so an issuer that is a moment late costs a moment and
+// an issuer that never arrives costs one read per max.
+func (v *Verifier) warmLoop(ctx context.Context, retry, max time.Duration, log *slog.Logger) {
+	for delay := retry; ; delay = min(delay*2, max) {
+		t := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return
+		case <-t.C:
+		}
+		if err := v.warmOnce(ctx); err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			continue
+		}
+		log.InfoContext(ctx, "every issuer answered; the key sets are read and the readiness check issuers passes",
+			"variable", "ARCA_OIDC_ISSUERS", "issuers", v.issuers)
+		return
+	}
+}
+
+// delayOr is a configured duration or the default, so a zero field means
+// the default and a test sets its own.
+func delayOr(d, fallback time.Duration) time.Duration {
+	if d <= 0 {
+		return fallback
+	}
+	return d
+}
+
+// Check is the readiness check of spec 002 named issuers: it passes once
+// every listed issuer's key set has been read and fails until then. It reads
+// the last warm's verdict and reaches no network, so a probe on a schedule
+// costs nothing and never outlives the probe's budget.
+//
+// Every listed issuer must have answered. An installation that trusts two
+// and can reach one serves half its callers a 401 it cannot explain, which
+// is a replica to take out of rotation rather than one to route to.
+func (v *Verifier) Check(context.Context) error {
+	if r := v.warm.Load(); r != nil {
+		return r.err
+	}
+	return nil
 }
 
 // checkIssuerURL holds an issuer to a scheme whose key set cannot be

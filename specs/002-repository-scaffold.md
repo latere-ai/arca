@@ -76,7 +76,13 @@ listener and path by path on the public one.
 
 Readiness runs its checks with a 2 second budget: `draining` today, the
 bucket's `HeadBucket` once [[003-object-store]] lands, the database's
-ping once [[004-metadata-store]] does. `arcad` keeps no state on local
+ping once [[004-metadata-store]] does, and `issuers` once
+[[006-identity]] does. `issuers` reads the verdict of the last warm and
+reaches no network, so it stays inside the budget: it fails while no
+listed issuer has answered its discovery document, and passes for good
+once every one has. A replica whose issuers are late therefore serves
+and stays out of rotation, rather than exiting and crash-looping until
+its issuer is up. `arcad` keeps no state on local
 disk, so there is no disk check and no data directory. Shutdown on
 `SIGTERM` or `SIGINT`: readiness answers 503 at once, the process waits
 a 3 second drain delay, then closes the HTTP servers with a 60 second

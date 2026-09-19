@@ -555,22 +555,36 @@ func TestReadinessAsksTheAuthorizerWhenOneIsConfigured(t *testing.T) {
 
 // TestReadinessHasNoAuthorizerCheckWithoutOne: with no endpoint configured
 // the owner policy decides in process, and a check of it would be a check of
-// this binary against itself.
+// this binary against itself. The issuers check is there either way: it is
+// what keeps a replica whose issuers have not answered out of rotation.
 func TestReadinessHasNoAuthorizerCheckWithoutOne(t *testing.T) {
 	// The two store checks are the merged set's, and neither is run here.
 	reachable := func(context.Context) error { return nil }
-	stores := []string{"draining", "bucket", "database"}
-
-	policy := &auth.Identity{Mode: auth.ModeOwnerPolicy}
-	if got := readiness(policy, make(chan struct{}), reachable, reachable); !reflect.DeepEqual(names(got), stores) {
-		t.Errorf("the owner policy's checks are %v, want %v", names(got), stores)
+	always := []string{"draining", "bucket", "database", "issuers"}
+	iss := issuertest.New(t, issuertest.WithDefaultAudience("arca"))
+	verifier, err := auth.NewVerifier(t.Context(), auth.VerifierOptions{
+		Issuers: []string{iss.URL()}, Audience: "arca",
+	})
+	if err != nil {
+		t.Fatalf("the verifier would not build: %v", err)
 	}
-	asking := &auth.Identity{Mode: auth.ModeAuthorizer, Authorizer: auth.NewAuthorizer(denyAll{})}
-	got := readiness(asking, make(chan struct{}), reachable, reachable)
-	if !reflect.DeepEqual(names(got), append(stores, "authorizer")) {
-		t.Fatalf("the endpoint's checks are %v", names(got))
+
+	policy := &auth.Identity{Mode: auth.ModeOwnerPolicy, Verifier: verifier}
+	got := readiness(policy, make(chan struct{}), reachable, reachable)
+	if !reflect.DeepEqual(names(got), always) {
+		t.Errorf("the owner policy's checks are %v, want %v", names(got), always)
 	}
 	if err := got[3].Run(t.Context()); err != nil {
+		t.Errorf("an issuer that answered failed the check: %v", err)
+	}
+	asking := &auth.Identity{
+		Mode: auth.ModeAuthorizer, Verifier: verifier, Authorizer: auth.NewAuthorizer(denyAll{}),
+	}
+	got = readiness(asking, make(chan struct{}), reachable, reachable)
+	if !reflect.DeepEqual(names(got), append(always, "authorizer")) {
+		t.Fatalf("the endpoint's checks are %v", names(got))
+	}
+	if err := got[4].Run(t.Context()); err != nil {
 		t.Errorf("a conforming endpoint failed the check: %v", err)
 	}
 }
@@ -592,21 +606,22 @@ func (denyAll) Authorize(context.Context, authz.Request) (authz.Decision, error)
 	return authz.Decision{Reason: "the probe id is reserved"}, nil
 }
 
-// TestABadDeploymentOfSpec006ExitsOne: an issuer that does not answer and an
-// endpoint with no bearer are start-up failures naming their variable, so a
-// deployment is fixed rather than left answering 401 or 503 to everything.
+// TestABadDeploymentOfSpec006ExitsOne: an endpoint with no bearer is a
+// start-up failure naming its variable, so a deployment is fixed rather than
+// left answering 503 to everything. An issuer that does not answer is not
+// one: the case below proves what happens instead.
 func TestABadDeploymentOfSpec006ExitsOne(t *testing.T) {
 	cases := []struct {
 		name    string
 		env     map[string]string
 		mustSay string
 	}{
-		{"an issuer that does not answer", map[string]string{
-			"ARCA_OIDC_ISSUERS": "https://issuer.invalid",
-		}, "ARCA_OIDC_ISSUERS"},
 		{"an endpoint with no bearer", map[string]string{
 			"ARCA_AUTHORIZER_URL": "https://authz.example/decide",
 		}, "ARCA_AUTHORIZER_TOKEN"},
+		{"an issuer that names an unusable scheme", map[string]string{
+			"ARCA_OIDC_ISSUERS": "ftp://issuer.example",
+		}, "ARCA_OIDC_ISSUERS"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -619,6 +634,33 @@ func TestABadDeploymentOfSpec006ExitsOne(t *testing.T) {
 				t.Errorf("stderr is %q and does not name %q", errOut.String(), c.mustSay)
 			}
 		})
+	}
+}
+
+// TestAnIssuerThatIsNotUpLeavesTheReplicaUnready is spec 006's warm-up rule
+// at the binary: an issuer that does not answer is not a start-up failure.
+// The process serves, and /readyz names the issuers check, so the replica
+// stays out of rotation instead of crash-looping until its issuer is up.
+func TestAnIssuerThatIsNotUpLeavesTheReplicaUnready(t *testing.T) {
+	_, internalURL, _, stop := startServe(t, map[string]string{
+		"ARCA_OIDC_ISSUERS": "https://127.0.0.1:1/nowhere",
+	})
+	defer func() {
+		if code := stop(); code != 0 {
+			t.Errorf("exit %d", code)
+		}
+	}()
+	// The public listener answers too, which is how a smoke through an
+	// ingress reads the same verdict.
+	code, body := get(t, internalURL+"/readyz")
+	if code != 503 {
+		t.Fatalf("GET /readyz = %d %q with an issuer that is not there", code, body)
+	}
+	if !strings.Contains(body, "issuers") {
+		t.Errorf("the body is %q and does not name the check that failed", body)
+	}
+	if !strings.Contains(body, "ARCA_OIDC_ISSUERS") {
+		t.Errorf("the body is %q and does not name the variable to fix", body)
 	}
 }
 

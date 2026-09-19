@@ -533,9 +533,12 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 
 	// Spec 006's two, built once: the verifier over the listed issuers, warm
 	// before the first request, and the authorizer the operator configured or
-	// the owner policy. An issuer that does not answer and an endpoint with
-	// no bearer are start-up failures naming their variable, so a deployment
-	// is fixed rather than left answering 401 or 503 to everything.
+	// the owner policy. An endpoint with no bearer is a start-up failure
+	// naming its variable, so a deployment is fixed rather than left
+	// answering 503 to everything. An issuer that does not answer is not: the
+	// warm is best-effort, the readiness check issuers carries the failure,
+	// and the replica starts rather than making this installation's start
+	// order-dependent on its issuer.
 	identity, err := auth.Start(ctx, auth.Options{
 		Issuers: cfg.OIDCIssuers, Audience: cfg.OIDCAudience,
 		InsecureIssuers: cfg.OIDCInsecureIssuers,
@@ -790,19 +793,24 @@ func fail(stderr io.Writer, err error) int {
 
 // readiness is the checks /readyz runs, in the order it reports them. The
 // draining check is spec 002's and is always first, and the bucket and the
-// database of specs 003 and 004 follow it. The authorizer check is spec
-// 006's and is there only where an endpoint is configured: it sends the
-// probe every authorizer of the family denies, so a replica whose endpoint
-// is out of reach, or whose endpoint answers an allow without reading the
-// request, leaves rotation rather than serving decisions nobody made.
+// database of specs 003 and 004 follow it.
 //
-// With no endpoint configured the owner policy decides in process, and a
-// check of it would be a check of this binary against itself.
+// The last two are spec 006's. The issuers check reads the last warm's
+// verdict and reaches no network: a replica whose issuers have not answered
+// yet cannot verify a bearer, so it stays out of rotation until one does
+// rather than exiting and crash-looping until its issuer is up. The
+// authorizer check is there only where an endpoint is configured: it sends
+// the probe every authorizer of the family denies, so a replica whose
+// endpoint is out of reach, or whose endpoint answers an allow without
+// reading the request, leaves rotation rather than serving decisions nobody
+// made. With no endpoint configured the owner policy decides in process, and
+// a check of it would be a check of this binary against itself.
 func readiness(identity *auth.Identity, draining <-chan struct{}, bucket, database func(context.Context) error) []health.Check {
 	checks := []health.Check{
 		{Name: "draining", Run: notDraining(draining)},
 		{Name: "bucket", Run: bucket},
 		{Name: "database", Run: database},
+		{Name: "issuers", Run: identity.Verifier.Check},
 	}
 	if identity.Mode == auth.ModeAuthorizer {
 		checks = append(checks, health.Check{Name: "authorizer", Run: identity.Authorizer.Check})

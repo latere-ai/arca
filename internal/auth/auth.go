@@ -27,7 +27,11 @@
 //
 // Nothing here calls an issuer while a request is served. The discovery
 // documents and the key sets are read at start by [Verifier] warming the
-// shared validator, and refreshed by that validator on its own schedule.
+// shared validator, and refreshed by that validator on its own schedule. A
+// warm that fails is not a start-up failure: it is one line in the developer
+// register, a retry in the background, and [Verifier.Check] failing until an
+// issuer answers, so a replica whose issuer is late stays out of rotation
+// rather than exiting.
 package auth
 
 import (

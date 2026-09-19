@@ -99,7 +99,7 @@ table of [[002-repository-scaffold]]:
 | algorithms | RS256 and ES256 |
 | size | the package's bound |
 | grants | read: a token carrying `authorization_details` is narrowed by them, and a verifier that has not read the claim refuses the token (`grants_unread`) |
-| warm-up | `Warm` at start against every issuer, so the first request does not pay for discovery |
+| warm-up | `Warm` at start against every issuer, so the first request does not pay for discovery. It is best-effort: a warm that fails writes one line in the developer register, is retried in the background from one second doubling to thirty, and holds the `issuers` readiness check of [[002-repository-scaffold]] failing until an issuer answers. The process serves either way, and a request that arrives before the retry pays for the discovery itself. A start that exited here would make an installation's start order-dependent on its issuer and would crash-loop a replica through a transient outage |
 
 A failure is a 401 with the package's reason table in the developer
 detail and one fixed sentence in `message`. The verifier is one
