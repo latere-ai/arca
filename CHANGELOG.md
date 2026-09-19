@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.1.7 - 2026-09-19
+
 - **A production replica reaches the decider.** arcad dials platformd's
   internal Service on port 80, and a NetworkPolicy is evaluated after the
   Service's address translation, on the pod's own port, 8081. The base

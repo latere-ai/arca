@@ -33,7 +33,7 @@ resources:
 # release.stamp entry in .lateregate.yaml, so this line never lags a tag.
 images:
   - name: ghcr.io/latere-ai/arcad
-    newTag: v0.1.6
+    newTag: v0.1.7
 
 patches:
   - path: public-url.yaml
