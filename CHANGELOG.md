@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.1.4 - 2026-09-19
+
 - **A signature that meets a connection reset is retried.** Each signature
   reaches Sigstore's certificate and timestamp authorities over the
   network, and one reset from the timestamp authority failed the whole
