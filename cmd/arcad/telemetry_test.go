@@ -45,10 +45,11 @@ func TestMetricsListenerOnly(t *testing.T) {
 	}
 }
 
-// TestNoExporterStillServes is criterion 10: with
-// ARCA_OTEL_EXPORTER_OTLP_ENDPOINT unset the process starts, serves, and
-// exports nothing, and /metrics still carries the table. It is the shape
-// every self-hoster without a collector runs.
+// TestNoExporterStillServes is criterion 10: with both names of the endpoint
+// unset the process starts, serves, and exports nothing, and /metrics still
+// carries the table. It is the shape every self-hoster without a collector
+// runs. The environment is a map holding neither name, so the two lookups
+// internal/config makes both answer empty.
 func TestNoExporterStillServes(t *testing.T) {
 	endpoint := setenv
 	t.Cleanup(func() { setenv = endpoint })
@@ -62,10 +63,37 @@ func TestNoExporterStillServes(t *testing.T) {
 		}
 	}()
 	if handed {
-		t.Error("an endpoint was handed to the exporter while the variable was unset")
+		t.Error("an endpoint was handed to the exporter while both variables were unset")
 	}
 	if code, body := get(t, internalURL+"/metrics"); code != 200 || !strings.Contains(body, "arca_requests_total") {
 		t.Errorf("GET /metrics = %d, and the table is served whether or not anything is exported", code)
+	}
+}
+
+// TestAnInjectedEndpointReachesTheExporter is the other half of criterion 10
+// and criterion 11 at the process: a namespace whose operator instruments
+// every workload in it sets the standard name alone, and this replica exports
+// to it. Without it the same environment reads as a replica with no collector
+// and nothing would leave the process.
+func TestAnInjectedEndpointReachesTheExporter(t *testing.T) {
+	endpoint := setenv
+	t.Cleanup(func() { setenv = endpoint })
+	var name, value string
+	setenv = func(k, v string) error { name, value = k, v; return nil }
+
+	_, internalURL, _, stop := startServe(t, map[string]string{
+		"OTEL_EXPORTER_OTLP_ENDPOINT": "http://10.0.0.7:40318",
+	})
+	defer func() {
+		if code := stop(); code != 0 {
+			t.Errorf("exit %d", code)
+		}
+	}()
+	if name != "OTEL_EXPORTER_OTLP_ENDPOINT" || value != "http://10.0.0.7:40318" {
+		t.Errorf("the injected endpoint reached the exporter as %s=%q", name, value)
+	}
+	if code, _ := get(t, internalURL+"/metrics"); code != 200 {
+		t.Errorf("GET /metrics = %d", code)
 	}
 }
 

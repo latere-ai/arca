@@ -20,6 +20,22 @@ refused before it is pushed.
   the lower number over the live charge, so opening a session and waiting
   one reap interval erased it, and repeating that meant a space was never
   charged for any session. The recomputation reads all three tables.
+- **A namespace that instruments every workload in it instruments Arca
+  too.** `internal/config` read `ARCA_OTEL_EXPORTER_OTLP_ENDPOINT` and
+  nothing else, and an operator that instruments a namespace injects the
+  OpenTelemetry standard `OTEL_EXPORTER_OTLP_ENDPOINT` instead. Export did
+  happen, because `latere.ai/x/pkg/otel` reads that name off the process
+  environment itself, but nothing in this repository said so, no test held
+  it, and the criterion of spec 018 stated the opposite, so the one change
+  that handed the exporter an endpoint rather than leaking the environment
+  would have taken every trace and every log record with it and failed
+  nothing. Both names are read now and the prefixed one wins wherever it is
+  set, so an installation still points Arca at a collector of its own. The
+  shape is checked against the prefixed name alone: an injected value is the
+  platform's and the exporter that owns the standard name parses it, and a
+  telemetry variable Arca did not ask for is not a reason a replica refuses
+  to serve bytes. The collector joins the endpoints whose port every overlay
+  must admit, under both names.
 
 - **A replica can reach the database it is configured with.** The base
   confines egress and admits 5432, which is where a Postgres an operator

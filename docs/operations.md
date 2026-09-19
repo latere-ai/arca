@@ -233,6 +233,22 @@ traces and log records over OTLP. Leave it unset and nothing leaves the
 process: `/metrics` still serves everything, so an installation without a
 collector loses no local signal.
 
+If your cluster runs an operator that instruments a whole namespace, you
+have nothing to set. Such an operator injects the OpenTelemetry standard
+variables into every workload, `OTEL_EXPORTER_OTLP_ENDPOINT` among them, and
+`arcad` reads that name wherever `ARCA_OTEL_EXPORTER_OTLP_ENDPOINT` is
+unset. Set the prefixed one to send Arca's telemetry somewhere else: it wins
+wherever it is set. `arcad` checks the address you set for shape and refuses
+to start on one it cannot dial; an injected address it does not check, since
+that one is your platform's and the exporter is what reads it.
+
+Whichever name carries it, the collector's port has to be open. `arcad`
+confines its own egress (`deploy/base/networkpolicy.yaml`), and a port no
+policy names is a connection dropped rather than refused, so a collector on
+a port outside the base's 4317 and 4318 needs a policy of its own in your
+overlay. A dropped export fails no probe and logs nothing on the replica:
+the service serves while exporting nothing.
+
 Logs are JSON on standard error. Each request ends on one line carrying the
 route, the method, the status, the error code, the duration, the subject, the
 request id and the trace id. The request id is not the trace id: the first is

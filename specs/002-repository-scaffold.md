@@ -133,13 +133,24 @@ operator fixes a deployment in one round. A blank value is unset.
 | `ARCA_ADMIN_SUBJECTS` | unset | the subjects the owner policy treats as administrators, comma separated | 006 |
 | `ARCA_REAP_INTERVAL` | `5m` | how often the reconciler runs | 010 |
 | `ARCA_TRASH_RETENTION` | `720h` | how long a trashed object is restorable | 005 |
-| `ARCA_OTEL_EXPORTER_OTLP_ENDPOINT` | unset | where traces and metrics go; unset exports nothing | 018 |
+| `ARCA_OTEL_EXPORTER_OTLP_ENDPOINT` | the standard `OTEL_EXPORTER_OTLP_ENDPOINT`, then unset | where traces, logs and metrics go; unset exports nothing | 018 |
 | `ARCA_REQUESTS_PER_MINUTE` | `600` | the token bucket per subject after authentication; `0` disables it | 015 |
 | `ARCA_UNAUTHENTICATED_REQUESTS_PER_MINUTE` | `60` | the token bucket per client address before authentication, which bounds bad tokens and link token guessing | 015 |
 | `ARCA_TEST_DRIFT` | unset | makes the server drift from the contract in one named way, so the conformance suite is proved to catch it; refused outside the test build | 017 |
 
 The rows for later specs are reference entries; the spec named builds
 what reads each.
+
+One row has a second name. Where `ARCA_OTEL_EXPORTER_OTLP_ENDPOINT` is
+unset the server reads the standard `OTEL_EXPORTER_OTLP_ENDPOINT`,
+which is the name an operator that instruments a whole namespace
+injects into every workload in it; the row above wins wherever it is
+set. It is no exception to the rule this section states, because both
+names are read through the one lookup function, so a test still passes
+one map. The shape is checked against the row above alone: the
+injected value is the platform's rather than this installation's, and
+a telemetry variable Arca did not ask for is not a reason a replica
+refuses to serve bytes. [[018-observability]] carries the reasoning.
 
 ### The quality gate
 
