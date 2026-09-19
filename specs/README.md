@@ -59,13 +59,16 @@ validated spec is dispatched when every spec in its `depends_on` is at
 | [010](010-events-and-reaper.md) | Events and the reaper: the ledger, the log, the reconciliation of the two stores | complete |
 | 011 | Webhooks | retired 2026-09-18 before drafting closed; the number is not reused. Events are tailed by cursor, spec 010 |
 | [012](012-administration.md) | Administration: the overview across spaces, the cross-space restore, the record of what was done, the `check` command | testing |
-| [013](013-api.md) | API: routes, the error table, OpenAPI, the document served | testing |
-| [014](014-test-stubs-and-tiers.md) | Test stubs and tiers: the unit tier, the store tier on MinIO and Postgres, the e2e tier | testing |
+| [013](013-api.md) | API: routes, the error table, OpenAPI, the document served | complete |
+| [014](014-test-stubs-and-tiers.md) | Test stubs and tiers: the unit tier, the store tier on MinIO and Postgres, the e2e tier | complete |
 | [015](015-security-and-threat-model.md) | Security and threat model | testing |
 | [016](016-release-and-installation.md) | Release and installation: images, binaries, deploy manifests, the operator's overlay | testing |
-| [017](017-conformance-suite.md) | Conformance suite: the contract as an importable test package | testing |
+| [017](017-conformance-suite.md) | Conformance suite: the contract as an importable test package | complete |
 | [018](018-observability.md) | Observability: traces, metrics, logs, the alert rules | testing |
 | [019](019-migration-from-drive.md) | Migration from Drive: the order the code moves, the data, the consumers, the sunset, the archive | in-progress |
+| [022](022-api-response-validation.md) | API response validation: the e2e tier checked against the served OpenAPI document | validated |
+| [023](023-merged-coverage-floor.md) | Merged coverage floor: the 90% bar judged over the unit, store and e2e profiles together | validated |
+| [024](024-conformance-against-a-published-release.md) | N-1 conformance: the previous release's suite run against this release's binary | validated |
 
 The order of building is the order of the numbers except where a spec's
 `depends_on` says otherwise, and 019 runs alongside all of them: each
