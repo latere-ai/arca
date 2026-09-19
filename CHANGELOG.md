@@ -36,6 +36,16 @@ refused before it is pushed.
   telemetry variable Arca did not ask for is not a reason a replica refuses
   to serve bytes. The collector joins the endpoints whose port every overlay
   must admit, under both names.
+- **A route that would take a word out of a space's namespace fails the
+  start-up.** Go's router prefers a literal over a wildcard in the same
+  position and reports no conflict, so `GET /v1/workspaces/archived`
+  registered beside `GET /v1/workspaces/{id}` would have made a workspace
+  named `archived` unreachable on the day it was added, and nothing would
+  have said so. `arcad` now refuses to start when one route's literal
+  segment sits where another route of the same method has a wildcard,
+  naming both routes, unless the literal is one of the four the API
+  grammar reserves: `materialize`, `links`, `with-me` and `deleted`. An
+  installation that registers none of its own routes sees no change.
 
 - **A replica can reach the database it is configured with.** The base
   confines egress and admits 5432, which is where a Postgres an operator

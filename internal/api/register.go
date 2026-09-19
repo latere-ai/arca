@@ -6,6 +6,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"latere.ai/x/arca/authorizer"
 	"latere.ai/x/arca/internal/apidocs"
@@ -55,12 +56,63 @@ type Route struct {
 	Handler http.Handler
 }
 
+// reserved are the words of spec 013's fifth grammar rule: a literal that
+// sits beside a wildcard in the same position, wins there, and is therefore
+// not a value that position can carry. materialize is not an owner, links
+// and with-me are not share ids, and deleted is not a workspace id.
+//
+// A fifth shadowing literal is refused by [merge] until it is written into
+// that rule. Go's router gives a literal precedence over a wildcard without
+// complaining, so nothing else in this program would say that a new route
+// had just taken a word out of a caller's namespace.
+var reserved = map[string]bool{
+	"materialize": true,
+	"links":       true,
+	"with-me":     true,
+	"deleted":     true,
+}
+
+// shadowing answers the literal segment at the first position where one path
+// carries a literal and the other a wildcard, and the position it sits at,
+// which is where the router decides between the two.
+//
+// Two literals that differ put the paths in different subtrees, so nothing
+// below that position can shadow anything and the walk stops. Two wildcards
+// are one position spelled with two names, so the walk goes on. A path that
+// runs out is a prefix of the other and shadows nothing.
+func shadowing(a, b string) (word string, at int, ok bool) {
+	x, y := segmentsOf(a), segmentsOf(b)
+	for i := 0; i < len(x) && i < len(y); i++ {
+		switch {
+		case x[i] == y[i]:
+		case wildcard(x[i]) && wildcard(y[i]):
+		case wildcard(x[i]):
+			return y[i], i, true
+		case wildcard(y[i]):
+			return x[i], i, true
+		default:
+			return "", 0, false
+		}
+	}
+	return "", 0, false
+}
+
+// segmentsOf splits a registration into its path segments.
+func segmentsOf(path string) []string { return strings.Split(strings.Trim(path, "/"), "/") }
+
+// wildcard reports whether a segment is one of the router's, "{id}" or
+// "{path...}", rather than a literal word.
+func wildcard(segment string) bool {
+	return strings.HasPrefix(segment, "{") && strings.HasSuffix(segment, "}")
+}
+
 // merge folds the contributed rows into the frame's table and refuses a set
 // that could not be a surface: a row that asks nothing, one that asks a
-// string no authorizer can answer, one with no handler, and one registering
-// a method and path another row already holds. Each of those is a
-// programming error that would otherwise become a route nobody decided, so
-// the node fails to start rather than serving it.
+// string no authorizer can answer, one with no handler, one registering a
+// method and path another row already holds, and one whose literal shadows
+// another row's wildcard without a word in spec 013's fifth grammar rule.
+// Each of those is a programming error that would otherwise become a route
+// nobody decided, so the node fails to start rather than serving it.
 func merge(frame []route, added []Route) ([]route, error) {
 	rows := make([]route, 0, len(frame)+len(added))
 	seen := make(map[string]bool, len(frame)+len(added))
@@ -89,6 +141,27 @@ func merge(frame []route, added []Route) ([]route, error) {
 				handler.ServeHTTP(w, req)
 			},
 		})
+	}
+	// The fifth grammar rule of spec 013, over the merged list: the pair it
+	// governs may be one frame row and one contributed row, or two
+	// contributed rows, so neither half of the surface can be checked alone.
+	for i, a := range rows {
+		for _, b := range rows[i+1:] {
+			if a.method != b.method {
+				continue
+			}
+			word, at, shadows := shadowing(a.path, b.path)
+			if !shadows || reserved[word] {
+				continue
+			}
+			literal, wild := a, b
+			if wildcard(segmentsOf(a.path)[at]) {
+				literal, wild = b, a
+			}
+			return nil, fmt.Errorf(
+				"api: %s %s puts the literal %q where %s %s has a wildcard, and %q is not one of spec 013's reserved words",
+				literal.method, literal.path, word, wild.method, wild.path, word)
+		}
 	}
 	return rows, nil
 }

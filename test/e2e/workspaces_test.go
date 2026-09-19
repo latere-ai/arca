@@ -355,10 +355,11 @@ func TestE2EAWorkspaceIsDeletedListedAndRestored(t *testing.T) {
 	}
 }
 
-// TestE2ETheWorkspaceRoutesAreDescribedByTheDocumentTheServerServes is the
-// e2e half of criterion 13 of spec 013 for this prefix: the description a
-// client generates against names every route the server registers, and it is
-// served without a token.
+// TestE2ETheWorkspaceRoutesAreDescribedByTheDocumentTheServerServes is
+// criterion 14 of spec 013 for this prefix: the description a client
+// generates against names every route the server registers, and it is served
+// without a token. It is not criterion 13's second half, which is validating
+// every request and every response against that document and is open.
 func TestE2ETheWorkspaceRoutesAreDescribedByTheDocumentTheServerServes(t *testing.T) {
 	i := start(t)
 	code, body := get(t, i.publicURL+"/openapi.json")

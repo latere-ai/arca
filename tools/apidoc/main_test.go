@@ -13,9 +13,12 @@ import (
 	"testing"
 
 	"github.com/goccy/go-yaml"
+
+	"latere.ai/x/arca/authorizer"
 )
 
-// TestTheCommittedDocumentIsCurrent is criterion 13 of spec 013: the file at
+// TestTheCommittedDocumentIsCurrent is the proved half of criterion 13 of
+// spec 013: the file at
 // api/openapi.yaml equals a fresh generation, so a route added without
 // running `make openapi` does not reach main. It is the drift test the
 // predecessor carried, over a route table that is a declaration rather than
@@ -282,4 +285,65 @@ func TestEveryRouteThisBuildRegistersIsOneOfSpec013sTable(t *testing.T) {
 		}
 	}
 	t.Logf("%d of spec 013's %d routes are registered in this build", len(registered), len(spec))
+}
+
+// chosenPerRequest are the actions of spec 006's vocabulary no row of spec
+// 013's table declares, because the request chooses them.
+//
+// There is one. POST /v1/workspaces/{id}/attach asks workspace.read for a ro
+// mount and workspace.attach for a rw one, and the renew and the release
+// that follow it ask the action their attach asked; actionOf in
+// internal/workspaces/lease.go is where that is decided, and that package's
+// own tests drive both modes and hold each to its answer. The rows carry the
+// read, which is the action every one of them asks at least, so the attach
+// action reaches no declaration and the count below would be short by one
+// without this list.
+var chosenPerRequest = []string{authorizer.ActionWorkspaceAttach}
+
+// TestEveryActionOfTheVocabularyIsAskedByARoute is criterion 3 of spec 013:
+// the twenty-three actions of spec 006 and the routes of spec 013 cover each
+// other, so no action is a permission nothing can exercise and no route asks
+// a question no authorizer was given.
+//
+// It reads the union of every declaration, which is this package's, for the
+// reason the criterion above it reads it here: internal/api is under every
+// package that contributes rows, so the whole surface is visible in one
+// place and that place is the generator's.
+func TestEveryActionOfTheVocabularyIsAskedByARoute(t *testing.T) {
+	asked := map[string]bool{}
+	for _, r := range routes() {
+		if r.Action == "" {
+			// The three public link routes of spec 008. The grant the token
+			// resolves to is the whole of their authorization.
+			continue
+		}
+		if !authorizer.Known(r.Action) {
+			t.Errorf("%s %s asks %q, which spec 006's vocabulary does not name", r.Method, r.Path, r.Action)
+			continue
+		}
+		asked[r.Action] = true
+	}
+	for _, action := range chosenPerRequest {
+		if !authorizer.Known(action) {
+			t.Errorf("%q is named as chosen per request and spec 006's vocabulary does not name it", action)
+			continue
+		}
+		asked[action] = true
+	}
+
+	vocabulary := authorizer.Actions()
+	var missing []string
+	for _, action := range vocabulary {
+		if !asked[action] {
+			missing = append(missing, action)
+		}
+	}
+	if len(missing) > 0 {
+		t.Errorf("spec 006's vocabulary names %v and no route of this build asks them; "+
+			"an action no route reaches is a permission an authorizer can answer and nobody can exercise", missing)
+	}
+	if len(asked) != len(vocabulary) {
+		t.Errorf("the surface asks %d actions and spec 006's vocabulary names %d", len(asked), len(vocabulary))
+	}
+	t.Logf("the %d routes of this build ask %d of spec 006's %d actions", len(routes()), len(asked), len(vocabulary))
 }
