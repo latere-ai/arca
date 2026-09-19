@@ -22,6 +22,14 @@ import (
 // identifier this service minted is not one a caller can walk, so the oracle
 // was never reachable; the answers are collapsed anyway, because a rule that
 // holds on most routes is a rule a reader has to check route by route.
+//
+// The four routes here reach the question through lookup. The renew, the
+// release, the sync and the materialize reach the same ask through
+// attachment, with the action that attachment's mode names, and are not
+// driven here: opening the attachment they need asks that very action and is
+// allowed, and spec 006 caches an allow per subject, action and resource, so
+// a deny set afterwards is not the answer the route reads. What that would
+// test is the cache rather than the collapse.
 func TestEveryWorkspaceLookupDenyIsTheAnswerAnAbsenceGives(t *testing.T) {
 	for _, c := range []struct {
 		name   string

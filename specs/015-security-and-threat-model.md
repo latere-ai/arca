@@ -576,6 +576,15 @@ holding nothing, and compare the envelopes byte for byte with the
 request id removed. Both failed on the authorizer's reason before the
 change and pass after it.
 
+Seven routes and not nine. The workspace renew, release, sync and
+materialize reach the same `ask` through `attachment` rather than
+through `lookup`, so the change covers them and a test cannot drive them
+the same way: opening the attachment they need asks the very action the
+attachment's mode names and is allowed, and [[006-identity]] caches an
+allow per subject, action and resource, so a deny set afterwards is not
+the answer the route reads. A case for them would measure the cache
+rather than the collapse, and the test says so where a reader looks.
+
 What the four sites answer differs only in `details.detail`, so no
 status, code or user sentence moved and [[017-conformance-suite]]'s
 comparisons are unchanged. The two new tests and the three of
