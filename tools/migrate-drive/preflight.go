@@ -42,6 +42,11 @@ func (r *Refusal) Refuse(format string, args ...any) {
 //  5. Is the target empty? The copy writes the ids the source chose, so a
 //     second run over a database that kept the first one's rows is a conflict
 //     on every primary key and never an update.
+//
+// It also mints the object ids, in Objects. That is not a question but the
+// same rule read the other way: the manifest of spec 019 is decided before a
+// row is written, so every id the copy hands out is an id the manifest
+// already names.
 func Preflight(ctx context.Context, r *Run) error {
 	refusal := &Refusal{}
 	if err := preflightTarget(ctx, r, refusal); err != nil {
@@ -62,7 +67,7 @@ func Preflight(ctx context.Context, r *Run) error {
 	if len(refusal.Reasons) > 0 {
 		return refusal
 	}
-	return nil
+	return Objects(ctx, r)
 }
 
 // preflightTarget refuses a target that already holds rows.

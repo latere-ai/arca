@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"latere.ai/x/arca/internal/events"
-	"latere.ai/x/arca/object"
 )
 
 // Run is one copy: the two databases, the rewrite, and what the report
@@ -21,16 +20,23 @@ type Run struct {
 	Prefix         string
 	DryRun         bool
 	Report         *Report
+	// Manifest is where -manifest puts the file that ties a copied row to a
+	// byte, and is empty when the operator named none.
+	Manifest string
 
 	// usage is the ledger, summed as files and versions copy. space_usage is
 	// recomputed rather than copied, and this is the sum it is recomputed
 	// from: the same two tables events.Recompute reads, so the reaper's
 	// reconciliation pass finds nothing to correct on its first run.
 	usage map[string]int64
-	// objects is one object id per distinct Drive key, so a file and the
-	// version that superseded it keep pointing at one object, which is what
-	// the reference union of spec 004 counts.
-	objects map[string]object.ID
+	// objects is one line per distinct Drive key, so a file and the version
+	// that superseded it keep pointing at one object, which is what the
+	// reference union of spec 004 counts, and so the move of spec 019 has
+	// one destination per key to write.
+	objects map[string]*manifestLine
+	// order is the keys as the object pass read them, which is the source's
+	// key order and therefore the manifest's.
+	order []string
 }
 
 // NewRun answers a run over two connections.
@@ -38,7 +44,7 @@ func NewRun(source, target Conn, r Rewriter, prefix string, dryRun bool, report 
 	return &Run{
 		Source: source, Target: target, Rewriter: r, Prefix: prefix,
 		DryRun: dryRun, Report: report,
-		usage: map[string]int64{}, objects: map[string]object.ID{},
+		usage: map[string]int64{}, objects: map[string]*manifestLine{},
 	}
 }
 
@@ -112,23 +118,6 @@ func (r *Run) table(ctx context.Context, fn func(insert) error) error {
 			return err
 		})
 	})
-}
-
-// objectID answers the object id one Drive key becomes, minting one the first
-// time it sees the key.
-//
-// Nothing in a Drive key is an id. The key is drive/<owner>/<path>, with a
-// random suffix on a versioned write, so there is no id in it to keep and the
-// copy mints one. What that costs is the bytes: an object id this run minted
-// names a key no byte lies at. The report says so on every run and spec 019
-// records it; this function does not pretend otherwise.
-func (r *Run) objectID(storageKey string) object.ID {
-	if id, ok := r.objects[storageKey]; ok {
-		return id
-	}
-	id := object.NewID()
-	r.objects[storageKey] = id
-	return id
 }
 
 // charge adds one row's bytes to the ledger the run recomputes space_usage
@@ -329,7 +318,7 @@ func copyUploadSessions(ctx context.Context, r *Run) error {
 					return err
 				}
 				r.Report.Copy("upload_sessions")
-				r.Report.Note("upload_sessions", "sessions whose parts stay at Drive's key")
+				r.Report.Note("upload_sessions", NoteNoObjectYet)
 				return nil
 			})
 	})

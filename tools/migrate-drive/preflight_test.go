@@ -11,15 +11,23 @@ import (
 
 // clean is a source the preflight holds over: no organization outside the
 // mapping, no plane without a rule, no colliding slug, no key outside the
-// prefix.
+// prefix, and one key the manifest lists.
 func clean() *fake {
 	return newFake(
 		answer{"SELECT DISTINCT owner_id", [][]any{{mappedOrg}}},
 		answer{"split_part(path, '/', 1)", [][]any{{"files"}, {"memory"}, {"repos"}, {"workspaces"}}},
 		answer{"HAVING count(*) > 1", [][]any{}},
 		answer{"strpos(storage_key", [][]any{{int64(0)}}},
+		answer{"true AS live", [][]any{{cleanKey, int64(10), cleanSHA, false, true}}},
 	)
 }
+
+// The one object the clean source holds: a live file, its key, and the digest
+// its row carries.
+const (
+	cleanKey = "drive/u-11111111-1111-4111-8111-111111111111/files/notes.md"
+	cleanSHA = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+)
 
 func TestAPreflightOverACleanSourceHolds(t *testing.T) {
 	if err := Preflight(t.Context(), testRunPair(clean(), emptyTarget(), false)); err != nil {

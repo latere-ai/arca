@@ -20,6 +20,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -31,6 +32,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"latere.ai/x/arca/internal/store"
+	"latere.ai/x/arca/tools/internal/manifest"
 )
 
 // skipWithoutTheStack is the remediation this tier prints when the stack is
@@ -64,6 +66,11 @@ const (
 // notesKeyTier is the key Drive wrote for the first file, and the key its
 // version still points at. One key is one object id after the copy.
 const notesKeyTier = "drive/u-" + personA + "/files/notes.md"
+
+// uploadKeyTier is the key the open upload writes its parts under. No object
+// lies at it until the upload completes, so it carries an object id and no
+// manifest line.
+const uploadKeyTier = "drive/u-" + personA + "/files/big.bin@ab12"
 
 const tierSHA = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 const tierETag = "0123456789abcdef0123456789abcdef-3"
@@ -285,6 +292,101 @@ func TestStoreMigrateDriveCopiesEveryTableSpec019Names(t *testing.T) {
 	})
 }
 
+// TestStoreMigrateDriveWritesTheManifestOfTheCopiedRows is the manifest half
+// of the object move of spec 019 against the two schemas: one line per
+// distinct source key, carrying the object id the copy wrote into the rows,
+// the size and checksum the rows carry, and the publicity, and marked
+// complete because the copy verified.
+func TestStoreMigrateDriveWritesTheManifestOfTheCopiedRows(t *testing.T) {
+	src, dst := tierDatabases(t)
+	path := filepath.Join(t.TempDir(), "manifest.tsv")
+	mapping := writeMapping(t, fmt.Sprintf(`{%q: %q}`, orgID, tierOrgSubject))
+	out, errs, code := runWriting(t, src, dst, mapping, false, path)
+	if code != exitOK {
+		t.Fatalf("the copy exited %d\n%s\n%s", code, out, errs)
+	}
+	target := open(t, dst)
+
+	m, err := manifest.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the manifest: %v", err)
+	}
+	if !m.Complete {
+		t.Error("a verified copy left the manifest without its trailer")
+	}
+	if m.Prefix != "drive/" {
+		t.Errorf("the manifest names the prefix %q", m.Prefix)
+	}
+	// Four distinct keys hold bytes: three live files, one trashed file, and
+	// the version that shares the first file's key. The open upload's key is
+	// the fifth distinct key in the source and is not one of them, because
+	// its parts are not an object until the upload completes.
+	if len(m.Entries) != 4 {
+		t.Fatalf("the manifest lists %d keys, want 4:\n%+v", len(m.Entries), m.Entries)
+	}
+
+	lines := map[string]manifest.Entry{}
+	for _, e := range m.Entries {
+		lines[e.Key] = e
+	}
+	if _, listed := lines[uploadKeyTier]; listed {
+		t.Error("the open upload's key is on the manifest, and no object lies at it")
+	}
+	for id, key := range map[string]string{
+		fileNotes:  notesKeyTier,
+		fileMemory: "drive/u-" + personA + "/memory/agent.md",
+		fileRepo:   "drive/o-" + orgID + "/repos/site/README.md",
+		fileGone:   "drive/u-" + personA + "/files/gone.md",
+	} {
+		e, listed := lines[key]
+		if !listed {
+			t.Errorf("the manifest does not list %q", key)
+			continue
+		}
+		// The line carries the id the rows point at, so the move writes the
+		// bytes where the copied rows look for them.
+		if got := one[string](t, target, `SELECT object_id::text FROM files WHERE id = $1`, id); got != string(e.ID) {
+			t.Errorf("%s points at %s and the manifest mints %s", key, got, e.ID)
+		}
+		size := one[int64](t, target, `SELECT size_bytes FROM files WHERE id = $1`, id)
+		checksum := one[string](t, target, `SELECT checksum FROM files WHERE id = $1`, id)
+		public := one[bool](t, target, `SELECT is_public FROM files WHERE id = $1`, id)
+		if e.Size != size || e.Checksum != checksum || e.Public != public {
+			t.Errorf("%s is %+v, and the row says %d, %s, %v", key, e, size, checksum, public)
+		}
+	}
+	// One key, two rows, two sizes: the live file holds ten bytes and the
+	// version it superseded held five, and the live row is what the bytes
+	// are now.
+	if lines[notesKeyTier].Size != 10 {
+		t.Errorf("the shared key carries %d bytes, want the live row's 10", lines[notesKeyTier].Size)
+	}
+	for _, text := range []string{path, "4 keys, complete", NoteTwoDescriptions, NoteNoObjectYet} {
+		if !strings.Contains(out, text) {
+			t.Errorf("the report holds no %q:\n%s", text, out)
+		}
+	}
+}
+
+// TestStoreMigrateDriveDryRunWritesNoManifest holds the rule that a manifest
+// is the record of ids a copy handed out: a run that writes no row hands out
+// none, so it writes no file and says what it would have listed.
+func TestStoreMigrateDriveDryRunWritesNoManifest(t *testing.T) {
+	src, dst := tierDatabases(t)
+	path := filepath.Join(t.TempDir(), "manifest.tsv")
+	mapping := writeMapping(t, fmt.Sprintf(`{%q: %q}`, orgID, tierOrgSubject))
+	out, errs, code := runWriting(t, src, dst, mapping, true, path)
+	if code != exitOK {
+		t.Fatalf("the dry run exited %d\n%s\n%s", code, out, errs)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the dry run wrote a manifest: %v", err)
+	}
+	if !strings.Contains(out, "would list 4 keys") {
+		t.Errorf("the report does not say what it would list:\n%s", out)
+	}
+}
+
 // TestStoreMigrateDriveRefusesATargetThatHoldsRows is the idempotence of
 // criterion 3: a second run over the database the first one filled does not
 // begin, so running the tool twice leaves what one run left.
@@ -424,12 +526,22 @@ func runTool(t *testing.T, source, target string, dryRun bool) (stdout, stderr s
 
 func runWith(t *testing.T, source, target, mapping string, dryRun bool) (stdout, stderr string, code int) {
 	t.Helper()
+	return runWriting(t, source, target, mapping, dryRun, "")
+}
+
+// runWriting runs the tool with a manifest where the caller names one, so a
+// case reads back the file tools/move-objects reads.
+func runWriting(t *testing.T, source, target, mapping string, dryRun bool, manifestPath string) (stdout, stderr string, code int) {
+	t.Helper()
 	// The tool compares -prefix against the installation's variable, so the
 	// tier sets what the installation would be deployed with.
 	t.Setenv(BucketPrefixVar, "drive/")
 	args := []string{
 		"-source", source, "-target", target,
 		"-issuer", tierIssuer, "-org-subjects", mapping,
+	}
+	if manifestPath != "" {
+		args = append(args, "-manifest", manifestPath)
 	}
 	if dryRun {
 		args = append(args, "-dry-run")

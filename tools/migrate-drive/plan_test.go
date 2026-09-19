@@ -356,7 +356,7 @@ func TestASessionsPartsStayWhereDriveLeftThem(t *testing.T) {
 	if got := session.args[9]; got != at.Add(SessionLifetime) {
 		t.Errorf("the session expires at %v, want %v", got, at.Add(SessionLifetime))
 	}
-	if got := r.Report.Table("upload_sessions").Noted["sessions whose parts stay at Drive's key"]; got != 1 {
+	if got := r.Report.Table("upload_sessions").Noted[NoteNoObjectYet]; got != 1 {
 		t.Errorf("open sessions counted: %d, want 1", got)
 	}
 }

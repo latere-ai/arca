@@ -39,6 +39,7 @@ func cli(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	orgSubjects := fs.String("org-subjects", "", "a JSON or CSV file mapping Drive organization ids to subjects")
 	dryRun := fs.Bool("dry-run", false, "read, rewrite and report, and write nothing")
 	prefix := fs.String("prefix", "drive/", "the bucket prefix every key in the source carries")
+	manifest := fs.String("manifest", "", "write the manifest of source keys and minted object ids here, which tools/move-objects reads")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
@@ -50,7 +51,7 @@ func cli(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if err := run(ctx, options{
 		source: *source, target: *target, issuer: *issuer,
 		orgSubjects: *orgSubjects, dryRun: *dryRun, prefix: *prefix,
-		bucketPrefix: os.Getenv(BucketPrefixVar),
+		manifest: *manifest, bucketPrefix: os.Getenv(BucketPrefixVar),
 	}, stdout); err != nil {
 		_, _ = fmt.Fprintf(stderr, "%v\n", err)
 		return exitRefused
@@ -65,6 +66,7 @@ type options struct {
 	orgSubjects    string
 	dryRun         bool
 	prefix         string
+	manifest       string
 	bucketPrefix   string
 }
 
@@ -95,13 +97,23 @@ func run(ctx context.Context, o options, stdout io.Writer) error {
 	report.Issuer, report.Prefix, report.DryRun = o.issuer, prefix, o.dryRun
 
 	r := NewRun(source, target, NewRewriter(o.issuer, orgs), prefix, o.dryRun, report)
+	r.Manifest = o.manifest
 	if err := Preflight(ctx, r); err != nil {
+		return err
+	}
+	// The manifest is written before the first table commits, so every
+	// object id the copy is about to hand out is an id the file already
+	// names. It is marked complete after the verification and not before.
+	if err := WriteManifest(r); err != nil {
 		return err
 	}
 	if err := r.Copy(ctx); err != nil {
 		return err
 	}
 	if err := Verify(ctx, r); err != nil {
+		return err
+	}
+	if err := CompleteManifest(r); err != nil {
 		return err
 	}
 	report.Write(stdout)
