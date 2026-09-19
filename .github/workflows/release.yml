@@ -413,9 +413,16 @@ jobs:
           # readiness probe reaches the events as a status code and nothing
           # else; the body is where arcad says which requirement it is
           # waiting on, and v0.1.2's run was lost for want of it.
-          for p in $(kubectl get pods -n arca -l app.kubernetes.io/name=arcad -o name); do
+          # kubectl's --raw turns the 503 into its own ServiceUnavailable
+          # error and drops the body, so the read goes through a
+          # port-forward and curl, which prints a 503's body as it is.
+          for p in $(kubectl get pods -n arca -l app.kubernetes.io/name=arcad,app.kubernetes.io/component!=migrate -o name); do
             echo "== ${p#pod/} /readyz"
-            kubectl get --raw "/api/v1/namespaces/arca/pods/${p#pod/}:8081/proxy/readyz" || echo "(readyz unreachable through the API proxy)"
+            kubectl -n arca port-forward "$p" 18081:8081 >/dev/null 2>&1 &
+            pf=$!
+            sleep 2
+            curl -sS -m 10 -w '\nHTTP %{http_code}\n' http://127.0.0.1:18081/readyz || echo "(readyz unreachable through a port-forward)"
+            kill $pf 2>/dev/null || true
             echo
           done
 
