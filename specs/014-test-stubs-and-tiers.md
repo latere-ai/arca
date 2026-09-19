@@ -1,6 +1,6 @@
 ---
 title: "Test stubs and tiers: the stubs, the unit tier, the store tier, the e2e tier, make run, the CI jobs"
-status: testing
+status: complete
 track: core
 depends_on:
   - specs/002-repository-scaffold.md
@@ -68,8 +68,9 @@ Divergences from the design as drafted:
 - `make down` stops the stack and keeps its volumes, and `make clean` removes
   the project with them. `make down -v` is not a make idiom: a target takes
   no flags.
-- The coverage floor is enforced over the unit tier, and criterion 11 is
-  open on a change this repository cannot make. The gate's `cover` takes
+- The coverage floor is enforced over the unit tier. The merged floor is
+  [[023-merged-coverage-floor]], split out because closing it is a change
+  to another repository rather than to this one. The gate's `cover` takes
   `-profile` once per tier, but the reusable workflow that runs it,
   `latere-ai/ci/.github/workflows/lateregate.yml@v1`, takes `go_version`,
   `test_os` and `runs_on` and nothing else, and its gate job runs `go tool
@@ -82,7 +83,7 @@ Divergences from the design as drafted:
   artifacts to download before the `cover` gate and append to that one
   gate's invocation as repeated `-profile=` flags; and `needs: [store,
   e2e]` on this repository's `gate` job, without which the artifacts do not
-  exist when the gate runs.
+  exist when the gate runs. That spec carries both halves written out.
 - `make up` waits for facts of its own rather than for `compose up --wait`:
   only one of the two container engines has that flag, and a contributor with
   either should get the same stack.
@@ -94,14 +95,15 @@ Divergences from the design as drafted:
 - The tier variables are `E2E_DATABASE_URL`, `E2E_S3_ENDPOINT`, `E2E_S3_KEY`,
   `E2E_S3_SECRET` and `E2E_S3_BUCKET`, as this spec's table names them.
 
-Every criterion but one holds in the tree, each verified against the file or
-the test its row names. The halves that waited on another spec have landed:
+Every criterion holds in the tree, each verified against the file or the
+test its row names. The halves that waited on another spec have landed:
 [[012-administration]]'s `check` is what criteria 2 and 10 read, and
 [[010-events-and-reaper]]'s byte limit is what criterion 4 reads through the
-conformance case that puts a limit on the stub's answer. Criterion 11 is the
-one item open, and it is a `latere-ai/ci` change and not this repository's,
-as the coverage bullet above says with the input it needs. This spec moves to
-`complete` when that lands.
+conformance case that puts a limit on the stub's answer. The one item this
+repository could not build is the merged coverage floor, which is a
+`latere-ai/ci` change: it left as [[023-merged-coverage-floor]], carrying
+criterion 11 verbatim and the input the reusable workflow needs, and
+criterion 11 here now says what the gate enforces.
 
 ## Design
 
@@ -239,11 +241,14 @@ name, so two clones run side by side.
 
 ### Coverage
 
-90% per package, the shared gate's `cover`, with the tiers' profiles
-included: the gate takes `-profile` once per tier, so the unit, store,
-and e2e profiles are read together and a package whose only exercise is
-the e2e tier counts. `make check` runs the unit tier alone and reports
-coverage over it; `make check-all` runs all three and is what a
+90% per package, the shared gate's `cover`, over the unit tier's profile.
+The gate takes `-profile` once per tier and would read the unit, store
+and e2e profiles together, so a package whose only exercise is the e2e
+tier counts; the workflow that runs the gate in CI has no seam to pass
+them, so each tier job keeps its profile as an artifact and the number
+the gate enforces is the unit run's. Reading all three is
+[[023-merged-coverage-floor]]. `make check` runs the unit tier alone and
+reports coverage over it; `make check-all` runs all three and is what a
 contributor runs before pushing something that touches a store.
 
 A package below the bar fails the gate. `test/stubs` is held to the same
@@ -260,10 +265,10 @@ free for a public repository and give each job a fresh machine.
 | `store` | checkout, Go, `make up`, `go test -tags=tiers -race -run '^TestStore' -covermode=atomic -coverprofile=store.out` over the packages `TestWorkflowJobsMatchTheTable` holds the job to, upload the profile |
 | `e2e` | the same stack, `make build build-stubs`, `go test -tags=tiers -race -run '^TestE2E' -covermode=atomic -coverprofile=e2e.out ./test/e2e/...`, upload the profile |
 
-The `gate` job is to read the two profiles beside its own and enforce the
-bar over all three, so the number in the log is the number a reader of
-this spec expects; what stands in the way is criterion 11 above. Both jobs
-run on every push and every pull request.
+Both jobs upload their profile, and the `gate` job reads its own. Reading
+the two beside it and enforcing the bar over all three needs an input the
+reusable workflow does not have, and is [[023-merged-coverage-floor]].
+Both jobs run on every push and every pull request.
 Neither is self-hosted: the service Arca replaces ran its equivalent on
 one company's VM for a warm cache and a private repository, and neither
 reason survives.
@@ -284,7 +289,9 @@ reason survives.
 The suite an installation must pass, which is importable and runs
 against any server ([[017-conformance-suite]]). The release pipeline
 that publishes `arca-stubs` ([[016-release-and-installation]]). What each
-tier asserts, which every other spec's acceptance criteria own.
+tier asserts, which every other spec's acceptance criteria own. The input
+`latere-ai/ci` needs before the gate can read all three profiles
+([[023-merged-coverage-floor]]).
 
 ## Acceptance criteria
 
@@ -300,7 +307,7 @@ tier asserts, which every other spec's acceptance criteria own.
 | 8 | `make run` on a clean clone completes the seven steps, `arcad check` prints five `ok` lines, and the printed `curl` puts and reads one object | `TestMakeRun`, reading the `run` target; `TestE2ECheckPassesAgainstTheStack` for the five lines and `TestE2EAPutRoundTripsAndAReadAboveTheBoundaryRedirects` for the round trip, both against a running stack |
 | 9 | Two clones run `make run` at once without a port or volume collision | `TestMakeRunSideBySide`, reading the derivation in the Makefile and `compose.yaml` |
 | 10 | One e2e test drives `arcad` as a process: the subcommands, the two listeners, the probes, and `check` | `TestE2EBinaryServesItsProbesAgainstBothStores`, with `TestE2EMigrateIsIdempotent`, `TestE2EAnUnknownSubcommandIsAUsageError` and `TestE2ECheckPassesAgainstTheStack` for the subcommands beside `serve` |
-| 11 | Coverage over the three profiles is at least 90% for every package, `test/stubs` included | the `cover` gate with three `-profile` flags. Open: the reusable workflow takes no input to pass them, so the floor is the unit tier's. See Current state |
+| 11 | Coverage is at least 90% for every package, `test/stubs` included, over the unit tier's profile, and each service tier job uploads its own profile as an artifact | the `cover` gate in the `gate` job of `verify.yml`, and `TestWorkflowJobsMatchTheTable` for the two uploads. Judging the floor on the three profiles merged was this criterion's first form and is [[023-merged-coverage-floor]], which carries it verbatim: the reusable workflow takes no input to pass them |
 | 12 | `verify.yml` has one job per service tier with the command from the table, on hosted runners | `TestWorkflowJobsMatchTheTable`, reading `verify.yml` |
 
 Criterion 8 is three assertions rather than one, because no test runs `make
@@ -313,3 +320,32 @@ and the put and the read by
 requests work as printed against the run's own installation is checked by
 hand whenever `make run` changes; on 2026-09-19 the put answered `201` with
 the object's checksum and the read answered its bytes.
+
+## Outcome
+
+Complete on 2026-09-19. The two stubs, the `arca-stubs` binary, the
+compose stack, the three tiers, `make run` and the two CI jobs are in the
+tree, and the gate is green at every commit that built them: `b4671bf`,
+`3204b35`, `df9c1ca`, `4663ec3` and `c099323`, with the seventh `make
+run` step landing on 2026-09-19. The tiers carried the release: the store
+and e2e jobs ran on every push to v0.1.7, and the stubs image the release
+publishes is what the kind stack of [[016-release-and-installation]] and
+the conformance run of [[017-conformance-suite]] stand on.
+
+| Criterion | What closed it |
+|---|---|
+| 1, 2, 3, 4 | `TestIssuerStub` and `TestAuthorizerStub` drive every flag of both stubs, with [[012-administration]]'s `check` test and [[010-events-and-reaper]]'s limit test reading the two flags that only matter against a server |
+| 5, 6, 7 | a clean clone with no services is green, the `hermetic` gate's allow list is empty, and each tier sweeps what it made |
+| 8, 9, 10 | `TestMakeRun` and `TestMakeRunSideBySide` read the target; the two steps that need a running installation are proved by the e2e tests named in the table |
+| 11 | narrowed to what the gate enforces: 90% per package over the unit profile, with each service tier uploading its own. The merged floor is [[023-merged-coverage-floor]] |
+| 12 | `TestWorkflowJobsMatchTheTable` reads `verify.yml` against the job table |
+
+One criterion was split rather than built.
+[[023-merged-coverage-floor]] carries criterion 11's first form verbatim
+and the change that closes it: an input `cover_profiles` on
+`latere-ai/ci/.github/workflows/lateregate.yml`, naming the artifacts to
+download before the `cover` gate and append to that one gate's invocation
+as repeated `-profile=` flags, and `needs: [store, e2e]` on this
+repository's `gate` job. It is another repository's pull request, and no
+change inside this tree closes it, which is why it left rather than
+waited. Every divergence from the draft is in Current state above.
