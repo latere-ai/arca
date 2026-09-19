@@ -19,7 +19,13 @@ type Report struct {
 	Prefix   string
 	Bucket   string
 	DryRun   bool
-	Outcomes []Outcome
+	// VerifyBytes, VerifyMax and VerifySample are what the run was told to
+	// read back. They print in the header, so the counts below are read
+	// against the check that produced them.
+	VerifyBytes  bool
+	VerifyMax    int64
+	VerifySample int
+	Outcomes     []Outcome
 }
 
 // NewReport answers an empty report over one run's inputs.
@@ -57,6 +63,7 @@ func (r *Report) Write(w io.Writer) {
 	_, _ = fmt.Fprintf(head, "bucket\t%s\n", r.Bucket)
 	_, _ = fmt.Fprintf(head, "prefix\t%s\n", r.Prefix)
 	_, _ = fmt.Fprintf(head, "mode\t%s\n", mode)
+	_, _ = fmt.Fprintf(head, "byte check\t%s\n", r.byteCheck())
 	flush(head)
 
 	fmt.Fprintf(&b, "\n")
@@ -90,33 +97,69 @@ func (r *Report) copiedMeans() string {
 	return "copied to the object id's key and read back"
 }
 
-// writeNotes prints what the run could not prove and what the store could not
-// do, with a count each, so neither reads as a silent success.
-func (r *Report) writeNotes(b *strings.Builder) {
-	sizeOnly, unstamped := 0, 0
+// byteCheck is the header's line for what this run reads back, so a clean
+// report is never read without the check that produced it.
+func (r *Report) byteCheck() string {
+	if !r.VerifyBytes {
+		return "off; -verify-bytes reads each destination back and digests it"
+	}
+	return fmt.Sprintf("on, every object at or under %d bytes and %d%% of the larger ones",
+		r.VerifyMax, r.VerifySample)
+}
+
+// Proved answers how many keys that arrived carry one proof.
+func (r *Report) Proved(p Proof) int {
+	n := 0
 	for _, o := range r.Outcomes {
-		if o.SizeOnly && (o.State == Copied || o.State == Skipped) {
-			sizeOnly++
+		if (o.State == Copied || o.State == Skipped) && o.Verified == p {
+			n++
 		}
+	}
+	return n
+}
+
+// writeNotes prints how far each key was proved and what the store could not
+// do, with a count each, so the weakest proof never reads as the strongest and
+// nothing reads as a silent success.
+func (r *Report) writeNotes(b *strings.Builder) {
+	unstamped := 0
+	for _, o := range r.Outcomes {
 		if o.Unstamped {
 			unstamped++
 		}
 	}
-	if sizeOnly == 0 && unstamped == 0 {
+	onBytes, onLabel, onSize := r.Proved(OnBytes), r.Proved(OnLabel), r.Proved(OnSize)
+	if onBytes+onLabel+onSize+unstamped == 0 {
 		return
 	}
 	fmt.Fprintf(b, "\nnoted\n")
 	tw := tabwriter.NewWriter(b, 0, 0, 2, ' ', 0)
-	if sizeOnly > 0 {
-		_, _ = fmt.Fprintf(tw, "  verified on size\t%d\t%s\n", sizeOnly,
-			"the row's checksum is a digest the predecessor computed, not a label this store reports, "+
-				"so the size and the store's own copy are what hold")
+	if onBytes > 0 {
+		_, _ = fmt.Fprintf(tw, "  verified on bytes\t%d\t%s\n", onBytes, r.bytesMeans())
+	}
+	if onLabel > 0 {
+		_, _ = fmt.Fprintf(tw, "  verified on label\t%d\t%s\n", onLabel,
+			"the store's own label for the object is the checksum the row carries")
+	}
+	if onSize > 0 {
+		_, _ = fmt.Fprintf(tw, "  verified on size\t%d\t%s\n", onSize,
+			"the size and the store's own copy are what hold: the row's checksum is a digest no store "+
+				"reports, and this run did not read the object back")
 	}
 	if unstamped > 0 {
 		_, _ = fmt.Fprintf(tw, "  publicity not stamped\t%d\t%s\n", unstamped,
 			"the store holds no object ACLs; serve these through a bucket policy (spec 003)")
 	}
 	flush(tw)
+}
+
+// bytesMeans is the byte proof's sentence, which a dry run reads in the
+// conditional because it read no destination.
+func (r *Report) bytesMeans() string {
+	if r.DryRun {
+		return "the run will read these destinations back and digest them against the manifest"
+	}
+	return "read back from the store and digested to the checksum the row carries"
 }
 
 // writeKeys names every key an operator has to look at, and nothing else: a

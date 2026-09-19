@@ -65,8 +65,12 @@ to it, in the tree on 2026-09-19: it reads the manifest `migrate-drive
 inside one bucket. Criterion 4 is two criteria now, the rows and the
 bytes, and `TestStoreTheTwoCommandsOfStepThreeLeaveEveryByteAtItsObjectIDsKey`
 in `tools/move-objects/store_tier_test.go` runs both commands in order
-against Postgres and MinIO. The operator's procedure for both is the
-"Migrating from Drive" section of `docs/operations.md`.
+against Postgres and MinIO. The bytes half is proved by reading every
+destination back and digesting it, not by a label: no store the family
+runs reports a checksum of its own for an object, which the build
+measured against MinIO and which Spaces answers no better. The
+operator's procedure for both is the "Migrating from Drive" section of
+`docs/operations.md`.
 
 ## Design
 
@@ -173,7 +177,7 @@ network twice and the cost is one request per distinct key.
 | Piece | Design |
 |---|---|
 | the manifest | `migrate-drive -manifest <path>`: one line per distinct source key, tab separated, `<drive key>\t<object id>\t<size>\t<checksum>\t<public>`, under a header naming the format, its version and the bucket prefix, and closed by a `#complete <count>` trailer. The ids are minted in the preflight, so the body is written before the first table commits and every id the copy hands out is one the file already names; the trailer is appended only when the verification holds, and the move refuses a file without it. A dry run writes none: it commits nothing for a manifest to be the record of. One key two rows describe differently takes the live file's size and checksum, and the disagreement is counted; a key with no object behind it, which is an open upload's destination, is counted and left off, because its parts are invisible to a listing until the upload completes. The format is `tools/internal/manifest`, read by the copy that writes it and the move that consumes it and by nothing that serves a request |
-| `tools/move-objects` | reads the manifest and, for each line, `Head`s `id.Key(prefix)` first, because the store the family runs neither honours the conditional copy nor refuses it. A destination already holding the line's size and checksum is a skip, so a killed run resumes and a finished run repeats; one holding other bytes is a mismatch and is never overwritten. Otherwise it copies and `Head`s the destination back. What it verifies is what a store can answer: the size always, and the checksum where the line carries a label a store reports, which a sha256 the predecessor computed and a composite label are not; those keys are counted and named as verified on size alone rather than passed off as checked. Flags `-manifest`, `-bucket`, `-endpoint`, `-region`, `-prefix`, `-path-style`, `-concurrency` (16), `-dry-run`; the credentials come from `ARCA_BUCKET_ACCESS_KEY` and `ARCA_BUCKET_SECRET_KEY`, so no secret reaches a command line. A dry run reads both ends of every line and writes nothing. The report counts copied, skipped, mismatched and failed and names every key of the last two; exit 0 clean, 1 on any mismatch, failure or refusal, 2 on a flag, which is what `migrate-drive` exits |
+| `tools/move-objects` | reads the manifest and, for each line, `Head`s `id.Key(prefix)` first, because the store the family runs neither honours the conditional copy nor refuses it. A destination already holding the line's size and checksum is a skip, so a killed run resumes and a finished run repeats; one holding other bytes is a mismatch and is never overwritten. Otherwise it copies and `Head`s the destination back. What it verifies is the size always, then the bytes: the destination is streamed through a sha256 and compared to the line's checksum, which is the only proof a store reporting no checksum of its own can give. A line whose checksum is a label a store reports takes that comparison instead; one that is neither, which is the composite label of an object assembled from parts, is counted and named as verified on size alone rather than passed off as checked. The report counts the three apart, so the weakest never reads as the strongest. Flags `-manifest`, `-bucket`, `-endpoint`, `-region`, `-prefix`, `-path-style`, `-concurrency` (16), `-verify-bytes` (on), `-verify-bytes-max` (256 MiB), `-verify-sample` (10), `-dry-run`; the credentials come from `ARCA_BUCKET_ACCESS_KEY` and `ARCA_BUCKET_SECRET_KEY`, so no secret reaches a command line. A dry run reads both ends of every line and writes nothing. The report counts copied, skipped, mismatched and failed and names every key of the last two; exit 0 clean, 1 on any mismatch, failure or refusal, 2 on a flag, which is what `migrate-drive` exits |
 | `blob.Store` | gains `Copy(ctx, from, to string, o PutOptions) (Object, error)` with the S3 call, the map, the counter and the metrics decorator; one interface method, tested in the store tier against MinIO. It reads the source once for its size and its media type, so a copy is two round trips and not one |
 | the source keys | left in place until the sunset. The move never deletes; the reaper does not read `drive/<owner>/` keys because they carry no id (`object.ParseKey` refuses them), so they are invisible to the sweep and to Arca. Step 4 of the sunset deletes them by the manifest that named them, after criterion 4b has held and the smoke of step 5 with it |
 | public objects | Drive stamped `public-read` on the source key; `CopyObject` does not carry an ACL, so the move re-stamps the destination through `SetPublic` for every line the copy marked public. A store that holds no object ACLs and serves publicity through a bucket policy answers `ErrNotSupported`, which spec 003 has a caller carry on from, so the move counts it rather than failing the key |
@@ -185,10 +189,29 @@ table below carries them as two rows with what proves each.
 
 What this costs: at most four requests per distinct key, a read of the
 destination, a read of the source, the copy, and a read of the
-destination back, minutes to an hour at the counts a `-dry-run` will
-print from production. What it avoids: teaching Arca to read two key
-shapes, which would put Drive's owner-and-path addressing into the core
-forever.
+destination back, plus one read of every byte at or under
+`-verify-bytes-max` and of the sampled share above it, which is the byte
+check below. The requests are minutes at the counts a `-dry-run` will
+print from production; the byte check is one pass over the bucket, so
+the move takes about as long as reading the bucket once. What it avoids:
+teaching Arca to read two key shapes, which would put Drive's
+owner-and-path addressing into the core forever.
+
+The byte check is what makes criterion 4b provable at the store
+production runs on. Neither the MinIO the tier pins nor the Spaces the
+cutover writes to answers a checksum of its own for an object, and
+Drive's `checksum` column holds a sha256 it computed for itself, which
+no store reports back as a label. So the destination is streamed through
+a sha256 and compared to that column: `-verify-bytes`, on by default,
+over every object at or under `-verify-bytes-max` (256 MiB) and
+`-verify-sample` percent (10) of the larger ones, the sample chosen by a
+digest of the key so two runs choose the same keys and a resumed run
+leaves no hole. A resumed skip is checked too, or the keys of a killed
+run would be the only ones nobody read. A disagreement is a mismatch
+like any other: the key is named, nothing is overwritten, and the run
+exits 1. The operator opts out of the check rather than into it, because
+a clean report nobody read a byte for is the outcome this step exists to
+prevent.
 
 One finding the build made, recorded here because the move rests on it:
 **the MinIO the stack pins neither honours `If-None-Match: *` on a
@@ -356,7 +379,7 @@ limit variables join the configuration table
 | 2 | No file in this repository carries a line copied from Drive without the licence notice and without a spec that names it | the `license` gate and criterion 1 |
 | 3 | `tools/migrate-drive` is idempotent, refuses a non-empty target, rewrites every owner column, and verifies counts and checksums | **Holds, 2026-09-19.** `TestStoreMigrateDrive*` in `tools/migrate-drive/store_tier_test.go`, run by `make test-store` against two Postgres databases the tier creates: one holds Drive's schema from `testdata/drive_schema.sql` and the fixture, one holds Arca's migrations. The four cases are the copy of every table, the refusal of a second run, the dry run that leaves the target empty, and the refusal of a missing mapping. The rewrite rules and the dependency order are proved against a fake in the unit tier beside it |
 | 4a | The rows. After the copy, every object Drive listed is listed by Arca under the same path with the same version history | **Holds, 2026-09-19.** The copy's report verifies the counts and a sample of checksums, and `TestStoreMigrateDriveCopiesEveryTableSpec019Names` in `tools/migrate-drive/store_tier_test.go` proves the paths and the version history arrive against Drive's schema and Arca's |
-| 4b | The bytes. After the move, every byte reads through Arca at the key its object id derives, with the size and, where a store reports one, the label the rows carry | **Holds in the tier, 2026-09-19; run in production at the cutover.** `TestStoreTheTwoCommandsOfStepThreeLeaveEveryByteAtItsObjectIDsKey` in `tools/move-objects/store_tier_test.go` seeds Drive-shaped keys into MinIO, runs the row copy with `-manifest`, runs the move, and reads every object back through the id-derived key with the bytes its source key held, including a key with a character outside a path's alphabet and a public one; a second move skips every key, which is the resume. The move's own report is what records the production run, and what an operator reads before step 4. Both halves are recorded in the Outcome with their dates |
+| 4b | The bytes. After the move, every byte reads through Arca at the key its object id derives, and digests to the checksum the rows carry | **Holds in the tier, 2026-09-19; run in production at the cutover.** Proved by two cases in `tools/move-objects/store_tier_test.go`. `TestStoreTheTwoCommandsOfStepThreeLeaveEveryByteAtItsObjectIDsKey` seeds Drive-shaped keys into MinIO, runs the row copy with `-manifest`, runs the move, and reads every object back through the id-derived key with the bytes its source key held, including a key with a character outside a path's alphabet and a public one; every row carrying a sha256 is reported `verified on bytes` and none is left on its size, and a second move skips every key, which is the resume. `TestStoreACorruptedDestinationFailsTheRunAndNamesTheKey` overwrites one destination with other bytes of the same length, so the size and the store's own copy both still hold, and the run exits 1 naming the key; with `-verify-bytes=false` the same run is clean, which is what the check is worth. The move's own report is what records the production run, and what an operator reads before step 4. Both halves are recorded in the Outcome with their dates |
 | 5 | Drive refuses every write during the copy | Drive's read-only flag and its test, in Drive's repository |
 | 6 | The origin routes the storage prefixes to Arca and nothing routes to Drive | the origin's route table and the release smoke |
 | 7 | Every consumer in the table above is repointed by a commit that names this spec | `git log --grep` in each repository, listed in the Outcome |

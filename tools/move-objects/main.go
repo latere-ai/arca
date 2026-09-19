@@ -43,6 +43,15 @@ const (
 // store's request budget and not about bandwidth.
 const DefaultConcurrency = 16
 
+// DefaultVerifyMax is the largest object the byte check reads back in full,
+// and DefaultVerifySample is the percentage of the larger ones it samples. At
+// Drive's sizes almost every object is under the threshold, so the run reads
+// the bucket once and the tail costs a tenth of the rest.
+const (
+	DefaultVerifyMax    = 256 << 20
+	DefaultVerifySample = 10
+)
+
 // cli runs one move and answers the process exit code.
 func cli(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("move-objects", flag.ContinueOnError)
@@ -54,6 +63,9 @@ func cli(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	prefix := fs.String("prefix", "drive/", "the bucket prefix, which has to be the manifest's and the installation's")
 	pathStyle := fs.Bool("path-style", false, "address the bucket in the path, for a store without virtual hosts")
 	concurrency := fs.Int("concurrency", DefaultConcurrency, "how many keys move at once")
+	verifyBytes := fs.Bool("verify-bytes", true, "read each destination back and digest it against the manifest's checksum")
+	verifyMax := fs.Int64("verify-bytes-max", DefaultVerifyMax, "read back in full every object at or under this size in bytes")
+	verifySample := fs.Int("verify-sample", DefaultVerifySample, "the percentage of the objects above that size to read back")
 	dryRun := fs.Bool("dry-run", false, "read every destination and every source, and write nothing")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -67,6 +79,7 @@ func cli(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		manifest: *manifestPath, bucket: *bucket, endpoint: *endpoint,
 		region: *region, prefix: *prefix, pathStyle: *pathStyle,
 		concurrency: *concurrency, dryRun: *dryRun,
+		verifyBytes: *verifyBytes, verifyMax: *verifyMax, verifySample: *verifySample,
 		bucketPrefix: os.Getenv(BucketPrefixVar),
 		accessKey:    os.Getenv(AccessKeyVar), secretKey: os.Getenv(SecretKeyVar),
 	}, stdout); err != nil {
@@ -86,6 +99,9 @@ type options struct {
 	pathStyle    bool
 	concurrency  int
 	dryRun       bool
+	verifyBytes  bool
+	verifyMax    int64
+	verifySample int
 	bucketPrefix string
 	accessKey    string
 	secretKey    string
@@ -134,7 +150,11 @@ func (o options) plan() (string, *manifest.Manifest, error) {
 // the map of spec 003 included.
 func move(ctx context.Context, o options, prefix string, m *manifest.Manifest, bucket blob.Store, stdout io.Writer) error {
 	report := NewReport(o.manifest, prefix, o.bucket, o.dryRun)
-	mv := &Move{Bucket: bucket, Prefix: prefix, DryRun: o.dryRun, Concurrency: o.concurrency}
+	report.VerifyBytes, report.VerifyMax, report.VerifySample = o.verifyBytes, o.verifyMax, o.verifySample
+	mv := &Move{
+		Bucket: bucket, Prefix: prefix, DryRun: o.dryRun, Concurrency: o.concurrency,
+		VerifyBytes: o.verifyBytes, VerifyMax: o.verifyMax, VerifySample: o.verifySample,
+	}
 	report.Outcomes = mv.Run(ctx, m.Entries)
 	report.Write(stdout)
 	if !report.OK() {
@@ -178,6 +198,12 @@ func (o options) check() (string, error) {
 	}
 	if o.concurrency < 1 {
 		missing.Refuse("-concurrency is %d, and a move copies at least one key at a time", o.concurrency)
+	}
+	if o.verifyMax < 0 {
+		missing.Refuse("-verify-bytes-max is %d, and a size is not negative", o.verifyMax)
+	}
+	if o.verifySample < 0 || o.verifySample > 100 {
+		missing.Refuse("-verify-sample is %d, and a percentage is 0 to 100", o.verifySample)
 	}
 	prefix := normalisePrefix(o.prefix)
 	if prefix == "" {

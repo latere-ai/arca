@@ -158,11 +158,98 @@ func TestStoreTheTwoCommandsOfStepThreeLeaveEveryByteAtItsObjectIDsKey(t *testin
 	if !strings.Contains(counts, "copied 0") || !strings.Contains(counts, "skipped 4") {
 		t.Errorf("the second move did not skip every key:\n%s", again.String())
 	}
-	// Three rows carry a digest no store reports as a label, and the fourth
-	// carries the label a store does report, so the report names three and
-	// the checksum rung ran against the real store for the fourth.
-	if !strings.Contains(strings.Join(strings.Fields(out.String()), " "), "verified on size 3") {
-		t.Errorf("the move did not name what it verified on size alone:\n%s", out.String())
+	// Three rows carry the sha256 of their bytes and were read back and
+	// digested, which is the only proof a store reporting no checksum of its
+	// own can give; the fourth carries the store's own label and took the
+	// rung below. Nothing was left on the size alone.
+	counted := strings.Join(strings.Fields(out.String()), " ")
+	for _, says := range []string{"verified on bytes 3", "verified on label 1"} {
+		if !strings.Contains(counted, says) {
+			t.Errorf("the move did not report %q:\n%s", says, out.String())
+		}
+	}
+	if strings.Contains(counted, "verified on size") {
+		t.Errorf("a key was left on its size alone:\n%s", out.String())
+	}
+}
+
+// TestStoreACorruptedDestinationFailsTheRunAndNamesTheKey is criterion 4b
+// earning its keep at a store that reports no checksum of its own: the
+// destination is there, the right length, and wrong, and only a read of the
+// bytes tells the difference.
+func TestStoreACorruptedDestinationFailsTheRunAndNamesTheKey(t *testing.T) {
+	endpoint := os.Getenv("E2E_S3_ENDPOINT")
+	if endpoint == "" || os.Getenv("E2E_DATABASE_URL") == "" {
+		t.Skip(skipWithoutTheStack)
+	}
+	prefix := fmt.Sprintf("test-%d-%d/drive/", time.Now().UnixNano(), os.Getpid())
+	bucket := tierBucket(t, endpoint, prefix)
+	source, target := tierDatabases(t, prefix)
+
+	bodies := map[string][]byte{}
+	for path, body := range tierBodies() {
+		key := prefix + path
+		bodies[key] = body
+		if _, err := bucket.Put(t.Context(), key, bytes.NewReader(body), int64(len(body)), blob.PutOptions{}); err != nil {
+			t.Fatalf("seed %q: %v", key, err)
+		}
+	}
+	manifestPath := filepath.Join(t.TempDir(), "manifest.tsv")
+	copyRows(t, source, target, prefix, manifestPath)
+
+	t.Setenv(BucketPrefixVar, prefix)
+	t.Setenv(AccessKeyVar, envOr("E2E_S3_KEY", "minioadmin"))
+	t.Setenv(SecretKeyVar, envOr("E2E_S3_SECRET", "minioadmin"))
+	args := []string{
+		"-manifest", manifestPath,
+		"-bucket", envOr("E2E_S3_BUCKET", "arca-test"),
+		"-endpoint", endpoint, "-region", "us-east-1", "-path-style",
+		"-prefix", prefix, "-concurrency", "4",
+	}
+	var out, errs bytes.Buffer
+	if code := cli(t.Context(), args, &out, &errs); code != exitOK {
+		t.Fatalf("the move exited %d\n%s\n%s", code, out.String(), errs.String())
+	}
+
+	// One destination is overwritten with other bytes of the same length,
+	// which is what a store losing a byte in flight would leave. The size
+	// still holds and the store's own copy still holds.
+	pool := open(t, target)
+	objectID := one[string](t, pool, `SELECT object_id::text FROM files WHERE id = $1`, tierNotes)
+	corrupted := object.ID(objectID).Key(prefix)
+	held := bodies[prefix+"u-"+tierPerson+"/files/notes.md"]
+	other := bytes.Repeat([]byte("x"), len(held))
+	if err := bucket.Delete(t.Context(), corrupted); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bucket.Put(t.Context(), corrupted, bytes.NewReader(other), int64(len(other)), blob.PutOptions{}); err != nil {
+		t.Fatalf("corrupt the destination: %v", err)
+	}
+
+	var again, againErrs bytes.Buffer
+	code := cli(t.Context(), args, &again, &againErrs)
+	if code != exitRefused {
+		t.Fatalf("a corrupted destination exited %d, want %d\n%s", code, exitRefused, again.String())
+	}
+	for _, says := range []string{prefix + "u-" + tierPerson + "/files/notes.md", "digest", "the move is not clean"} {
+		if !strings.Contains(again.String(), says) {
+			t.Errorf("the report holds no %q:\n%s", says, again.String())
+		}
+	}
+	// Nothing is overwritten: what to do with a disagreement is the
+	// operator's, and the run leaves the evidence where it found it.
+	rc, _, err := bucket.Get(t.Context(), corrupted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rc.Close() }()
+	if got, _ := io.ReadAll(rc); !bytes.Equal(got, other) {
+		t.Error("the run overwrote the destination it could not verify")
+	}
+	// The byte check is what caught it: with it off, the same run is clean.
+	var without bytes.Buffer
+	if code := cli(t.Context(), append(args, "-verify-bytes=false"), &without, &without); code != exitOK {
+		t.Fatalf("without the byte check the run exited %d\n%s", code, without.String())
 	}
 }
 
@@ -284,22 +371,23 @@ func tierDatabases(t *testing.T, prefix string) (source, target string) {
 // The sizes are the lengths of tierBodies, because the manifest carries what
 // the rows say and the move compares that against what the bucket holds.
 //
-// Three rows carry a digest the predecessor computed for itself, which no
-// store reports as a label, and the move verifies those on their size and
-// says so. The public one carries the label a store does report, so the
-// checksum rung is exercised against the real store too.
+// Three rows carry the sha256 of their bytes, which is what the predecessor
+// stored for an object written in one piece and what the byte check reads a
+// destination back against. The public one carries the store's own label
+// instead, so the rung below the byte check runs against the real store too.
 func seed(prefix string) string {
 	bodies := tierBodies()
 	size := func(path string) int { return len(bodies[path]) }
 	owner := "u-" + tierPerson
+	digest := func(path string) string { return sha(bodies[path]) }
 	return fmt.Sprintf(`
 INSERT INTO principal_directory (principal_id, email) VALUES ('%[1]s', 'a@example.com');
 
 INSERT INTO files (id, owner_type, owner_id, path, created_by, content_type,
                    size_bytes, storage_key, checksum, is_public, deleted_at) VALUES
   ('%[2]s', 'principal', '%[1]s', 'files/notes.md',        '%[1]s', 'text/markdown',            %[7]d,  '%[6]s%[11]s/files/notes.md',        '%[10]s', false, NULL),
-  ('%[3]s', 'principal', '%[1]s', 'files/my logo@ab12',    '%[1]s', 'image/png',                %[8]d,  '%[6]s%[11]s/files/my logo@ab12',    '%[10]s', false, NULL),
-  ('%[4]s', 'principal', '%[1]s', 'files/big.bin',         '%[1]s', 'application/octet-stream', %[9]d,  '%[6]s%[11]s/files/big.bin',         '%[10]s', false, NULL),
+  ('%[3]s', 'principal', '%[1]s', 'files/my logo@ab12',    '%[1]s', 'image/png',                %[8]d,  '%[6]s%[11]s/files/my logo@ab12',    '%[14]s', false, NULL),
+  ('%[4]s', 'principal', '%[1]s', 'files/big.bin',         '%[1]s', 'application/octet-stream', %[9]d,  '%[6]s%[11]s/files/big.bin',         '%[15]s', false, NULL),
   ('%[5]s', 'principal', '%[1]s', 'files/public/logo.png', '%[1]s', 'image/png',                %[12]d, '%[6]s%[11]s/files/public/logo.png', '%[13]s', true,  NULL);
 
 -- The version points at the key the live row carries, so one key is one
@@ -309,8 +397,9 @@ INSERT INTO file_versions (owner_type, owner_id, path, version_no, content_type,
   ('principal', '%[1]s', 'files/notes.md', 1, 'text/markdown', 9, '%[10]s', '%[6]s%[11]s/files/notes.md', '%[1]s');
 `, tierPerson, tierNotes, tierLogo, tierBig, tierPublic, prefix,
 		size(owner+"/files/notes.md"), size(owner+"/files/my logo@ab12"),
-		size(owner+"/files/big.bin"), strings.Repeat("a", 64), owner,
-		size(owner+"/files/public/logo.png"), label(bodies[owner+"/files/public/logo.png"]))
+		size(owner+"/files/big.bin"), digest(owner+"/files/notes.md"), owner,
+		size(owner+"/files/public/logo.png"), label(bodies[owner+"/files/public/logo.png"]),
+		digest(owner+"/files/my logo@ab12"), digest(owner+"/files/big.bin"))
 }
 
 // createDatabase makes one database beside the stack's and drops it with its

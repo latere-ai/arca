@@ -438,6 +438,22 @@ such as MinIO.
 Add `-dry-run` first. It reads both ends of every line and writes nothing, so
 the counts it prints are the counts the real run will print.
 
+**The byte check is on, and you have to turn it off rather than on.** After
+each copy, and for each key a resumed run skips, the object is read back out
+of your bucket, hashed, and compared to the checksum the row carried. That is
+the only check that holds at a store which reports no checksum of its own,
+which is every S3 store we know of, DigitalOcean Spaces and MinIO among them:
+without it a copy is proved by its length. It costs one read of every byte you
+move, so the run takes about as long as reading your bucket once.
+
+| Flag | Default | What it does |
+|---|---|---|
+| `-verify-bytes` | on | read each destination back and hash it |
+| `-verify-bytes-max` | 268435456 (256 MiB) | read back in full every object at or under this size |
+| `-verify-sample` | 10 | the percentage of the larger objects to read back, chosen by hashing the key, so a rerun reads the same ones |
+
+Turn it off only when you are rehearsing against a copy of your data.
+
 ```
 outcome     keys  means
 copied      812   copied to the object id's key and read back
@@ -446,23 +462,31 @@ mismatched  0     the destination holds other bytes, and nothing was overwritten
 failed      0     the store could not answer for the key
 
 noted
-  verified on size  812  the row's checksum is a digest the predecessor computed, not a
-                         label this store reports, so the size and the store's own copy
-                         are what hold
+  verified on bytes  807  read back from the store and digested to the checksum the row
+                          carries
+  verified on size   5    the size and the store's own copy are what hold: the row's
+                          checksum is a digest no store reports, and this run did not
+                          read the object back
 ```
 
 - **copied** is the objects now readable at their object id's key.
 - **skipped** is the destinations that were already right. A killed run
   resumes and a finished run repeats: rerun the same command as often as you
   like.
-- **mismatched** is a destination holding something else. Nothing is
-  overwritten and every key is named. Look at each one before you continue.
+- **mismatched** is a destination holding something else, a destination whose
+  bytes hash to something else included. Nothing is overwritten and every key
+  is named. Look at each one before you continue.
 - **failed** is a key the store could not answer for, a missing source among
   them. Every key is named with the reason.
-- **verified on size** counts the keys whose stored checksum is a digest Drive
-  computed for itself, which no S3 store reports back as a label. Those are
-  verified on their size and on the store's own copy; the keys whose checksum
-  is a store label are compared on that too.
+- **verified on bytes** is the objects read back and hashed. This is the count
+  that makes the move provable; aim for all of them.
+- **verified on label** appears where the row's checksum is a label your store
+  reports for a whole object, which is compared without reading the bytes.
+- **verified on size** counts what neither check could reach: an object above
+  the threshold that the sample did not pick, a row whose checksum is the
+  composite label of a multipart upload, or every row if you turned the byte
+  check off. Read this number. It is how many objects you are taking on
+  trust.
 - **publicity not stamped** appears when your store has no object ACLs and
   serves public objects through a bucket policy instead. Those objects are
   copied; only the stamp is the policy's job.
