@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.1.3 - 2026-09-19
+
 - **The kind stack's authorizer accepts the bearer arcad sends.** The stub
   authorizer requires a bearer and was started with none named, so it
   expected the package default while the overlay's Secret told arcad to
