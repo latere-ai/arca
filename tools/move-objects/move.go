@@ -169,27 +169,30 @@ func (m *Move) rehearse(ctx context.Context, o Outcome) Outcome {
 // compare checks what the store holds against the line and records the
 // verdict on the outcome.
 //
-// The size is compared always. The checksum is compared where the line
-// carries a label the store's own can be read against, which is a digest of
-// the whole object written as thirty-two hexadecimal characters. A sha256 the
-// predecessor computed for itself is not one, and neither is the composite
-// label of an object assembled from parts, because a copy relabels the
-// destination as one piece. Those lines are verified on their size and on the
+// The size is compared always. The checksum is compared where both the line
+// and the store's label are a digest of the whole object, which is thirty-two
+// hexadecimal characters. A sha256 the predecessor computed for itself is not
+// one, and neither is the composite label the store gives a destination
+// assembled from ranges. Those lines are verified on their size and on the
 // store's own copy, and the report says how many.
 func (m *Move) compare(o *Outcome, held blob.Object) {
 	if held.Size != o.Entry.Size {
 		o.State, o.Why = Mismatched, fmt.Sprintf("the destination holds %d bytes and the manifest says %d", held.Size, o.Entry.Size)
 		return
 	}
-	if comparableLabel(o.Entry.Checksum) {
-		if held.ETag != o.Entry.Checksum {
-			o.State, o.Why = Mismatched, fmt.Sprintf("the destination is labelled %q and the manifest says %q", held.ETag, o.Entry.Checksum)
-			return
-		}
+	switch {
+	case !comparableLabel(o.Entry.Checksum), !comparableLabel(held.ETag):
+		// One of the two is not a digest of the whole object: the row's
+		// checksum is a sha256 the predecessor computed, or the destination
+		// was assembled from ranges and carries a composite label, which no
+		// digest of the whole object ever equals. Comparing either would
+		// fail a healthy copy.
+		o.State, o.SizeOnly = Copied, true
+	case held.ETag != o.Entry.Checksum:
+		o.State, o.Why = Mismatched, fmt.Sprintf("the destination is labelled %q and the manifest says %q", held.ETag, o.Entry.Checksum)
+	default:
 		o.State = Copied
-		return
 	}
-	o.State, o.SizeOnly = Copied, true
 }
 
 // stamp re-stamps a public destination, because a copy carries no ACL. A

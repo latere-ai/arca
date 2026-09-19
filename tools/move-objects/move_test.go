@@ -190,6 +190,36 @@ func TestALineWithNoComparableLabelIsVerifiedOnItsSize(t *testing.T) {
 	}
 }
 
+func TestADestinationAssembledFromRangesIsVerifiedOnItsSize(t *testing.T) {
+	// A source above the API's single copy maximum moves range by range, and
+	// the store then labels the destination the way it labels an upload in
+	// parts. No digest of the whole object equals that label, so a line that
+	// carries one is verified on its size rather than failed.
+	notes := []byte("the bytes of one note")
+	b := newBucket(t, map[string][]byte{notesKey: notes})
+	destination := object.ID(idNotes).Key(prefix)
+	uploadID, err := b.inner.CreateMultipart(t.Context(), destination, blob.PutOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	etag, err := b.inner.UploadPart(destination, uploadID, 1, notes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assembled, err := b.inner.CompleteMultipart(t.Context(), destination, uploadID, []blob.Part{{Number: 1, ETag: etag}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(assembled.ETag, "-1") {
+		t.Fatalf("the destination is labelled %q, which is not composite", assembled.ETag)
+	}
+
+	o := moved(t, b, false, entry(notesKey, idNotes, notes, false))[notesKey]
+	if o.State != Skipped || !o.SizeOnly {
+		t.Fatalf("the run is %s, size only %v: %s", name(o.State), o.SizeOnly, o.Why)
+	}
+}
+
 func TestAPublicRowIsStampedAndAStoreWithoutACLsIsCounted(t *testing.T) {
 	logo := []byte("the bytes of one public logo")
 	b := newBucket(t, map[string][]byte{logoKey: logo})
