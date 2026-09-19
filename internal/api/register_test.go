@@ -112,3 +112,97 @@ func TestASurfaceBuiltWithNoContributedRowsIsTheFrame(t *testing.T) {
 		t.Fatalf("the frame alone holds %d rows, want %d", len(rows), len(routeTable))
 	}
 }
+
+// shadow is one contributed row on a path, with an action the vocabulary
+// names, so a merge refuses it for its path and never for its fields.
+func shadow(path string) Route {
+	row := contributed()
+	row.Path = path
+	return row
+}
+
+// TestALiteralThatShadowsAWildcardWithoutARowIsRefusedAtStart is the second
+// half of criterion 4 of spec 013.
+//
+// Go's router prefers the more specific pattern and reports no conflict, so
+// a route added with a literal where another row has a wildcard would take
+// that word out of the namespace the wildcard addresses and nothing would
+// say so: a workspace named archived would stop being reachable on the day
+// GET /v1/workspaces/archived was registered. The four words that do this on
+// purpose are written into the fifth grammar rule of spec 013 and named
+// here; a fifth fails the start-up, with both rows in the message, until it
+// is written into that rule too.
+func TestALiteralThatShadowsAWildcardWithoutARowIsRefusedAtStart(t *testing.T) {
+	t.Run("the four reserved words are not refused", func(t *testing.T) {
+		for _, c := range []struct {
+			word  string
+			added []Route
+		}{
+			{"deleted", []Route{
+				shadow("/v1/workspaces/{id}"), shadow("/v1/workspaces/deleted"),
+			}},
+			{"with-me", []Route{
+				shadow("/v1/shares/{id}"), shadow("/v1/shares/with-me"),
+			}},
+			{"materialize", []Route{
+				shadow("/v1/files/{owner}/{path...}"), shadow("/v1/files/materialize"),
+			}},
+			// links shadows the frame's own three public rows rather than a
+			// contributed one, which is why the pass reads the merged list.
+			{"links", []Route{shadow("/v1/shares/{id}")}},
+		} {
+			t.Run(c.word, func(t *testing.T) {
+				if _, err := merge(routeTable, c.added); err != nil {
+					t.Errorf("%q is a reserved word of spec 013 and the surface would not build: %v", c.word, err)
+				}
+			})
+		}
+	})
+
+	t.Run("a fifth is refused whichever row arrives first", func(t *testing.T) {
+		wild, literal := shadow("/v1/workspaces/{id}"), shadow("/v1/workspaces/archived")
+		for _, order := range [][]Route{{wild, literal}, {literal, wild}} {
+			_, err := merge(routeTable, order)
+			if err == nil {
+				t.Fatal("a literal that shadows a wildcard built a surface")
+			}
+			for _, want := range []string{
+				"/v1/workspaces/archived", "/v1/workspaces/{id}", `"archived"`, "reserved",
+			} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("the failure reads %q and does not name %s", err, want)
+				}
+			}
+		}
+	})
+
+	t.Run("a wildcard under a literal another row reserves is refused too", func(t *testing.T) {
+		// The rule is about a position and not about a prefix: links is
+		// reserved at the third segment and says nothing about the fourth.
+		_, err := merge(routeTable, []Route{
+			shadow("/v1/shares/links/{id}/renew"), shadow("/v1/shares/links/expired/renew"),
+		})
+		if err == nil || !strings.Contains(err.Error(), `"expired"`) {
+			t.Errorf("a shadow one segment below a reserved word = %v", err)
+		}
+	})
+
+	t.Run("paths that cannot both match one request are not a shadow", func(t *testing.T) {
+		for _, added := range [][]Route{
+			// Different subtrees: the literals differ above the position.
+			{shadow("/v1/trash/{id}"), shadow("/v1/stars/pinned")},
+			// Different methods: the router never chooses between them.
+			{shadow("/v1/workspaces/{id}"), func() Route {
+				r := shadow("/v1/workspaces/archived")
+				r.Method = http.MethodDelete
+				return r
+			}()},
+			// One path is a prefix of the other, wildcards aligned.
+			{shadow("/v1/uploads/{id}"), shadow("/v1/uploads/{id}/complete")},
+		} {
+			if _, err := merge(routeTable, added); err != nil {
+				t.Errorf("%s and %s do not shadow each other: %v", added[0].Path, added[1].Path, err)
+			}
+		}
+	})
+}
