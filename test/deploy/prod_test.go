@@ -77,26 +77,13 @@ func TestProdPinsAReleasedImage(t *testing.T) {
 // The catch-all is asserted absent for the opposite reason: the host is
 // shared with several services, and a `/` rule would take the whole origin
 // and answer 404 for every route another service adds.
+//
+// The /v1 prefixes this used to name are asserted by
+// TestProdRoutesEveryPrefixTheDocumentServes, which derives them from the
+// committed document. They were written here as a literal list, which is a
+// third copy of the route table and drifted exactly as the smoke paths had.
 func TestProdRoutesWhatTheSmokeReads(t *testing.T) {
-	routed := map[string]string{}
-	found := false
-	for _, d := range read(t, "deploy/prod") {
-		if d.kind() != "Ingress" {
-			continue
-		}
-		found = true
-		for _, rule := range d.items("spec", "rules") {
-			for _, p := range rule.items("http", "paths") {
-				routed[p.text("path")] = p.text("pathType")
-				if backend := p.at("backend", "service").text("name"); backend != "arcad" {
-					t.Errorf("deploy/prod routes %s to %q, want arcad", p.text("path"), backend)
-				}
-			}
-		}
-	}
-	if !found {
-		t.Fatal("deploy/prod holds no Ingress")
-	}
+	routed := prodRoutes(t)
 	smoked := smokedPaths(t)
 	if len(smoked) < 2 {
 		t.Fatalf("read %d paths out of the release smoke, want the several it checks: the parse is wrong, not the overlay", len(smoked))
@@ -123,20 +110,109 @@ func TestProdRoutesWhatTheSmokeReads(t *testing.T) {
 	if _, ok := routed["/"]; ok {
 		t.Error("deploy/prod claims / at a shared origin; a catch-all takes the whole host")
 	}
-	// The storage prefixes of spec 013. One dropped here is a route that
-	// answers 404 at the origin while the server still serves it.
-	for _, prefix := range []string{
-		"/v1/files", "/v1/uploads", "/v1/shares",
-		"/v1/workspaces", "/v1/trash", "/v1/stars", "/v1/events",
-	} {
+}
+
+// prodRoutes reads the path and the pathType of every rule of the
+// production Ingress, and reports a rule that points anywhere but arcad.
+// Two tests ask about that object, so it is read once here rather than
+// walked twice with the second walk free to drift from the first.
+func prodRoutes(t *testing.T) map[string]string {
+	t.Helper()
+	routed := map[string]string{}
+	found := false
+	for _, d := range read(t, "deploy/prod") {
+		if d.kind() != "Ingress" {
+			continue
+		}
+		found = true
+		for _, rule := range d.items("spec", "rules") {
+			for _, p := range rule.items("http", "paths") {
+				routed[p.text("path")] = p.text("pathType")
+				if backend := p.at("backend", "service").text("name"); backend != "arcad" {
+					t.Errorf("deploy/prod routes %s to %q, want arcad", p.text("path"), backend)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("deploy/prod holds no Ingress")
+	}
+	return routed
+}
+
+// TestProdRoutesEveryPrefixTheDocumentServes holds the Ingress to every /v1
+// namespace the served document declares. The origin is shared, so this
+// object enumerates prefixes rather than claiming the host, and an
+// enumeration is a second copy of the route table. The copy drifted:
+// `/v1/admin` was in the document and in no rule here, so the console's
+// administration screen asked api.latere.ai for `/v1/admin/overview` and
+// nginx answered 404 with an HTML body while arcad served the route and
+// every other prefix answered a JSON 401.
+//
+// The prefixes are derived rather than written here, for the reason the
+// smoke paths above are: tools/apidoc writes api/openapi.yaml from the route
+// table and TestTheCommittedDocumentIsCurrent holds it equal to a fresh
+// generation, so a namespace the server grows is a red tree here rather than
+// a 404 at the origin after a rollout.
+func TestProdRoutesEveryPrefixTheDocumentServes(t *testing.T) {
+	routed := prodRoutes(t)
+	served := servedPrefixes(t)
+	if len(served) < 5 {
+		t.Fatalf("read %d prefixes out of api/openapi.yaml, want the several /v1 namespaces spec 013 registers: the parse is wrong, not the overlay", len(served))
+	}
+	for _, prefix := range served {
 		got, ok := routed[prefix]
 		switch {
 		case !ok:
-			t.Errorf("deploy/prod routes no %s", prefix)
+			t.Errorf("deploy/prod routes no %s, which the committed document serves", prefix)
 		case got != "Prefix":
 			t.Errorf("deploy/prod routes %s as %q, want Prefix", prefix, got)
 		}
 	}
+}
+
+// servedPrefixes returns `/v1/<namespace>` for every first path segment the
+// committed document declares under /v1, in the order it declares them and
+// without repeats.
+//
+// The document is read as text and not with the manifest reader beside it.
+// That reader refuses a key holding a brace on purpose, and every path
+// carrying a template parameter is one; the keys wanted here are the entries
+// of the top-level `paths` mapping, which is a shape a line scan reads
+// exactly.
+func servedPrefixes(t *testing.T) []string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(root(t), filepath.FromSlash("api/openapi.yaml")))
+	if err != nil {
+		t.Fatalf("read the committed document: %v", err)
+	}
+	var out []string
+	inPaths := false
+	for line := range strings.SplitSeq(string(b), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if indent := len(line) - len(strings.TrimLeft(line, " ")); indent == 0 {
+			inPaths = trimmed == "paths:"
+			continue
+		} else if !inPaths || indent != 2 {
+			continue
+		}
+		path, ok := strings.CutSuffix(trimmed, ":")
+		if !ok {
+			continue
+		}
+		rest, under := strings.CutPrefix(path, "/v1/")
+		if !under {
+			continue
+		}
+		prefix := "/v1/" + strings.Split(rest, "/")[0]
+		if !slices.Contains(out, prefix) {
+			out = append(out, prefix)
+		}
+	}
+	return out
 }
 
 // smokedPaths reads the paths tools/smoke/release.sh asks the origin for,
