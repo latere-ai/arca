@@ -5,7 +5,8 @@
 # service adds.
 #
 # The host and its certificate are the platform's, shared by every service
-# routed under the origin, so there is no cert-manager annotation here and
+# routed under the origin; the cert-manager annotation below is the one
+# exception, explained where it stands, and
 # no Certificate of Arca's: this object adds paths and nothing else. The
 # secret it names is the one the origin already holds.
 #
@@ -35,6 +36,12 @@ kind: Ingress
 metadata:
   name: arcad
   annotations:
+    # The origin's certificate. Until the cutover Drive's api ingress
+    # carried this annotation and was the only one that did, so its
+    # removal would have left api-latere-ai-tls with no issuer; from the
+    # cutover this ingress renews it. ps-01 of the platform epic moves it
+    # to the origin's own ingress with the other prefixes.
+    cert-manager.io/cluster-issuer: letsencrypt-prod
     # An object at or below ARCA_INLINE_BYTES streams through the server
     # (spec 007); above it the parts go directly to the bucket and never
     # through this controller. The limit that matters is
