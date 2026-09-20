@@ -67,6 +67,8 @@ func cli(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	verifyMax := fs.Int64("verify-bytes-max", DefaultVerifyMax, "read back in full every object at or under this size in bytes")
 	verifySample := fs.Int("verify-sample", DefaultVerifySample, "the percentage of the objects above that size to read back")
 	dryRun := fs.Bool("dry-run", false, "read every destination and every source, and write nothing")
+	deleteSources := fs.Bool("delete-sources", false,
+		"after every destination is verified, delete each manifest source key whose destination holds its bytes")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
@@ -78,7 +80,7 @@ func cli(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if err := run(ctx, options{
 		manifest: *manifestPath, bucket: *bucket, endpoint: *endpoint,
 		region: *region, prefix: *prefix, pathStyle: *pathStyle,
-		concurrency: *concurrency, dryRun: *dryRun,
+		concurrency: *concurrency, dryRun: *dryRun, deleteSources: *deleteSources,
 		verifyBytes: *verifyBytes, verifyMax: *verifyMax, verifySample: *verifySample,
 		bucketPrefix: os.Getenv(BucketPrefixVar),
 		accessKey:    os.Getenv(AccessKeyVar), secretKey: os.Getenv(SecretKeyVar),
@@ -91,20 +93,23 @@ func cli(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 
 // options is what the flags say, plus the variables the environment does.
 type options struct {
-	manifest     string
-	bucket       string
-	endpoint     string
-	region       string
-	prefix       string
-	pathStyle    bool
-	concurrency  int
-	dryRun       bool
-	verifyBytes  bool
-	verifyMax    int64
-	verifySample int
-	bucketPrefix string
-	accessKey    string
-	secretKey    string
+	manifest    string
+	bucket      string
+	endpoint    string
+	region      string
+	prefix      string
+	pathStyle   bool
+	concurrency int
+	dryRun      bool
+	// deleteSources runs the delete pass of the sunset after the move, which
+	// removes the source key of every destination the move verified.
+	deleteSources bool
+	verifyBytes   bool
+	verifyMax     int64
+	verifySample  int
+	bucketPrefix  string
+	accessKey     string
+	secretKey     string
 }
 
 // run reads the manifest, moves every object it names, and prints the report.
@@ -156,6 +161,14 @@ func move(ctx context.Context, o options, prefix string, m *manifest.Manifest, b
 		VerifyBytes: o.verifyBytes, VerifyMax: o.verifyMax, VerifySample: o.verifySample,
 	}
 	report.Outcomes = mv.Run(ctx, m.Entries)
+	if o.deleteSources {
+		// The sunset's pass, and a pass of its own: it begins after the move
+		// has read back and verified every destination of the manifest, and it
+		// deletes only the sources of the destinations that held.
+		report.DeleteSources = true
+		sweep := &Sweep{Bucket: bucket, DryRun: o.dryRun, Concurrency: o.concurrency}
+		report.Deletions = sweep.Run(ctx, report.Outcomes)
+	}
 	report.Write(stdout)
 	if !report.OK() {
 		return errNotClean
@@ -166,7 +179,7 @@ func move(ctx context.Context, o options, prefix string, m *manifest.Manifest, b
 // errNotClean is a move a key did not survive. The report is already printed
 // and names every one, so the message here adds the verdict and not a second
 // copy of it.
-var errNotClean = errors.New("move-objects: the move is not clean; the report above names every key")
+var errNotClean = errors.New("move-objects: the run is not clean; the report above names every key")
 
 // agrees refuses a manifest the move must not act on: one whose copy did not
 // finish, and one written under another prefix.
@@ -204,6 +217,13 @@ func (o options) check() (string, error) {
 	}
 	if o.verifySample < 0 || o.verifySample > 100 {
 		missing.Refuse("-verify-sample is %d, and a percentage is 0 to 100", o.verifySample)
+	}
+	// A deleted source is the last other copy of those bytes. The check that
+	// proves a destination at a store reporting no checksum of its own is the
+	// byte read, so the two flags only make sense together.
+	if o.deleteSources && !o.verifyBytes {
+		missing.Refuse("-delete-sources deletes the last other copy of every byte it verifies and " +
+			"-verify-bytes is off, which leaves the destinations proved on their length alone")
 	}
 	prefix := normalisePrefix(o.prefix)
 	if prefix == "" {

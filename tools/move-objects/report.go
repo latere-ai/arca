@@ -26,6 +26,12 @@ type Report struct {
 	VerifyMax    int64
 	VerifySample int
 	Outcomes     []Outcome
+	// DeleteSources says the delete pass of the sunset ran, so a report with
+	// no deletion in it still says the pass read every line.
+	DeleteSources bool
+	// Deletions is what became of every source key, one per outcome, in the
+	// manifest's order.
+	Deletions []Deletion
 }
 
 // NewReport answers an empty report over one run's inputs.
@@ -44,10 +50,23 @@ func (r *Report) Count(s State) int {
 	return n
 }
 
-// OK reports whether the move holds: nothing mismatched and nothing failed. A
-// run with no keys at all is clean, because a manifest of no keys is a copy
-// that had no bytes to move.
-func (r *Report) OK() bool { return r.Count(Mismatched) == 0 && r.Count(Failed) == 0 }
+// OK reports whether the run holds: nothing mismatched, nothing failed, and
+// no source the store would not delete. A run with no keys at all is clean,
+// because a manifest of no keys is a copy that had no bytes to move.
+func (r *Report) OK() bool {
+	return r.Count(Mismatched) == 0 && r.Count(Failed) == 0 && r.Sources(DeleteFailed) == 0
+}
+
+// Sources answers how many source keys met one fate.
+func (r *Report) Sources(f Fate) int {
+	n := 0
+	for _, d := range r.Deletions {
+		if d.Fate == f {
+			n++
+		}
+	}
+	return n
+}
 
 // Write prints the report. It renders once into a buffer and writes that,
 // because a report half on the terminal and half not is worse than none.
@@ -84,6 +103,7 @@ func (r *Report) Write(w io.Writer) {
 
 	r.writeNotes(&b)
 	r.writeKeys(&b)
+	r.writeSources(&b)
 	fmt.Fprintf(&b, "\n%s\n", r.verdict())
 	_, _ = io.WriteString(w, b.String())
 }
@@ -184,18 +204,96 @@ func (r *Report) writeKeys(b *strings.Builder) {
 	}
 }
 
+// writeSources names what became of every source key, one line each, and
+// counts them. It prints only where the delete pass ran: a move that deletes
+// nothing has no sources section to read.
+func (r *Report) writeSources(b *strings.Builder) {
+	if !r.DeleteSources {
+		return
+	}
+	fmt.Fprintf(b, "\nsources\n")
+	for _, d := range r.Deletions {
+		switch d.Fate {
+		case Deleted:
+			fmt.Fprintf(b, "  %s %s\n", r.deleteWord(), d.Source)
+		case Kept:
+			fmt.Fprintf(b, "  kept %s: %s\n", d.Source, d.Why)
+		default:
+			fmt.Fprintf(b, "  not deleted %s: %s\n", d.Source, d.Why)
+		}
+	}
+	fmt.Fprintf(b, "\n%s\n", r.sourceCount())
+}
+
+// deleteWord is what one deleted line reads as, which a rehearsal reads in
+// the conditional because it called nothing.
+func (r *Report) deleteWord() string {
+	if r.DryRun {
+		return "would delete"
+	}
+	return "deleted"
+}
+
+// sourceCount is the line an operator counts the delete pass by.
+func (r *Report) sourceCount() string {
+	deleted, kept := r.Sources(Deleted), r.Sources(Kept)
+	if r.DryRun {
+		return fmt.Sprintf("%s would be deleted, %d kept", sourceKeys(deleted), kept)
+	}
+	count := fmt.Sprintf("%s deleted, %d kept, %d the store would not delete",
+		sourceKeys(deleted), kept, r.Sources(DeleteFailed))
+	if onSize := r.deletedOnSize(); onSize > 0 {
+		count += fmt.Sprintf("; %d of the deleted were proved on their length alone", onSize)
+	}
+	return count
+}
+
+// deletedOnSize answers how many deleted sources had a destination the run
+// proved on its length and not on its bytes, which is what the byte check
+// could not reach: an object above its threshold that the sample did not
+// pick, or a row whose checksum is the composite label of a multipart upload.
+func (r *Report) deletedOnSize() int {
+	n := 0
+	for _, d := range r.Deletions {
+		if d.Fate == Deleted && d.Proof == OnSize {
+			n++
+		}
+	}
+	return n
+}
+
+// sourceKeys is a count of source keys a sentence can carry.
+func sourceKeys(n int) string {
+	if n == 1 {
+		return "1 source key"
+	}
+	return fmt.Sprintf("%d source keys", n)
+}
+
 // verdict is the line an operator reads last: whether the routes may switch
 // on this run.
 func (r *Report) verdict() string {
 	switch {
 	case !r.OK():
-		return "the move is not clean. Every key above is one to answer for, and the routes do not switch " +
+		v := "the move is not clean. Every key above is one to answer for, and the routes do not switch " +
 			"until a rerun is clean; a rerun skips what is already there."
+		if r.DeleteSources {
+			v += " No source of a key above was deleted."
+		}
+		return v
 	case r.DryRun:
+		if r.DeleteSources {
+			return "the dry run holds. Run the same command without -dry-run to move the objects and " +
+				"delete the source keys it names."
+		}
 		return "the dry run holds. Run the same command without -dry-run to move the objects."
 	default:
-		return "the move holds: every key the manifest names is readable at its object id's key. " +
+		v := "the move holds: every key the manifest names is readable at its object id's key. " +
 			"This is the bytes half of criterion 4 of spec 019; the row copy's report is the other."
+		if r.DeleteSources {
+			v += " The source keys it deleted are gone, which is step 5 of the sunset."
+		}
+		return v
 	}
 }
 
