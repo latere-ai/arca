@@ -1,6 +1,6 @@
 ---
 title: "Serving under the capability prefix: the base path, the second audience, and the one batch that moves both callers"
-status: testing
+status: complete
 track: core
 depends_on:
   - specs/006-identity.md
@@ -311,3 +311,20 @@ built on `ARCA_PUBLIC_URL`.
   `/v1/storage/files/me/`, the hosted prefix, so an installation at the root
   of the version reads `/v1/files/me/` instead. `docs/install.md` says so
   with the one command that does it.
+
+## Outcome
+
+Released as v0.2.0 on 2026-09-20; the deploy and smoke job passed at
+17:26 UTC and the origin answered the prefixed surface at 17:27 UTC.
+
+| # | Criterion | Proof |
+|---|---|---|
+| 1 | every path answers under `/v1/storage/` and none at the root | `GET https://api.latere.ai/v1/storage/files/me/` 401 (the verifier's), `GET /v1/files/me/` 404 from ingress-nginx with no envelope, `GET /v1/storage/admin/overview` 401 |
+| 3 | the Ingress claims one `/v1` prefix | live rules: `/v1/storage`, `/livez`, `/readyz`, `/openapi.json`, `/version` |
+| 5, 7 | two audiences | both `arcad` and `arcad-reaper` run with `ARCA_OIDC_AUDIENCE=arca,api.latere.ai`; the key-path request with a PAT-minted `api.latere.ai` token is the maintainer's, recorded in the specs repo's window runbook |
+| 10 | smoke | the release smoke printed the surface line; `GET /version` answers `v0.2.0` |
+| 11 | the two callers moved in the window | platform v0.14.0 (18:25 UTC) proxies `/api/storage/...` to `/v1/storage/...`: a tokenless `GET /api/storage/shares/links/{token}/meta` through the console answers Arca's own `not_found` envelope; auth v0.39.0 (18:27 UTC) runs with `ARCA_URL=https://api.latere.ai/v1/storage` |
+
+Between 17:27 and 18:25 UTC the console's storage screens answered 404
+and between 17:27 and 18:27 UTC avatar uploads failed, the accepted
+no-window gap.
