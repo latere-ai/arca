@@ -8,7 +8,7 @@ depends_on:
 affects: [internal/, cmd/arcad/, deploy/prod/, tools/migrate-drive/, tools/move-objects/, docs/, specs/]
 effort: xlarge
 created: 2026-09-18
-updated: 2026-09-19
+updated: 2026-09-20
 author: changkun
 ---
 
@@ -189,9 +189,9 @@ network twice and the cost is one request per distinct key.
 | Piece | Design |
 |---|---|
 | the manifest | `migrate-drive -manifest <path>`: one line per distinct source key, tab separated, `<drive key>\t<object id>\t<size>\t<checksum>\t<public>`, under a header naming the format, its version and the bucket prefix, and closed by a `#complete <count>` trailer. The ids are minted in the preflight, so the body is written before the first table commits and every id the copy hands out is one the file already names; the trailer is appended only when the verification holds, and the move refuses a file without it. A dry run writes none: it commits nothing for a manifest to be the record of. One key two rows describe differently takes the live file's size and checksum, and the disagreement is counted; a key with no object behind it, which is an open upload's destination, is counted and left off, because its parts are invisible to a listing until the upload completes. The format is `tools/internal/manifest`, read by the copy that writes it and the move that consumes it and by nothing that serves a request |
-| `tools/move-objects` | reads the manifest and, for each line, `Head`s `id.Key(prefix)` first, because the store the family runs neither honours the conditional copy nor refuses it. A destination already holding the line's size and checksum is a skip, so a killed run resumes and a finished run repeats; one holding other bytes is a mismatch and is never overwritten. Otherwise it copies and `Head`s the destination back. What it verifies is the size always, then the bytes: the destination is streamed through a sha256 and compared to the line's checksum, which is the only proof a store reporting no checksum of its own can give. A line whose checksum is a label a store reports takes that comparison instead; one that is neither, which is the composite label of an object assembled from parts, is counted and named as verified on size alone rather than passed off as checked. The report counts the three apart, so the weakest never reads as the strongest. Flags `-manifest`, `-bucket`, `-endpoint`, `-region`, `-prefix`, `-path-style`, `-concurrency` (16), `-verify-bytes` (on), `-verify-bytes-max` (256 MiB), `-verify-sample` (10), `-dry-run`; the credentials come from `ARCA_BUCKET_ACCESS_KEY` and `ARCA_BUCKET_SECRET_KEY`, so no secret reaches a command line. A dry run reads both ends of every line and writes nothing. The report counts copied, skipped, mismatched and failed and names every key of the last two; exit 0 clean, 1 on any mismatch, failure or refusal, 2 on a flag, which is what `migrate-drive` exits |
+| `tools/move-objects` | reads the manifest and, for each line, `Head`s `id.Key(prefix)` first, because the store the family runs neither honours the conditional copy nor refuses it. A destination already holding the line's size and checksum is a skip, so a killed run resumes and a finished run repeats; one holding other bytes is a mismatch and is never overwritten. Otherwise it copies and `Head`s the destination back. What it verifies is the size always, then the bytes: the destination is streamed through a sha256 and compared to the line's checksum, which is the only proof a store reporting no checksum of its own can give. A line whose checksum is a label a store reports takes that comparison instead; one that is neither, which is the composite label of an object assembled from parts, is counted and named as verified on size alone rather than passed off as checked. The report counts the three apart, so the weakest never reads as the strongest. Flags `-manifest`, `-bucket`, `-endpoint`, `-region`, `-prefix`, `-path-style`, `-concurrency` (16), `-verify-bytes` (on), `-verify-bytes-max` (256 MiB), `-verify-sample` (10), `-dry-run`, `-delete-sources` (off, the sunset's pass, in the row below); the credentials come from `ARCA_BUCKET_ACCESS_KEY` and `ARCA_BUCKET_SECRET_KEY`, so no secret reaches a command line. A dry run reads both ends of every line and writes nothing. The report counts copied, skipped, mismatched and failed and names every key of the last two; exit 0 clean, 1 on any mismatch, failure or refusal, 2 on a flag, which is what `migrate-drive` exits |
 | `blob.Store` | gains `Copy(ctx, from, to string, o PutOptions) (Object, error)` with the S3 call, the map, the counter and the metrics decorator; one interface method, tested in the store tier against MinIO. It reads the source once for its size and its media type, so a copy is two round trips and not one |
-| the source keys | left in place until the sunset. The move never deletes; the reaper does not read `drive/<owner>/` keys because they carry no id (`object.ParseKey` refuses them), so they are invisible to the sweep and to Arca. Step 4 of the sunset deletes them by the manifest that named them, after criterion 4b has held and the smoke of step 5 with it |
+| the source keys | left in place until the sunset. The move deletes nothing without `-delete-sources`; the reaper does not read `drive/<owner>/` keys because they carry no id (`object.ParseKey` refuses them), so they are invisible to the sweep and to Arca. Step 5 of the sunset deletes them by the manifest that named them, after criterion 4b has held and the smoke of step 5 of the cutover with it, and it is this same command with that flag: the move runs first and verifies every destination, and a second pass then deletes the source of each destination that held, one `DeleteObject` per key, keeping and naming every source whose destination mismatched, failed or is not in the bucket and exiting 1 for it. `-dry-run` names what the pass would delete and writes nothing; `-verify-bytes=false` with the flag is refused, because a length is not a proof to delete the other copy of an object on. Proved in the store tier by `TestStoreTheDeletePassRemovesTheSourceKeyOfEveryVerifiedDestination`, `TestStoreASourceWhoseDestinationDoesNotVerifyIsNotDeleted` and `TestStoreADryRunOfTheDeletePassRemovesNothing` |
 | public objects | Drive stamped `public-read` on the source key; `CopyObject` does not carry an ACL, so the move re-stamps the destination through `SetPublic` for every line the copy marked public. A store that holds no object ACLs and serves publicity through a bucket policy answers `ErrNotSupported`, which spec 003 has a caller carry on from, so the move counts it rather than failing the key |
 | the multipart tail | a Drive object above 5 GiB cannot be copied in one `CopyObject`; the move uses `UploadPartCopy` for those, under the same conditional on the completion, and aborts the upload on any failure, because copied parts carry no session row for a sweep to find. At Drive's current sizes this branch is expected to run zero times. The two bounds it branches at are options rather than constants, so the store tier reaches it on a twelve mebibyte fixture rather than a five gibibyte one; neither is configuration and no `ARCA_*` variable reaches either |
 | order | copy rows (step 3) with the manifest, run the move, verify, then switch routes. The rows point at ids from the moment they are written, so nothing reads Arca before the move completes; Drive is read-only throughout, so the source keys do not change under the copy |
@@ -277,15 +277,31 @@ The same day, once the smoke of step 5 holds:
 4. Drive's database is dropped. The row copy is verified before the
    routes switch (criterion 4a), and the bucket, which holds every byte,
    is untouched, so there is nothing a retained database would recover.
-5. The source keys of the manifest are deleted. The move never deletes,
-   so every `drive/<owner>/<path>` key the copy read is still in the
-   bucket, holding a second copy of bytes that are now readable at their
-   object id's key. The manifest is the list: its first field is every
+5. The source keys of the manifest are deleted, by the move's own
+   `-delete-sources`, which is in the tree since 2026-09-20:
+
+   ```sh
+   go run ./tools/move-objects -manifest <manifest> \
+     -bucket latere-storage -endpoint https://fra1.digitaloceanspaces.com \
+     -region fra1 -prefix drive/ -delete-sources
+   ```
+
+   Without the flag the move deletes nothing, so every
+   `drive/<owner>/<path>` key the copy read is still in the bucket,
+   holding a second copy of bytes that are now readable at their object
+   id's key. With it the run moves as it always does and then, in a pass
+   of its own over the outcomes, deletes the source of each destination
+   that verified, one `DeleteObject` per key; a source whose destination
+   mismatched, failed, or is not in the bucket is kept and named, and
+   the run exits 1. The manifest is the list: its first field is every
    key to delete, and no other key in the bucket is touched, which is
    what makes this safe to run against a bucket Arca is already serving
-   from. It runs only after the smoke of step 5 holds, so a byte the
-   move got wrong is still at its source key until a person has read one
-   through the origin.
+   from. `-dry-run` names every key the pass would delete and writes
+   nothing, and `-verify-bytes=false` is refused with the flag, because
+   a length is not a proof to delete the other copy of an object on. It
+   runs only after the smoke of step 5 holds, so a byte the move got
+   wrong is still at its source key until a person has read one through
+   the origin.
 
 ### What is removed, and why
 

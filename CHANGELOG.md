@@ -6,6 +6,18 @@ refused before it is pushed.
 
 ## Unreleased
 
+- **The object move deletes the old keys when it is asked to.**
+  `move-objects -delete-sources` runs the move as it always did and then, in
+  a pass of its own, deletes each manifest source key whose destination that
+  run verified, one key per request. A source whose destination mismatched,
+  failed, or is not in the bucket is kept and named, and the run exits 1, so
+  no object is left with one copy nobody proved. `-dry-run` names what the
+  pass would delete and writes nothing, and `-verify-bytes=false` is refused
+  with the flag: a length is not a proof to delete the other copy of an
+  object on. Without the flag nothing about the command changes. This is step
+  5 of the sunset of spec 019, and `docs/operations.md` carries the command
+  line.
+
 ## v0.1.8 - 2026-09-20
 
 - **The administration routes answer at the production origin.** The

@@ -51,14 +51,28 @@
 //     that holds no object ACLs and offers bucket policies instead is
 //     counted rather than failed, which is the rule of spec 003.
 //
-// It never deletes. The source keys stay until the sunset of spec 019, which
-// deletes them by the manifest that named them.
+// It never deletes without -delete-sources. The source keys stay until the
+// sunset of spec 019, and that step is this same command with the flag:
+//
+//	move-objects -manifest manifest.tsv -bucket … -delete-sources
+//
+// The flag adds a pass of its own, which begins after the move has read back
+// and verified every destination the manifest names. That pass deletes the
+// source key of each destination that held, one DeleteObject per key, and
+// keeps and names every source whose destination mismatched, failed, or is
+// not in the bucket, because the bytes under such a source are the only copy
+// left. It reports `deleted <source>` per key and counts them at the end. A
+// dry run names what it would delete and calls nothing.
+//
+// The byte check has to be on for it: -delete-sources with
+// -verify-bytes=false is refused, because a length is not a proof to delete
+// the other copy of an object on.
 //
 // The report counts the keys copied, skipped, mismatched and failed, and
-// names every key of the last two. It exits 0 when nothing mismatched and
-// nothing failed, 1 when anything did or the run was refused, and 2 on a bad
-// flag, which is what migrate-drive exits and what an operator scripts the
-// two around.
+// names every key of the last two. It exits 0 when nothing mismatched,
+// nothing failed and no delete was refused, 1 when anything did or the run
+// was refused, and 2 on a bad flag, which is what migrate-drive exits and
+// what an operator scripts the two around.
 //
 // With -dry-run it reads the destination and the source of every line and
 // writes nothing, so the counts a rehearsal prints are the counts the run

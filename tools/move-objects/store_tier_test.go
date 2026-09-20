@@ -21,6 +21,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -448,4 +449,224 @@ func one[T any](t *testing.T, pool *pgxpool.Pool, sql string, args ...any) T {
 		t.Fatalf("%s: %v", sql, err)
 	}
 	return v
+}
+
+// The sunset of spec 019, step 5: `move-objects -delete-sources` against the
+// real MinIO. What a fake cannot prove is that a source key is gone from a
+// store an operator can still list, and that the destination the run deleted
+// it for is readable at that moment.
+//
+// These cases write the manifest themselves rather than run the row copy. The
+// coupling of the two commands is proved above; what a delete pass needs is a
+// line whose source was never in the bucket, which no copy of a healthy
+// database writes.
+
+// skipWithoutTheStore names the one service a delete pass reaches.
+const skipWithoutTheStore = "set E2E_S3_ENDPOINT (make up)"
+
+// The ids the delete cases mint, in the canonical text a key derives from.
+const (
+	sunsetNotes = "0192f0c3-6c1a-7b3e-9a2e-6b7c8d9e0b01"
+	sunsetLogo  = "0192f0c3-6c1a-7b3e-9a2e-6b7c8d9e0b02"
+	sunsetGone  = "0192f0c3-6c1a-7b3e-9a2e-6b7c8d9e0b03"
+)
+
+func TestStoreTheDeletePassRemovesTheSourceKeyOfEveryVerifiedDestination(t *testing.T) {
+	endpoint := os.Getenv("E2E_S3_ENDPOINT")
+	if endpoint == "" {
+		t.Skip(skipWithoutTheStore)
+	}
+	prefix := sunsetPrefix()
+	bucket := tierBucket(t, endpoint, prefix)
+	notes, logo := []byte("the bytes of one note"), []byte("the bytes of one logo")
+	notesSource := put(t, bucket, prefix+"u-1/files/notes.md", notes)
+	logoSource := put(t, bucket, prefix+"u-1/files/logo.png", logo)
+	path := writeManifest(t, prefix,
+		byteEntry(notesSource, sunsetNotes, notes, false),
+		byteEntry(logoSource, sunsetLogo, logo, true))
+
+	out, errs, code := command(t, append(sunsetArgs(t, endpoint, prefix, path), "-delete-sources")...)
+	if code != exitOK {
+		t.Fatalf("the sunset exited %d\n%s\n%s", code, out, errs)
+	}
+	for _, says := range []string{"deleted " + notesSource, "deleted " + logoSource, "2 source keys deleted"} {
+		if !strings.Contains(out, says) {
+			t.Errorf("the report holds no %q:\n%s", says, out)
+		}
+	}
+	// The sources are gone and the destinations hold their bytes, which is
+	// the whole of step 5 of the sunset.
+	for _, source := range []string{notesSource, logoSource} {
+		if !gone(t, bucket, source) {
+			t.Errorf("the source key %s is still in the bucket", source)
+		}
+	}
+	holds(t, bucket, object.ID(sunsetNotes).Key(prefix), notes)
+	holds(t, bucket, object.ID(sunsetLogo).Key(prefix), logo)
+
+	// A second run is the same run: every destination verifies and skips, and
+	// a delete of a key that is already gone is a success, so the sunset is as
+	// repeatable as the move.
+	again, againErrs, code := command(t, append(sunsetArgs(t, endpoint, prefix, path), "-delete-sources")...)
+	if code != exitOK {
+		t.Fatalf("the second sunset exited %d\n%s\n%s", code, again, againErrs)
+	}
+	holds(t, bucket, object.ID(sunsetNotes).Key(prefix), notes)
+	holds(t, bucket, object.ID(sunsetLogo).Key(prefix), logo)
+}
+
+func TestStoreASourceWhoseDestinationDoesNotVerifyIsNotDeleted(t *testing.T) {
+	endpoint := os.Getenv("E2E_S3_ENDPOINT")
+	if endpoint == "" {
+		t.Skip(skipWithoutTheStore)
+	}
+	prefix := sunsetPrefix()
+	bucket := tierBucket(t, endpoint, prefix)
+	notes, logo := []byte("the bytes of one note"), []byte("the bytes of one logo")
+	notesSource := put(t, bucket, prefix+"u-1/files/notes.md", notes)
+	logoSource := put(t, bucket, prefix+"u-1/files/logo.png", logo)
+	// The destination of the logo holds another object of another length, so
+	// the move mismatches it and overwrites nothing.
+	other := []byte("the bytes of something else entirely")
+	held := put(t, bucket, object.ID(sunsetLogo).Key(prefix), other)
+	// The third line's source was never in the bucket, so its destination is
+	// missing when the delete pass reads the run's verdict.
+	goneSource := prefix + "u-1/files/gone.md"
+
+	path := writeManifest(t, prefix,
+		byteEntry(notesSource, sunsetNotes, notes, false),
+		byteEntry(logoSource, sunsetLogo, logo, false),
+		byteEntry(goneSource, sunsetGone, []byte("the bytes nobody wrote"), false))
+
+	out, _, code := command(t, append(sunsetArgs(t, endpoint, prefix, path), "-delete-sources")...)
+	if code != exitRefused {
+		t.Fatalf("a run that could not verify every destination exited %d, want %d\n%s", code, exitRefused, out)
+	}
+	for _, says := range []string{"kept " + logoSource, "kept " + goneSource, "1 source key deleted"} {
+		if !strings.Contains(out, says) {
+			t.Errorf("the report holds no %q:\n%s", says, out)
+		}
+	}
+	for _, source := range []string{logoSource, goneSource} {
+		if strings.Contains(out, "deleted "+source) {
+			t.Errorf("the report says it deleted %s:\n%s", source, out)
+		}
+	}
+	// The source of the destination that did not verify is still there, which
+	// is what makes a botched move recoverable.
+	holds(t, bucket, logoSource, logo)
+	holds(t, bucket, held, other)
+	if !gone(t, bucket, notesSource) {
+		t.Errorf("the source key %s of a verified destination is still in the bucket", notesSource)
+	}
+	holds(t, bucket, object.ID(sunsetNotes).Key(prefix), notes)
+	if !gone(t, bucket, object.ID(sunsetGone).Key(prefix)) {
+		t.Error("the run wrote a destination for a line whose source is not in the bucket")
+	}
+}
+
+func TestStoreADryRunOfTheDeletePassRemovesNothing(t *testing.T) {
+	endpoint := os.Getenv("E2E_S3_ENDPOINT")
+	if endpoint == "" {
+		t.Skip(skipWithoutTheStore)
+	}
+	prefix := sunsetPrefix()
+	bucket := tierBucket(t, endpoint, prefix)
+	notes, logo := []byte("the bytes of one note"), []byte("the bytes of one logo")
+	notesSource := put(t, bucket, prefix+"u-1/files/notes.md", notes)
+	logoSource := put(t, bucket, prefix+"u-1/files/logo.png", logo)
+	path := writeManifest(t, prefix,
+		byteEntry(notesSource, sunsetNotes, notes, false),
+		byteEntry(logoSource, sunsetLogo, logo, false))
+
+	// The move first, so the rehearsal reads the bucket an operator rehearses
+	// the sunset against: every destination is there and every source is too.
+	args := sunsetArgs(t, endpoint, prefix, path)
+	if out, errs, code := command(t, args...); code != exitOK {
+		t.Fatalf("the move exited %d\n%s\n%s", code, out, errs)
+	}
+
+	out, errs, code := command(t, append(args, "-delete-sources", "-dry-run")...)
+	if code != exitOK {
+		t.Fatalf("the rehearsal exited %d\n%s\n%s", code, out, errs)
+	}
+	for _, says := range []string{"would delete " + notesSource, "would delete " + logoSource,
+		"2 source keys would be deleted"} {
+		if !strings.Contains(out, says) {
+			t.Errorf("the report holds no %q:\n%s", says, out)
+		}
+	}
+	for _, source := range []string{notesSource, logoSource} {
+		if strings.Contains(out, "deleted "+source) {
+			t.Errorf("the rehearsal says it deleted %s:\n%s", source, out)
+		}
+	}
+	// Nothing is written: both sources are where they were, and so is every
+	// destination.
+	holds(t, bucket, notesSource, notes)
+	holds(t, bucket, logoSource, logo)
+	holds(t, bucket, object.ID(sunsetNotes).Key(prefix), notes)
+	holds(t, bucket, object.ID(sunsetLogo).Key(prefix), logo)
+}
+
+// sunsetPrefix answers a prefix of this run's own, so two runs against one
+// bucket never read each other's keys.
+func sunsetPrefix() string {
+	return fmt.Sprintf("test-%d-%d/drive/", time.Now().UnixNano(), os.Getpid())
+}
+
+// sunsetArgs is the command line of step 5 of the sunset, minus the flags the
+// case adds, with the credentials where the command reads them.
+func sunsetArgs(t *testing.T, endpoint, prefix, manifestPath string) []string {
+	t.Helper()
+	t.Setenv(BucketPrefixVar, prefix)
+	t.Setenv(AccessKeyVar, envOr("E2E_S3_KEY", "minioadmin"))
+	t.Setenv(SecretKeyVar, envOr("E2E_S3_SECRET", "minioadmin"))
+	return []string{
+		"-manifest", manifestPath,
+		"-bucket", envOr("E2E_S3_BUCKET", "arca-test"),
+		"-endpoint", endpoint, "-region", "us-east-1", "-path-style",
+		"-prefix", prefix, "-concurrency", "4",
+	}
+}
+
+// put writes one object and answers its key.
+func put(t *testing.T, bucket *blob.S3, key string, body []byte) string {
+	t.Helper()
+	if _, err := bucket.Put(t.Context(), key, bytes.NewReader(body), int64(len(body)), blob.PutOptions{}); err != nil {
+		t.Fatalf("seed %q: %v", key, err)
+	}
+	return key
+}
+
+// holds fails the case unless the store holds the body under the key.
+func holds(t *testing.T, bucket *blob.S3, key string, body []byte) {
+	t.Helper()
+	rc, _, err := bucket.Get(t.Context(), key)
+	if err != nil {
+		t.Errorf("read %q: %v", key, err)
+		return
+	}
+	defer func() { _ = rc.Close() }()
+	got, err := io.ReadAll(rc)
+	if err != nil {
+		t.Errorf("read %q: %v", key, err)
+		return
+	}
+	if !bytes.Equal(got, body) {
+		t.Errorf("%q holds %d bytes, want the %d it was written with", key, len(got), len(body))
+	}
+}
+
+// gone reports whether the store holds the key no longer.
+func gone(t *testing.T, bucket *blob.S3, key string) bool {
+	t.Helper()
+	_, err := bucket.Head(t.Context(), key)
+	if err == nil {
+		return false
+	}
+	if !errors.Is(err, blob.ErrNotFound) {
+		t.Fatalf("read %q: %v", key, err)
+	}
+	return true
 }
