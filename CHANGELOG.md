@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.2.0 - 2026-09-20
+
 - **The surface is served under `ARCA_BASE_PATH`, and the production origin
   moves to `/v1/storage`.** The new variable is the base every route is
   registered under. Its default is `/v1`, the root of the version, so a
