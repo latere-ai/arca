@@ -376,7 +376,7 @@ not delete.
 | database | the connection opens, the server answers, and the schema version equals the highest embedded migration with no dirty flag | the server version and the migration the schema is at |
 | issuer | for each entry of `ARCA_OIDC_ISSUERS`: discovery answers, the key set parses, and it holds at least one key of an accepted algorithm | the issuer, the key count, the algorithms |
 | authorizer | `ARCA_AUTHORIZER_URL` answers the probe question of [[006-identity]], the resource id `probe` of kind `Space`, with a well-formed `200` carrying `allow: false` | the endpoint and the decision |
-| public-url | `ARCA_PUBLIC_URL` answers the version endpoint of [[002-repository-scaffold]] with this server's build identity. A URL nothing answers at all is not a failure: an ingress often does not answer from inside its own cluster, and the check runs beside the server as often as in front of it | the URL and what answered there |
+| public-url | `ARCA_PUBLIC_URL` answers the version endpoint of [[002-repository-scaffold]] with this server's build identity. A URL nothing answers at all is not a failure: an ingress often does not answer from inside its own cluster, and the check runs beside the server as often as in front of it | the URL, the base path, and what answered there |
 
 ```
 $ arcad check
@@ -384,11 +384,20 @@ ok    bucket      arca-prod at https://s3.example, prefix arca/: wrote, read, de
 ok    database    PostgreSQL 16.4, schema at 0005_usage_events, clean
 ok    issuer      https://issuer.example: discovery ok, 3 keys, RS256 ES256
 fail  authorizer  https://authz.example/decide: allowed the probe resource
-ok    public-url  https://arca.example: answers the version endpoint
+ok    public-url  https://arca.example, serving under /v1: answers the version endpoint
 arcad: 1 of 5 checks failed
 $ echo $?
 1
 ```
+
+**Amended 2026-09-20 ([[027-serving-under-the-capability-prefix]]).** The
+`public-url` line reports `ARCA_BASE_PATH` beside the origin, the base this
+server registers its routes under. No requirement is added and the count of
+five is unchanged: the prefix is reported and not dialled, because this
+requirement passes on an address nothing answers by design, so a dial there
+could not fail where the base is wrong. What proves the prefix at the origin
+is the release smoke of [[016-release-and-installation]], which reads one
+prefixed path from outside the cluster.
 
 Every line is `ok` or `fail`, then the requirement, then one sentence
 naming what was reached and what happened. Lines go to stdout and the

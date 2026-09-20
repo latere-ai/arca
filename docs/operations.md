@@ -21,7 +21,7 @@ ok    bucket      arca-prod at https://s3.example, prefix arca/: wrote, read, de
 ok    database    PostgreSQL 18.0, schema at 0005_usage_events, clean
 ok    issuer      https://issuer.example: discovery ok, 3 keys, RS256 ES256
 fail  authorizer  https://authz.example/decide: allowed the probe resource
-ok    public-url  https://arca.example: answers the version endpoint
+ok    public-url  https://arca.example, serving under /v1: answers the version endpoint
 arcad: 1 of 5 checks failed
 ```
 
@@ -36,7 +36,7 @@ runs against a healthy installation print exactly the same thing.
 | `database` | the connection opens, the server answers, and the schema holds every migration this binary carries | running the migration job for this version: `arcad migrate` |
 | `issuer` | every issuer in `ARCA_OIDC_ISSUERS` serves a discovery document and a key set holding at least one RS256 or ES256 key | checking the issuer list and that the issuer is reachable from the cluster |
 | `authorizer` | `ARCA_AUTHORIZER_URL` answers the reserved probe resource with a deny. Unset is not a failure: the line says the built-in owner policy applies and how many subjects `ARCA_ADMIN_SUBJECTS` lists | an endpoint that **allowed** the probe: it is not reading the request, and it will allow every action Arca ever adds. Fix the endpoint before anything else |
-| `public-url` | `ARCA_PUBLIC_URL` answers this server's `/version`. A URL that cannot be reached from where the check runs is not a failure, because an ingress often does not answer from inside its own cluster | a URL that answers something else: it names another installation, and every URL this server writes points there |
+| `public-url` | `ARCA_PUBLIC_URL` answers this server's `/version`. The line also names `ARCA_BASE_PATH`, the base this server serves its routes under, which it reports rather than dials: this check passes on an address nothing answers, so a dial there could not fail where the base is wrong. A URL that cannot be reached from where the check runs is not a failure, because an ingress often does not answer from inside its own cluster | a URL that answers something else: it names another installation, and every URL this server writes points there |
 
 Run it after every configuration change, after every upgrade, and first when
 something is wrong. A failure here is a fact about the installation, not

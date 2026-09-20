@@ -52,6 +52,36 @@ func anObject(h *harness, path string) store.File {
 	return f
 }
 
+// TestTheLinkURLCarriesTheBasePath is criterion 8 of spec 027: the one URL
+// the core writes is written under the base path the surface is served at,
+// so a link minted by a hosted installation is redeemed at the prefix that
+// installation answers under rather than at the root of the version.
+//
+// The redemption is driven as well as read, because a URL nothing answers at
+// is the failure this test exists to catch.
+func TestTheLinkURLCarriesTheBasePath(t *testing.T) {
+	const base = "/v1/storage"
+	h := newHarness(t, func(o *shares.Options) { o.BasePath = base })
+	anObject(h, "files/reports/q3.pdf")
+
+	body := map[string]any{"owner": "me", "path_prefix": "files/reports"}
+	w := h.do(t, http.MethodPost, base+"/shares/links", "alice", body)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("POST %s/shares/links = %d: %s", base, w.Code, w.Body)
+	}
+	var link shares.Link
+	if err := json.Unmarshal(w.Body.Bytes(), &link); err != nil {
+		t.Fatalf("the body is not a link: %v\n%s", err, w.Body)
+	}
+	if want := base + "/shares/links/" + link.Token; link.URL != want {
+		t.Fatalf("the link is redeemed at %q, want %q", link.URL, want)
+	}
+	if redeemed := h.do(t, http.MethodGet, link.URL+"/meta", "", nil); redeemed.Code != http.StatusOK {
+		t.Fatalf("the URL the mint answered is %s and reading it answered %d: %s",
+			link.URL, redeemed.Code, redeemed.Body)
+	}
+}
+
 // TestMintingALinkAnswersTheTokenOnce: the token is the capability, and this
 // is the one shape that carries it.
 func TestMintingALinkAnswersTheTokenOnce(t *testing.T) {

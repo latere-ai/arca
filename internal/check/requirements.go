@@ -276,20 +276,27 @@ func checkAuthorizer(ctx context.Context, o Options) Requirement {
 // all is not, because the check runs beside the server as often as in front
 // of it, and a cluster whose ingress does not answer from inside a pod is the
 // ordinary case rather than a misconfiguration.
+//
+// The line names ARCA_BASE_PATH beside the origin, which is the whole of what
+// this command can say about it (spec 027). The prefix is not dialled: the
+// requirement passes on an unreachable address by design, so a dial there
+// could not fail where the prefix is wrong, and the address that proves it is
+// the origin the release smoke reads from outside the cluster.
 func checkPublicURL(ctx context.Context, o Options) Requirement {
 	url := strings.TrimRight(o.Config.PublicURL, "/")
+	where := fmt.Sprintf("%s, serving under %s", url, o.Config.BasePath)
 	var identity struct {
 		Version string `json:"version"`
 	}
 	switch err := readJSON(ctx, o.HTTP, url+"/version", &identity); {
 	case errors.Is(err, errUnreachable):
-		return passed(NamePublicURL, "%s: not reachable from here, which is what a check beside the server sees", url)
+		return passed(NamePublicURL, "%s: not reachable from here, which is what a check beside the server sees", where)
 	case err != nil:
-		return failed(NamePublicURL, "%s: %v, so something other than this server answers there", url, err)
+		return failed(NamePublicURL, "%s: %v, so something other than this server answers there", where, err)
 	case identity.Version == "":
-		return failed(NamePublicURL, "%s: answered no build identity, so something other than this server answers there", url)
+		return failed(NamePublicURL, "%s: answered no build identity, so something other than this server answers there", where)
 	}
-	return passed(NamePublicURL, "%s: answers the version endpoint", url)
+	return passed(NamePublicURL, "%s: answers the version endpoint", where)
 }
 
 // errUnreachable is a dependency that could not be dialled at all, which the

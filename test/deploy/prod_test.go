@@ -78,9 +78,15 @@ func TestProdPinsAReleasedImage(t *testing.T) {
 // shared with several services, and a `/` rule would take the whole origin
 // and answer 404 for every route another service adds.
 //
-// The /v1 prefixes this used to name are asserted by
-// TestProdRoutesEveryPrefixTheDocumentServes, which derives them from the
-// committed document. They were written here as a literal list, which is a
+// A smoked path that falls under a Prefix rule this Ingress claims is routed
+// by that rule and needs none of its own, which is how the prefixed path the
+// smoke reads for a 401 is covered. A rule of its own is required only of a
+// smoked path outside every Prefix rule, which is what the four probes at the
+// origin root are.
+//
+// The /v1 prefix this used to enumerate is asserted by
+// TestProdClaimsOneV1PrefixAndItIsTheBasePathItServes, which derives it from
+// the overlay. The prefixes were written here as a literal list, which is a
 // third copy of the route table and drifted exactly as the smoke paths had.
 func TestProdRoutesWhatTheSmokeReads(t *testing.T) {
 	routed := prodRoutes(t)
@@ -89,6 +95,9 @@ func TestProdRoutesWhatTheSmokeReads(t *testing.T) {
 		t.Fatalf("read %d paths out of the release smoke, want the several it checks: the parse is wrong, not the overlay", len(smoked))
 	}
 	for _, path := range smoked {
+		if under := coveringPrefix(routed, path); under != "" {
+			continue
+		}
 		got, ok := routed[path]
 		if !ok {
 			t.Errorf("deploy/prod routes no %s, which the release smoke reads through the origin", path)
@@ -110,6 +119,22 @@ func TestProdRoutesWhatTheSmokeReads(t *testing.T) {
 	if _, ok := routed["/"]; ok {
 		t.Error("deploy/prod claims / at a shared origin; a catch-all takes the whole host")
 	}
+}
+
+// coveringPrefix answers the Prefix rule that routes a path, or the empty
+// string. It is Kubernetes' own rule, matched on whole segments: /v1/storage
+// covers /v1/storage and everything below it, and covers /v1/storagefoo
+// never.
+func coveringPrefix(routed map[string]string, path string) string {
+	for rule, kind := range routed {
+		if kind != "Prefix" {
+			continue
+		}
+		if path == rule || strings.HasPrefix(path, strings.TrimSuffix(rule, "/")+"/") {
+			return rule
+		}
+	}
+	return ""
 }
 
 // prodRoutes reads the path and the pathType of every rule of the
@@ -140,47 +165,134 @@ func prodRoutes(t *testing.T) map[string]string {
 	return routed
 }
 
-// TestProdRoutesEveryPrefixTheDocumentServes holds the Ingress to every /v1
-// namespace the served document declares. The origin is shared, so this
-// object enumerates prefixes rather than claiming the host, and an
-// enumeration is a second copy of the route table. The copy drifted:
-// `/v1/admin` was in the document and in no rule here, so the console's
-// administration screen asked api.latere.ai for `/v1/admin/overview` and
-// nginx answered 404 with an HTML body while arcad served the route and
-// every other prefix answered a JSON 401.
+// TestProdClaimsOneV1PrefixAndItIsTheBasePathItServes is criterion 3 of spec
+// 027: at an origin partitioned by capability this object claims one prefix
+// and the server mounts its whole surface under it, so the claim and the
+// mount are one value read twice rather than an enumeration that drifts.
 //
-// The prefixes are derived rather than written here, for the reason the
-// smoke paths above are: tools/apidoc writes api/openapi.yaml from the route
-// table and TestTheCommittedDocumentIsCurrent holds it equal to a fresh
-// generation, so a namespace the server grows is a red tree here rather than
-// a 404 at the origin after a rollout.
-func TestProdRoutesEveryPrefixTheDocumentServes(t *testing.T) {
-	routed := prodRoutes(t)
-	served := servedPrefixes(t)
-	if len(served) < 5 {
-		t.Fatalf("read %d prefixes out of api/openapi.yaml, want the several /v1 namespaces spec 013 registers: the parse is wrong, not the overlay", len(served))
+// It drifted before. The Ingress used to enumerate the /v1 namespaces the
+// document declares, `/v1/admin` was in the document and in no rule here, and
+// the console asked api.latere.ai for `/v1/admin/overview` and took a 404
+// from nginx with an HTML body while arcad served the route. One rule derived
+// from ARCA_BASE_PATH cannot lose a namespace: a route the server grows
+// answers under the same prefix.
+//
+// The document is held to the version as well, because the swap the server
+// makes is of the leading `/v1`: a path declared outside it would be mounted
+// nowhere the rule claims.
+func TestProdClaimsOneV1PrefixAndItIsTheBasePathItServes(t *testing.T) {
+	base := prodBasePath(t)
+	if !strings.HasPrefix(base, "/v1") {
+		t.Fatalf("deploy/prod sets ARCA_BASE_PATH to %q, which is not under the version spec 013 fixes", base)
 	}
-	for _, prefix := range served {
-		got, ok := routed[prefix]
-		switch {
-		case !ok:
-			t.Errorf("deploy/prod routes no %s, which the committed document serves", prefix)
-		case got != "Prefix":
-			t.Errorf("deploy/prod routes %s as %q, want Prefix", prefix, got)
+	served := servedPaths(t)
+	if len(served) < 20 {
+		t.Fatalf("read %d paths out of api/openapi.yaml, want the several dozen spec 013 registers: the parse is wrong, not the overlay", len(served))
+	}
+	for _, path := range served {
+		if !strings.HasPrefix(path, "/v1/") {
+			t.Errorf("the committed document declares %s, which is outside /v1 and would be mounted under no prefix this Ingress claims", path)
 		}
+	}
+
+	var claimed []string
+	for path, kind := range prodRoutes(t) {
+		if kind == "Prefix" && strings.HasPrefix(path, "/v1") {
+			claimed = append(claimed, path)
+		}
+	}
+	slices.Sort(claimed)
+	if len(claimed) != 1 {
+		t.Fatalf("deploy/prod claims %v under /v1, want exactly one prefix: the origin is partitioned by capability", claimed)
+	}
+	if claimed[0] != base {
+		t.Errorf("deploy/prod claims %s and serves under %s; the Ingress forwards without a rewrite, so the two are one value", claimed[0], base)
 	}
 }
 
-// servedPrefixes returns `/v1/<namespace>` for every first path segment the
-// committed document declares under /v1, in the order it declares them and
-// without repeats.
+// TestProdVerifiesTheOriginsAudienceBesideItsOwn: the overlay sits behind a
+// shared origin, and a personal access token and a platform key are addressed
+// to that origin rather than to a service behind it. The list is asserted
+// here and not in the tree-wide audience test, because the base and the
+// reaper name the core alone and this overlay is the one place a second name
+// belongs.
+//
+// The first entry is held to `arca`: it is the primary, the name spec 001
+// fixes for the core, what the verifier reports and what the start-up line
+// prints.
+func TestProdVerifiesTheOriginsAudienceBesideItsOwn(t *testing.T) {
+	got, found := prodServerEnv(t, "ARCA_OIDC_AUDIENCE")
+	if !found {
+		t.Fatal("deploy/prod patches no ARCA_OIDC_AUDIENCE; a token addressed to the origin would be refused")
+	}
+	names := strings.Split(got, ",")
+	for i := range names {
+		names[i] = strings.TrimSpace(names[i])
+	}
+	if len(names) < 2 || names[0] != "arca" {
+		t.Errorf("deploy/prod verifies %v, want arca first and the origin beside it", names)
+	}
+	if !slices.Contains(names, "api.latere.ai") {
+		t.Errorf("deploy/prod verifies %v and not api.latere.ai, which is what a platform key is addressed to", names)
+	}
+	// The reaper verifies no token, and it still reads the same configuration
+	// the server does. One value across the hosted deployment is what the
+	// family's identity gate reads (ci-gate spec 026), and one value is one
+	// fact to move.
+	reaper, found := prodWorkloadEnv(t, "arcad-reaper", "ARCA_OIDC_AUDIENCE")
+	if !found || reaper != got {
+		t.Errorf("deploy/prod gives the reaper ARCA_OIDC_AUDIENCE %q (found %v), want the server's %q", reaper, found, got)
+	}
+}
+
+// prodBasePath reads ARCA_BASE_PATH off the server this overlay deploys. The
+// claim above is derived from it rather than written twice, so an operator
+// who moves the prefix moves the Ingress with it or reads the failure here.
+func prodBasePath(t *testing.T) string {
+	t.Helper()
+	base, found := prodServerEnv(t, "ARCA_BASE_PATH")
+	if !found {
+		t.Fatal("deploy/prod sets no ARCA_BASE_PATH; the server would serve at the root of the version and answer nothing the Ingress claims")
+	}
+	return base
+}
+
+// prodServerEnv reads one environment value of the arcad Deployment across
+// the overlay's patches, which is where the server's own configuration is
+// set. The reaper is not read: it serves no surface and verifies no token.
+func prodServerEnv(t *testing.T, name string) (string, bool) {
+	t.Helper()
+	return prodWorkloadEnv(t, "arcad", name)
+}
+
+// prodWorkloadEnv reads one variable off the named Deployment of the overlay.
+func prodWorkloadEnv(t *testing.T, workload, name string) (string, bool) {
+	t.Helper()
+	value, found := "", false
+	for _, d := range read(t, "deploy/prod") {
+		if d.kind() != "Deployment" || d.named() != workload {
+			continue
+		}
+		for _, c := range d.containers() {
+			for _, e := range c.items("env") {
+				if e.text("name") == name {
+					value, found = e.text("value"), true
+				}
+			}
+		}
+	}
+	return value, found
+}
+
+// servedPaths returns every path the committed document declares, in the
+// order it declares them.
 //
 // The document is read as text and not with the manifest reader beside it.
 // That reader refuses a key holding a brace on purpose, and every path
 // carrying a template parameter is one; the keys wanted here are the entries
 // of the top-level `paths` mapping, which is a shape a line scan reads
 // exactly.
-func servedPrefixes(t *testing.T) []string {
+func servedPaths(t *testing.T) []string {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join(root(t), filepath.FromSlash("api/openapi.yaml")))
 	if err != nil {
@@ -200,16 +312,11 @@ func servedPrefixes(t *testing.T) []string {
 			continue
 		}
 		path, ok := strings.CutSuffix(trimmed, ":")
-		if !ok {
+		if !ok || !strings.HasPrefix(path, "/") {
 			continue
 		}
-		rest, under := strings.CutPrefix(path, "/v1/")
-		if !under {
-			continue
-		}
-		prefix := "/v1/" + strings.Split(rest, "/")[0]
-		if !slices.Contains(out, prefix) {
-			out = append(out, prefix)
+		if !slices.Contains(out, path) {
+			out = append(out, path)
 		}
 	}
 	return out

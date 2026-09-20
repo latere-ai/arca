@@ -32,8 +32,10 @@ const (
 // over. The field names are the variables without the ARCA_ prefix, so the
 // mapping in cmd/arcad is a line per variable.
 type Options struct {
-	Issuers         []string
-	Audience        string
+	Issuers []string
+	// Audiences is ARCA_OIDC_AUDIENCE read as a comma list, the names a
+	// token's aud may carry, the first of them primary (spec 027).
+	Audiences       []string
 	InsecureIssuers bool
 	AuthorizerURL   string
 	AuthorizerToken string
@@ -96,7 +98,7 @@ func Start(ctx context.Context, o Options) (*Identity, error) {
 		client = &http.Client{Timeout: DefaultFetchTimeout, Transport: otel.Transport(nil)}
 	}
 	verifier, err := NewVerifier(ctx, VerifierOptions{
-		Issuers: o.Issuers, Audience: o.Audience, Insecure: o.InsecureIssuers, HTTP: client,
+		Issuers: o.Issuers, Audiences: o.Audiences, Insecure: o.InsecureIssuers, HTTP: client,
 		Log: o.Log, WarmRetry: o.WarmRetry, WarmRetryMax: o.WarmRetryMax,
 	})
 	if err != nil {

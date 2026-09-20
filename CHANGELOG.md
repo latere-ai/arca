@@ -6,6 +6,43 @@ refused before it is pushed.
 
 ## Unreleased
 
+- **The surface is served under `ARCA_BASE_PATH`, and the production origin
+  moves to `/v1/storage`.** The new variable is the base every route is
+  registered under. Its default is `/v1`, the root of the version, so a
+  self-hosted installation serves exactly what it served before and sets
+  nothing. An installation that shares an origin partitioned by capability
+  sets the whole base it was given, and `deploy/prod` sets `/v1/storage`
+  beside an Ingress that claims that one prefix and forwards it without a
+  rewrite. The value begins with a slash, carries no trailing one, and names
+  `v1` first, or the start-up fails with the variable named.
+
+  The document the server serves moves with the router: its `paths` carry
+  the base and its `servers` keeps naming `ARCA_PUBLIC_URL`, the origin
+  root, so `servers` plus `paths` stays the address of a route. The URL a
+  minted link answers with carries the base too. The presigned redirect and
+  the CDN redirect are unchanged: neither is built on the public URL. The
+  probes, `GET /` and `GET /openapi.json` stay at the origin root, where the
+  release smoke reads them, and the smoke now reads one prefixed path for a
+  401 so a rollout whose image and Ingress disagree fails the release.
+
+  **Breaking at the platform origin only:** `api.latere.ai/v1/files/...` and
+  every other flat prefix answer 404 from the ingress after this release,
+  and the console and the avatar handler move in the same window. Nothing
+  changes for an installation that owns its origin.
+
+- **`ARCA_OIDC_AUDIENCE` is a comma separated list.** A token is accepted
+  when its `aud` names any entry, and the first entry is the primary: the
+  name the installation answers to and the one the start-up line names. Unset is still `arca` alone and a single value
+  behaves as it always did. The production overlay verifies
+  `arca,api.latere.ai`, because a platform key and a personal access token
+  are addressed to the origin in front of the core rather than to the core.
+  No core accepts another core's workload credentials, which is unchanged.
+
+- **`arcad check` names the base path.** The `public-url` line reports the
+  origin and the base the server serves under. It reports and does not dial
+  it: that requirement passes on an address nothing answers, because the
+  command runs beside a replica as often as in front of one.
+
 - **The object move deletes the old keys when it is asked to.**
   `move-objects -delete-sources` runs the move as it always did and then, in
   a pass of its own, deletes each manifest source key whose destination that

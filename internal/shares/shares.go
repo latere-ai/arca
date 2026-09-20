@@ -22,6 +22,7 @@
 package shares
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"net/http"
@@ -29,6 +30,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"latere.ai/x/arca/internal/api"
 	"latere.ai/x/arca/internal/auth"
 	"latere.ai/x/arca/internal/store"
 )
@@ -149,6 +151,11 @@ type Options struct {
 	// BucketPrefix is ARCA_BUCKET_PREFIX, which the key of an object
 	// derives from (spec 003).
 	BucketPrefix string
+	// BasePath is ARCA_BASE_PATH, the base the surface is served under
+	// (spec 027). The URL a minted link answers with is written under it,
+	// because that URL is where the caller redeems the token. Empty is
+	// api.DefaultBasePath, the root of the version.
+	BasePath string
 	// Now is the clock an expiry is read against. time.Now when nil.
 	Now func() time.Time
 }
@@ -163,6 +170,7 @@ type Service struct {
 	reader       ObjectReader
 	publisher    Publisher
 	bucketPrefix string
+	basePath     string
 	clock        func() time.Time
 }
 
@@ -181,7 +189,8 @@ func New(o Options) (*Service, error) {
 	s := &Service{
 		authorizer: o.Authorizer, db: o.DB, store: o.Store,
 		ledger: o.Ledger, reader: o.Reader, publisher: o.Publisher,
-		bucketPrefix: o.BucketPrefix, clock: o.Now,
+		bucketPrefix: o.BucketPrefix, basePath: cmp.Or(o.BasePath, api.DefaultBasePath),
+		clock: o.Now,
 	}
 	if s.ledger == nil {
 		s.ledger = NoLedger{}

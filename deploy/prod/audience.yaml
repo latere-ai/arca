@@ -1,0 +1,46 @@
+# The audiences this installation verifies.
+#
+# ARCA_OIDC_AUDIENCE is a comma list and the first entry is the primary: the
+# name spec 001 fixes for the core, what the verifier reports and what the
+# start-up line prints. Every entry is accepted, so a token addressed to any
+# of them reaches a handler and a token addressed to anything else is a 401.
+#
+# The second entry is the platform origin in front of the core. A personal
+# access token and a platform key are minted for `api.latere.ai`, because
+# the holder addresses the origin and not a service behind it; an
+# installation verifying its own name alone would refuse every such
+# credential while accepting the console's, which is the key path shut and
+# the browser path open. Rule R4 is unchanged: this is the origin in front
+# of the core, not another core's name, and no core accepts another core's
+# workload credentials.
+#
+# The base sets `arca` for every container of the tree, and this patch
+# widens the server and the reaper to the same list. The reaper verifies no
+# token, and it reads the same configuration; one value across the hosted
+# deployment is what the family's identity gate reads (ci-gate spec 026),
+# and one value is one fact to move. The migration job keeps the base value.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: arcad
+spec:
+  template:
+    spec:
+      containers:
+        - name: arcad
+          env:
+            - name: ARCA_OIDC_AUDIENCE
+              value: arca,api.latere.ai
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: arcad-reaper
+spec:
+  template:
+    spec:
+      containers:
+        - name: arcad
+          env:
+            - name: ARCA_OIDC_AUDIENCE
+              value: arca,api.latere.ai

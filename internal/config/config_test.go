@@ -6,6 +6,7 @@ package config
 import (
 	"maps"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -45,7 +46,8 @@ func TestLoadAppliesEveryDefault(t *testing.T) {
 
 		PublicURL:                        "https://storage.example",
 		OIDCIssuers:                      []string{"https://issuer.example"},
-		OIDCAudience:                     DefaultOIDCAudience,
+		BasePath:                         DefaultBasePath,
+		OIDCAudiences:                    []string{DefaultOIDCAudience},
 		RequestsPerMinute:                DefaultRequestsPerMinute,
 		UnauthenticatedRequestsPerMinute: DefaultUnauthenticatedRequestsPerMinute,
 		MaxUploadBytes:                   DefaultMaxUploadBytes,
@@ -74,7 +76,8 @@ func TestLoadReadsEveryVariable(t *testing.T) {
 
 		"ARCA_PUBLIC_URL":                          "https://storage.example/base",
 		"ARCA_OIDC_ISSUERS":                        "https://issuer.example, https://other.example ,",
-		"ARCA_OIDC_AUDIENCE":                       "arca-test",
+		"ARCA_BASE_PATH":                           "/v1/storage",
+		"ARCA_OIDC_AUDIENCE":                       "arca-test, api.example ,",
 		"ARCA_OIDC_INSECURE_ISSUERS":               "true",
 		"ARCA_AUTHORIZER_URL":                      "https://authz.example/decide",
 		"ARCA_AUTHORIZER_TOKEN":                    "s3cret",
@@ -103,9 +106,10 @@ func TestLoadReadsEveryVariable(t *testing.T) {
 		PublicCDNURL:    "https://cdn.example",
 		DatabaseURL:     "postgresql://arca@db/arca",
 
-		PublicURL:    "https://storage.example/base",
-		OIDCIssuers:  []string{"https://issuer.example", "https://other.example"},
-		OIDCAudience: "arca-test", OIDCInsecureIssuers: true,
+		PublicURL:     "https://storage.example/base",
+		OIDCIssuers:   []string{"https://issuer.example", "https://other.example"},
+		BasePath:      "/v1/storage",
+		OIDCAudiences: []string{"arca-test", "api.example"}, OIDCInsecureIssuers: true,
 		AuthorizerURL: "https://authz.example/decide", AuthorizerToken: "s3cret",
 		AdminSubjects:     []string{"https://issuer.example|root", "https://issuer.example|ops"},
 		RequestsPerMinute: 1200, UnauthenticatedRequestsPerMinute: 0,
@@ -436,5 +440,59 @@ func TestTheInlineSizeStaysUnderTheLargestObject(t *testing.T) {
 		"ARCA_MAX_UPLOAD_BYTES": "2000", "ARCA_INLINE_BYTES": "2000",
 	})); err != nil {
 		t.Fatalf("an inline size equal to the largest object: %v", err)
+	}
+}
+
+// TestTheBasePathIsCheckedForShape is spec 027's rule at load: the base
+// begins with a slash, carries no trailing one, and names v1 first. An
+// installation whose base is wrong serves its whole surface at an address
+// no document of this API describes, which is a start-up failure and not a
+// 404 an operator reads after a rollout.
+func TestTheBasePathIsCheckedForShape(t *testing.T) {
+	for _, c := range []struct{ value, problem string }{
+		{"v1/storage", "a base path is rooted"},
+		{"/v1/storage/", "carries no trailing slash"},
+		{"/", "carries no trailing slash"},
+		{"/storage", "the first segment of the base is v1"},
+		{"/v2", "the first segment of the base is v1"},
+	} {
+		t.Run(c.value, func(t *testing.T) {
+			_, err := Load(required(map[string]string{"ARCA_BASE_PATH": c.value}))
+			if err == nil || !strings.Contains(err.Error(), c.problem) {
+				t.Fatalf("Load() = %v, want a problem naming %q", err, c.problem)
+			}
+		})
+	}
+	for _, good := range []string{"/v1", "/v1/storage", " /v1/storage "} {
+		t.Run(good, func(t *testing.T) {
+			c, err := Load(required(map[string]string{"ARCA_BASE_PATH": good}))
+			if err != nil {
+				t.Fatalf("Load() refused %q: %v", good, err)
+			}
+			if c.BasePath != strings.TrimSpace(good) {
+				t.Errorf("BasePath = %q, want %q", c.BasePath, strings.TrimSpace(good))
+			}
+		})
+	}
+}
+
+// TestTheAudienceIsAListWithThePrimaryFirst: ARCA_OIDC_AUDIENCE carries the
+// names a token's aud may hold, the first of them the name this core
+// answers to (spec 027). An unset variable is the default alone, so an
+// installation that configures nothing verifies what spec 001 fixes.
+func TestTheAudienceIsAListWithThePrimaryFirst(t *testing.T) {
+	c, err := Load(required(map[string]string{"ARCA_OIDC_AUDIENCE": "arca, api.latere.ai"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"arca", "api.latere.ai"}; !slices.Equal(c.OIDCAudiences, want) {
+		t.Errorf("OIDCAudiences = %v, want %v", c.OIDCAudiences, want)
+	}
+	blank, err := Load(required(map[string]string{"ARCA_OIDC_AUDIENCE": " , "}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{DefaultOIDCAudience}; !slices.Equal(blank.OIDCAudiences, want) {
+		t.Errorf("a blank list read as %v, want %v", blank.OIDCAudiences, want)
 	}
 }

@@ -15,13 +15,19 @@ import (
 	"testing"
 )
 
-// stub serves what a healthy arcad serves: the two probes, the API
-// description, and /version naming the given version. An empty version
-// answers /version with a page, the way a build whose probes were not
-// mounted would.
+// stub serves what a healthy installation serves through the platform
+// origin: the two probes, the API description, /version naming the given
+// version, and the surface under the capability prefix, which answers an
+// unauthenticated request with a 401 (spec 027). An empty version answers
+// /version with a page, the way a build whose probes were not mounted would.
 func stub(t *testing.T, version string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
+	mux.Handle("GET /v1/storage/", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":{"code":"unauthenticated"}}`))
+	}))
 	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	mux.HandleFunc("GET /openapi.json", func(w http.ResponseWriter, _ *http.Request) {
@@ -172,6 +178,33 @@ func TestSmokeFailsOnABrokenEmbed(t *testing.T) {
 	}
 	if !strings.Contains(out, "/openapi.json") {
 		t.Errorf("the failure does not name the missing description:\n%s", out)
+	}
+}
+
+// TestSmokeFailsWhenTheOriginRoutesNoSurface is the failure the prefixed
+// check exists for: a rollout that lands the image without the Ingress rule
+// that claims the prefix. Every probe at the origin root answers, the served
+// version is the tag, and no route of the API is reachable at all, which is
+// a release that would be published over a console taking 404s.
+func TestSmokeFailsWhenTheOriginRoutesNoSurface(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
+	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
+	mux.HandleFunc("GET /openapi.json", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"openapi":"3.1.0"}`))
+	})
+	mux.HandleFunc("GET /version", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"version":"v1.2.3"}`))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	out, ok := run(t, "BASE_URL="+srv.URL, "TAG=v1.2.3")
+	if ok {
+		t.Fatalf("the smoke passed against an origin that routes no surface:\n%s", out)
+	}
+	if !strings.Contains(out, "/v1/storage/files/me/") {
+		t.Errorf("the failure does not name the path that answered nothing:\n%s", out)
 	}
 }
 

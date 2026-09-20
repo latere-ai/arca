@@ -61,6 +61,14 @@ check_status "GET /readyz" "/readyz" "200" "$tmp/readyz"
 check_status "GET /openapi.json" "/openapi.json" "200" "$tmp/openapi"
 
 check_status "GET /version" "/version" "200" "$tmp/version"
+
+# The surface, at the prefix this installation serves it under. The four
+# checks above are the origin root and would pass on an image that mounted
+# its routes nowhere the Ingress claims, which is a rollout that returns
+# green and a console that takes a 404. A 401 is the right answer here: the
+# path carries no bearer, and a refusal from the surface proves the request
+# reached arcad through the rule that claims the prefix (spec 027).
+check_status "GET /v1/storage/files/me/" "/v1/storage/files/me/" "401" "$tmp/files"
 # `|| true` because grep exits 1 when it matches nothing, and under
 # pipefail that would end the script before the message below is written. A
 # build whose /version answers a page is a real failure and deserves to say
@@ -86,6 +94,7 @@ if [ -n "$OUTPUT_MD" ]; then
     echo "- Origin: ${BASE_URL}"
     echo "- Served version: \`${served}\`"
     echo "- Smoke: \`/livez\`, \`/readyz\`, \`/openapi.json\` and \`/version\` each answered 200"
+    echo "- Surface: \`/v1/storage/files/me/\` answered 401, so the origin routes the prefix to this build"
   } > "$OUTPUT_MD"
 fi
 

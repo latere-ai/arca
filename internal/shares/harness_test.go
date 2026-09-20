@@ -54,7 +54,7 @@ func newHarness(t *testing.T, opts ...func(*shares.Options)) *harness {
 	h.endpoint.Allow(stub.Rule{Subject: "*", Action: "*", Resource: "*", Allow: true})
 
 	id, err := auth.Start(t.Context(), auth.Options{
-		Issuers: []string{h.issuer.URL()}, Audience: "arca",
+		Issuers: []string{h.issuer.URL()}, Audiences: []string{"arca"},
 		AuthorizerURL: h.endpoint.URL(), AuthorizerToken: h.endpoint.Token(),
 	})
 	if err != nil {
@@ -74,6 +74,10 @@ func newHarness(t *testing.T, opts ...func(*shares.Options)) *harness {
 		Verifier: id.Verifier, Authorizer: id.Authorizer,
 		Routes: shares.Routes(h.service), Links: h.service,
 		PublicURL: "https://storage.example",
+		// The node hands one base path to both, so a harness that pointed
+		// the service at one prefix and the mux at another would prove
+		// nothing about an installation (spec 027).
+		BasePath: o.BasePath,
 		// The frame registers the event tail of spec 010 and refuses to
 		// build without its log. No test here drives that route, so the
 		// node's own log is wired with no database behind it: what the tail

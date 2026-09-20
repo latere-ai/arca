@@ -73,7 +73,7 @@ validated spec is dispatched when every spec in its `depends_on` is at
 | [024](024-conformance-against-a-published-release.md) | N-1 conformance: the previous release's suite run against this release's binary | validated |
 | [025](025-observability-follow-ups.md) | Observability follow-ups: the request span, the redaction handler, the label sweep, the stored-bytes gauge | validated |
 | [026](026-installation-verification-jobs.md) | Installation verification jobs: the candidate, the deploy archive, the install walk, and the clean-runner check of a published release | validated |
-| [027](027-serving-under-the-capability-prefix.md) | Serving under the capability prefix: the base path, the second audience, and the one batch that moves both callers | drafted |
+| [027](027-serving-under-the-capability-prefix.md) | Serving under the capability prefix: the base path, the second audience, and the one batch that moves both callers | testing |
 
 The order of building is the order of the numbers except where a spec's
 `depends_on` says otherwise, and 019 runs alongside all of them: each

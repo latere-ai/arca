@@ -214,7 +214,7 @@ func TestBothModesResolveTheGrant(t *testing.T) {
 	s.Allow(stub.Rule{Subject: "*", Action: "*", Resource: "*", Allow: true})
 	endpointTable := &lookup{held: auth.PermissionRead}
 	asked, err := auth.Start(t.Context(), auth.Options{
-		Issuers: []string{iss.URL()}, Audience: audience,
+		Issuers: []string{iss.URL()}, Audiences: []string{audience},
 		AuthorizerURL: s.URL(), AuthorizerToken: s.Token(), Grants: endpointTable,
 	})
 	if err != nil {
@@ -238,7 +238,7 @@ func TestBothModesResolveTheGrant(t *testing.T) {
 	// deciding on its own answer.
 	policyTable := &lookup{held: auth.PermissionRead}
 	own, err := auth.Start(t.Context(), auth.Options{
-		Issuers: []string{iss.URL()}, Audience: audience, Grants: policyTable,
+		Issuers: []string{iss.URL()}, Audiences: []string{audience}, Grants: policyTable,
 	})
 	if err != nil {
 		t.Fatalf("the node would not start: %v", err)
@@ -257,7 +257,7 @@ func TestBothModesResolveTheGrant(t *testing.T) {
 	// allows an owner before the grant step and ownership is not a grant.
 	ownerTable := &lookup{held: auth.PermissionManage}
 	plain, err := auth.Start(t.Context(), auth.Options{
-		Issuers: []string{iss.URL()}, Audience: audience, Grants: ownerTable,
+		Issuers: []string{iss.URL()}, Audiences: []string{audience}, Grants: ownerTable,
 	})
 	if err != nil {
 		t.Fatalf("the node would not start: %v", err)

@@ -80,12 +80,15 @@ spec:
               containerPort: 8081
               protocol: TCP
           env:
-            # The audience every accepted token must carry (spec 006),
-            # named here rather than left to the server's default, so a
-            # token addressed to anything else is refused by decision and
-            # not by coincidence. This is the value spec 001 fixes for the
-            # core, and an installation that changes it changes what its
-            # issuer must mint.
+            # The audiences an accepted token may carry (spec 006), named
+            # here rather than left to the server's default, so a token
+            # addressed to anything else is refused by decision and not by
+            # coincidence. The variable is a comma list and the first entry
+            # is the primary: this is the value spec 001 fixes for the core,
+            # and an installation that changes it changes what its issuer
+            # must mint. An installation behind an origin that mints
+            # credentials of its own adds that origin's name in an overlay,
+            # the way deploy/prod does.
             - name: ARCA_OIDC_AUDIENCE
               value: arca
             # The connection string is its own Secret, separate from the
@@ -111,6 +114,13 @@ spec:
           # overlay sets it, because the origin clients reach is the one
           # value no base can guess and every URL the server writes is
           # built from it.
+          #
+          # ARCA_BASE_PATH is not set here either, and its default is the
+          # root of the version: an installation that owns its origin serves
+          # /v1/files and the rest at the root, which is what a self-hoster
+          # following docs/install.md gets. Only an installation behind an
+          # origin partitioned by capability sets it, as deploy/prod does
+          # (spec 027).
           envFrom:
             - secretRef:
                 name: arcad-bucket

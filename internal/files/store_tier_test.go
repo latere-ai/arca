@@ -68,7 +68,7 @@ func tier(t *testing.T) (*harness, *tierStores) {
 	endpointStub := stub.New(t, stub.WithVocabulary(authorizer.Vocabulary()))
 	endpointStub.Allow(stub.Rule{Subject: "*", Action: "*", Resource: "*", Allow: true})
 	id, err := auth.Start(t.Context(), auth.Options{
-		Issuers: []string{iss.URL()}, Audience: "arca",
+		Issuers: []string{iss.URL()}, Audiences: []string{"arca"},
 		AuthorizerURL: endpointStub.URL(), AuthorizerToken: endpointStub.Token(),
 	})
 	if err != nil {

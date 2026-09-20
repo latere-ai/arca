@@ -513,6 +513,38 @@ func TestTheStartLineNamesWhoDecides(t *testing.T) {
 	}
 }
 
+// TestTheStartLineNamesTheBasePathAndTheSurfaceIsThere is spec 027 at the
+// node: an operator reads where this replica serves its surface, and the
+// surface is registered there. A path at the root of the version is outside
+// the mount and takes the router's own 404, with no envelope and no request
+// id, because no pattern of the public listener claims it.
+func TestTheStartLineNamesTheBasePathAndTheSurfaceIsThere(t *testing.T) {
+	publicURL, _, started, stop := startServe(t, map[string]string{"ARCA_BASE_PATH": "/v1/storage"})
+	defer stop()
+	if !strings.Contains(started, "base=/v1/storage") {
+		t.Errorf("the start line is %q and does not name the base path", started)
+	}
+	// The primary audience beside it: the first entry of the list, which is
+	// the name this installation answers to.
+	if !strings.Contains(started, "audience=arca") {
+		t.Errorf("the start line is %q and does not name the primary audience", started)
+	}
+	if code, body := get(t, publicURL+"/v1/storage/trash"); code != 401 || !strings.Contains(body, `"unauthenticated"`) {
+		t.Errorf("GET /v1/storage/trash = %d %q, want a 401 from the mounted surface", code, body)
+	}
+	if code, body := get(t, publicURL+"/v1/trash"); code != 404 || strings.Contains(body, `"error"`) {
+		t.Errorf("GET /v1/trash = %d %q, want the router's bare 404 outside the base path", code, body)
+	}
+	// The probes and the document keep the origin root: they sit outside
+	// the surface and no base path moves them.
+	if code, _ := get(t, publicURL+"/openapi.json"); code != 200 {
+		t.Errorf("GET /openapi.json = %d, want 200 at the root", code)
+	}
+	if code, _ := get(t, publicURL+"/livez"); code != 200 {
+		t.Errorf("GET /livez = %d, want 200 at the root", code)
+	}
+}
+
 // TestReadinessAsksTheAuthorizerWhenOneIsConfigured is the check named
 // authorizer of spec 006: a replica whose endpoint is out of reach leaves
 // rotation rather than answering 503 to every request it is sent.
@@ -563,7 +595,7 @@ func TestReadinessHasNoAuthorizerCheckWithoutOne(t *testing.T) {
 	always := []string{"draining", "bucket", "database", "issuers"}
 	iss := issuertest.New(t, issuertest.WithDefaultAudience("arca"))
 	verifier, err := auth.NewVerifier(t.Context(), auth.VerifierOptions{
-		Issuers: []string{iss.URL()}, Audience: "arca",
+		Issuers: []string{iss.URL()}, Audiences: []string{"arca"},
 	})
 	if err != nil {
 		t.Fatalf("the verifier would not build: %v", err)

@@ -547,7 +547,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	// and the replica starts rather than making this installation's start
 	// order-dependent on its issuer.
 	identity, err := auth.Start(ctx, auth.Options{
-		Issuers: cfg.OIDCIssuers, Audience: cfg.OIDCAudience,
+		Issuers: cfg.OIDCIssuers, Audiences: cfg.OIDCAudiences,
 		InsecureIssuers: cfg.OIDCInsecureIssuers,
 		AuthorizerURL:   cfg.AuthorizerURL, AuthorizerToken: cfg.AuthorizerToken,
 		AdminSubjects: cfg.AdminSubjects,
@@ -595,6 +595,9 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		Publisher: bucket, BucketPrefix: cfg.BucketPrefix,
 		Ledger: shareLedger{log: log},
 		Reader: object,
+		// The base the surface is served under, so the URL a mint answers
+		// with is the address the caller redeems the token at (spec 027).
+		BasePath: cfg.BasePath,
 	})
 	if err != nil {
 		return fail(stderr, err)
@@ -647,6 +650,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		Verifier: identity.Verifier, Authorizer: identity.Authorizer,
 		Links:                            sharing,
 		PublicURL:                        cfg.PublicURL,
+		BasePath:                         cfg.BasePath,
 		RequestsPerMinute:                cfg.RequestsPerMinute,
 		UnauthenticatedRequestsPerMinute: cfg.UnauthenticatedRequestsPerMinute,
 		// The log of spec 010 and the database it reads through, which is
@@ -730,9 +734,14 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		return fail(stderr, fmt.Errorf("ARCA_INTERNAL_ADDR: %w", err))
 	}
 	// The mode is on the line an operator reads at start, so they know
-	// whether the endpoint they configured was picked up (spec 006).
-	_, _ = fmt.Fprintf(stdout, "arcad: %s listening public=%s internal=%s deciding=%q\n",
-		version.Version, publicLn.Addr(), internalLn.Addr(), identity.Mode)
+	// whether the endpoint they configured was picked up (spec 006). Beside
+	// it are the two of spec 027: the base path, so they read where the
+	// surface answers rather than infer it from a 404, and the primary
+	// audience, the first entry of a list that may hold several, so they
+	// read which name this installation answers to.
+	_, _ = fmt.Fprintf(stdout, "arcad: %s listening public=%s internal=%s base=%s audience=%s deciding=%q\n",
+		version.Version, publicLn.Addr(), internalLn.Addr(),
+		cfg.BasePath, identity.Verifier.Audience(), identity.Mode)
 	// The drift seam of spec 017 is empty in every deployment, so a build
 	// that has one says so where an operator reads the start-up. It refuses
 	// what it should serve and grants nothing, which makes a seam set by

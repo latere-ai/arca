@@ -163,7 +163,11 @@ func (s *session) readSurface(t testing.TB) surface {
 	}
 	paths := obj(r.json, "paths")
 	for _, row := range surfaceTable {
-		item := obj(paths, row.template())
+		// The document names each path under the base the target serves at,
+		// and the table declares it at the root of the version, so the two
+		// are compared through the same rule every request goes through
+		// (spec 027).
+		item := obj(paths, s.under(row.template()))
 		if _, ok := item[strings.ToLower(row.method)]; ok {
 			answered[row.key()] = true
 		}

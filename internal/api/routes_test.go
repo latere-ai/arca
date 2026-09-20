@@ -327,7 +327,7 @@ func newHarness(t *testing.T, opts ...func(*Options)) *harness {
 	iss := issuertest.New(t, issuertest.WithDefaultAudience("arca"))
 	endpoint := stub.New(t, stub.WithVocabulary(authorizer.Vocabulary()))
 	id, err := auth.Start(t.Context(), auth.Options{
-		Issuers: []string{iss.URL()}, Audience: "arca",
+		Issuers: []string{iss.URL()}, Audiences: []string{"arca"},
 		AuthorizerURL: endpoint.URL(), AuthorizerToken: endpoint.Token(),
 	})
 	if err != nil {

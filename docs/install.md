@@ -59,6 +59,13 @@ refused by decision rather than by accident. An installation that needs a
 different audience sets `ARCA_OIDC_AUDIENCE` and tells its issuer to mint
 for that value.
 
+`ARCA_OIDC_AUDIENCE` is a comma separated list, and a token is accepted when
+its `aud` names any entry. The first entry is the primary, the name this
+installation answers to and the one the start-up line names. List more than one where something in front of Arca mints
+credentials addressed to itself: a gateway that issues keys for its own
+origin is the case this exists for, and the platform installation sets
+`arca,api.latere.ai` for exactly that reason.
+
 Skip this and `arcad check` cannot reach a key set, and every request is
 answered 401.
 
@@ -142,6 +149,16 @@ Change, in your copy:
 it, a presigned redirect included, so a value that does not match your
 ingress sends clients to an address that answers nothing.
 
+`ARCA_BASE_PATH` you leave alone. Its default is `/v1`, the root of the
+version, so `https://arca.example.com/v1/files/...` is where your routes
+answer and the examples above need nothing. Set it only where Arca shares an
+origin with other services and has been given a prefix of its own: the value
+is then the whole base, such as `/v1/storage`, your ingress forwards that
+prefix without rewriting it, and the document at `/openapi.json` names every
+path under it. The first segment stays `v1`, and a value that drops it, ends
+in a slash, or is not rooted fails the start-up with a message naming the
+variable.
+
 Then:
 
 ```sh
@@ -171,6 +188,19 @@ BASE_URL=https://arca.example.com tools/smoke/release.sh
 served version is written down. Add `TAG=vX.Y.Z` to make the served version
 having to equal it a condition of success, which is what the release
 pipeline does after every rollout.
+
+One check reads the surface itself, `/v1/storage/files/me/`, and wants a 401.
+That is the prefix the platform installation serves under, and the check
+proves the origin routes the prefix to this build rather than answering the
+probes alone. An installation at the root of the version serves that path
+nowhere, so read your own instead:
+
+```sh
+curl -so /dev/null -w '%{http_code}\n' https://arca.example.com/v1/files/me/
+```
+
+A 401 is the answer: the request carries no bearer, and a refusal from the
+surface is proof the request reached it.
 
 The conformance suite is the fuller answer to "does this installation behave
 like Arca": it runs against any installation with a token from your issuer,

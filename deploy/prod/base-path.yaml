@@ -1,0 +1,29 @@
+# The base this installation serves its surface under.
+#
+# api.latere.ai partitions /v1 by capability, one prefix per core, and
+# Arca's is `storage`. The server registers every route of spec 013's table
+# under ARCA_BASE_PATH and writes the same base into the paths of the
+# document it serves, so `servers` plus `paths` is the address a client
+# reaches a route at. The value is the whole base and not the capability
+# segment, because `/v1/storage` is the literal the Ingress rule, the
+# console's proxy target and the served document all carry.
+#
+# It moves with ingress.yaml or not at all: the Ingress claims this prefix
+# and forwards it unrewritten, so an image serving somewhere else answers
+# nothing at the origin. test/deploy/prod_test.go derives the claim from
+# this value, and the release smoke reads one prefixed path for a 401, so
+# the two are proved together rather than after a rollout.
+#
+# The reaper serves no surface and reads no base path.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: arcad
+spec:
+  template:
+    spec:
+      containers:
+        - name: arcad
+          env:
+            - name: ARCA_BASE_PATH
+              value: /v1/storage

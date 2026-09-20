@@ -6,7 +6,7 @@ depends_on: []
 affects: [cmd/arcad/, internal/config/, internal/version/, Makefile, .lateregate.yaml, Dockerfile, .github/workflows/, .githooks/, docs/]
 effort: small
 created: 2026-09-18
-updated: 2026-09-18
+updated: 2026-09-20
 author: changkun
 ---
 
@@ -125,8 +125,9 @@ operator fixes a deployment in one round. A blank value is unset.
 | `ARCA_DB_URL` | required | the Postgres connection string | 004 |
 | `ARCA_MAX_UPLOAD_BYTES` | `5368709120` | the largest object accepted | 007 |
 | `ARCA_INLINE_BYTES` | `16777216` | the largest object streamed through the server; above it, parts go direct | 007 |
+| `ARCA_BASE_PATH` | `/v1` | the base every route of the surface is registered under; begins with `/`, no trailing slash, first segment `v1` | 027 |
 | `ARCA_OIDC_ISSUERS` | required | the issuers whose tokens are verified, comma separated | 006 |
-| `ARCA_OIDC_AUDIENCE` | `arca` | the audience every token must carry | 006 |
+| `ARCA_OIDC_AUDIENCE` | `arca` | the audiences a token's `aud` may name, comma separated, the first primary | 006 |
 | `ARCA_OIDC_INSECURE_ISSUERS` | `false` | admit an `http://` issuer off loopback; for the test tiers | 006 |
 | `ARCA_AUTHORIZER_URL` | unset | the authorizer endpoint; unset selects the owner policy | 006 |
 | `ARCA_AUTHORIZER_TOKEN` | unset | the bearer the authorizer expects | 006 |
@@ -140,6 +141,14 @@ operator fixes a deployment in one round. A blank value is unset.
 
 The rows for later specs are reference entries; the spec named builds
 what reads each.
+
+**Amended 2026-09-20 ([[027-serving-under-the-capability-prefix]]).** Two
+rows. `ARCA_BASE_PATH` joins the table: the base every route of the surface
+is registered under, default `/v1`, validated at load as rooted, without a
+trailing slash, and naming `v1` first, so the version of [[013-api]] cannot
+be configured away. `ARCA_OIDC_AUDIENCE` is a comma list rather than one
+name: a token is verified when its `aud` names any entry, and the first
+entry is the primary, what the server reports as the name it answers to.
 
 One row has a second name. Where `ARCA_OTEL_EXPORTER_OTLP_ENDPOINT` is
 unset the server reads the standard `OTEL_EXPORTER_OTLP_ENDPOINT`,

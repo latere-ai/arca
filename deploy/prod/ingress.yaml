@@ -1,41 +1,34 @@
 # The platform origin. api.latere.ai is one name in front of several
-# services, and this object claims only the path prefixes Arca owns, one per
-# /v1 namespace of spec 013. There is deliberately no `/` rule: a catch-all
-# here would take the whole origin and answer 404 for every route another
-# service adds.
+# services, and its /v1 is partitioned by capability, one prefix per core.
+# Arca's prefix is `storage`, so this object claims `/v1/storage` and
+# nothing else under the version. There is deliberately no `/` rule: a
+# catch-all here would take the whole origin and answer 404 for every route
+# another service adds.
 #
 # The host and its certificate are the platform's, shared by every service
 # routed under the origin; the cert-manager annotation below is the one
-# exception, explained where it stands, and
-# no Certificate of Arca's: this object adds paths and nothing else. The
-# secret it names is the one the origin already holds.
+# exception, explained where it stands, and no Certificate of Arca's: this
+# object adds paths and nothing else. The secret it names is the one the
+# origin already holds.
 #
-# Seven of the prefixes are the storage half of the platform's resource
-# namespace table, which is the service Arca replaces minus what spec 013
-# does not register: `orgs` and `whoami` are identity's, `quotas`,
-# `webhooks` and `agent-visibility` are retired, and the `s/{token}` share
-# link is now `shares/links/{token}`, already covered by `shares`.
+# One rule replaces the eight flat prefixes this object used to claim. The
+# rule forwards without a rewrite and `arcad` serves its whole surface under
+# ARCA_BASE_PATH, which deploy/prod sets to the same `/v1/storage`, so the
+# served OpenAPI document names the paths the router answers at and the two
+# cannot drift (spec 027). test/deploy/prod_test.go derives the claim from
+# that variable and holds every path of the committed document to `/v1/`, so
+# an Ingress and an image that disagree are a red tree rather than a 404
+# after a rollout.
 #
-# The eighth is `/v1/admin`, the administration surface spec 012 owns. It
-# was left out on the reading that at a shared origin the prefix is the
-# platform's and not one service's, with spec 012 to say where an
-# administrator reaches it instead. Spec 012 never said, and the console
-# asked this origin for `/v1/admin/overview` and took a 404 from nginx while
-# arcad served the route and every other prefix answered a JSON 401. No
-# other service on the origin claims the prefix, so Arca claims it here.
-# test/deploy/prod_test.go derives the list from api/openapi.yaml, so a
-# namespace the document grows is a red tree rather than a 404 after a
-# rollout.
-#
-# Two probes are here, as exact paths: `/readyz` and `/version`. They are
-# what the release smoke reads, and it must read them through the address
-# GitHub records as the deployment rather than through a forwarded port. A
-# rollout returns as soon as the new pods are ready, and a smoke that
-# reached a pod directly would not see an endpoint list that still holds an
-# old one; `/version` answering the tag at the origin is the only check that
-# does. An exact path takes precedence over every prefix rule on this host
-# and claims nothing beyond itself, which is why `/livez` is left out: the
-# kubelet reads it and nothing at the origin does.
+# Four probes are here, each with a rule of its own at the origin root:
+# `/livez`, `/readyz`, `/openapi.json` and `/version`. They sit outside the
+# surface and no base path moves them. They are what the release smoke reads,
+# and it must read them through the address GitHub records as the deployment
+# rather than through a forwarded port. A rollout returns as soon as the new
+# pods are ready, and a smoke that reached a pod directly would not see an
+# endpoint list that still holds an old one; `/version` answering the tag at
+# the origin is the only check that does. An exact path takes precedence over
+# every prefix rule on this host and claims nothing beyond itself.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -65,68 +58,24 @@ spec:
     - host: api.latere.ai
       http:
         paths:
-          - path: /v1/files
+          # The capability prefix, forwarded without a rewrite. Every
+          # route of spec 013's table answers under it, because arcad
+          # registers its surface at ARCA_BASE_PATH and deploy/prod sets
+          # that to this same value.
+          - path: /v1/storage
             pathType: Prefix
             backend:
               service:
                 name: arcad
                 port:
                   name: http
-          - path: /v1/uploads
-            pathType: Prefix
-            backend:
-              service:
-                name: arcad
-                port:
-                  name: http
-          - path: /v1/shares
-            pathType: Prefix
-            backend:
-              service:
-                name: arcad
-                port:
-                  name: http
-          - path: /v1/workspaces
-            pathType: Prefix
-            backend:
-              service:
-                name: arcad
-                port:
-                  name: http
-          - path: /v1/trash
-            pathType: Prefix
-            backend:
-              service:
-                name: arcad
-                port:
-                  name: http
-          - path: /v1/stars
-            pathType: Prefix
-            backend:
-              service:
-                name: arcad
-                port:
-                  name: http
-          - path: /v1/events
-            pathType: Prefix
-            backend:
-              service:
-                name: arcad
-                port:
-                  name: http
-          # Spec 012's administration surface, which the console reaches here.
-          - path: /v1/admin
-            pathType: Prefix
-            backend:
-              service:
-                name: arcad
-                port:
-                  name: http
-          # The four the release smoke reads, each Exact so it claims
-          # nothing beyond itself at an origin several services share.
-          # test/deploy/prod_test.go reads the list out of
-          # tools/smoke/release.sh, so a path the script grows is a red
-          # tree here rather than a 404 after the rollout.
+          # The four probes the release smoke reads at the root, each
+          # Exact so it claims nothing beyond itself at an origin several
+          # services share. test/deploy/prod_test.go reads the smoked paths
+          # out of tools/smoke/release.sh, so a path the script grows is a
+          # red tree here rather than a 404 after the rollout; a smoked path
+          # that falls under the prefix rule above is routed by that rule
+          # and needs none of its own.
           - path: /livez
             pathType: Exact
             backend:

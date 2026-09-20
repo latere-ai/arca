@@ -273,8 +273,16 @@ func TestTheBaseLeavesThePrometheusRuleOut(t *testing.T) {
 // and the container named rather than at the end of a gate run. Spec 001
 // fixes the audience of the core; a container that does not name it accepts
 // whatever the binary's default is that release, which is a decision by
-// coincidence. The check is over the whole tree, so every overlay added
-// later is held to it too.
+// coincidence.
+//
+// It reads the containers that name an image, which is every container the
+// tree declares whole: the base, the reaper and the bootstrap job. A patch
+// adds environment to one of those containers and declares no image, so what
+// an overlay sets is asserted where that overlay is read.
+// TestProdVerifiesTheOriginsAudienceBesideItsOwn is the one that matters
+// here: ARCA_OIDC_AUDIENCE is a comma list from spec 027, the primary is the
+// first entry, and the production overlay adds the origin in front of the
+// core to it.
 func TestEveryArcadContainerNamesTheAudience(t *testing.T) {
 	found := 0
 	for _, d := range read(t, "deploy") {

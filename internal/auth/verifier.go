@@ -24,7 +24,9 @@ import (
 )
 
 // DefaultAudience is ARCA_OIDC_AUDIENCE's default: the audience every token
-// arcad accepts must carry.
+// arcad accepts must carry where the variable names none. It is also the
+// primary audience of an installation that lists several, the name this core
+// answers to.
 const DefaultAudience = "arca"
 
 // DefaultFetchTimeout bounds one start-up read of an issuer.
@@ -58,11 +60,16 @@ type Caller struct {
 // Anonymous reports a caller that carries no verified token.
 func (c Caller) Anonymous() bool { return c.Subject == "" }
 
-// VerifierOptions configures a Verifier. Issuers, Audience and Insecure are
+// VerifierOptions configures a Verifier. Issuers, Audiences and Insecure are
 // ARCA_OIDC_ISSUERS, ARCA_OIDC_AUDIENCE and ARCA_OIDC_INSECURE_ISSUERS.
 type VerifierOptions struct {
-	Issuers  []string
-	Audience string
+	Issuers []string
+	// Audiences are the names a token's aud may carry, ARCA_OIDC_AUDIENCE
+	// read as a comma list (spec 027). Empty is [DefaultAudience]. The
+	// first entry is the primary, which Audience reports; every entry is
+	// verified against, so a hosted installation accepts a token addressed
+	// to the origin in front of it as well as one addressed to the core.
+	Audiences []string
 	// Insecure admits an http:// issuer that is not on loopback. It is for
 	// the test tiers of spec 014 and for nothing an operator runs.
 	Insecure bool
@@ -86,7 +93,7 @@ type VerifierOptions struct {
 // token reaches the sandbox is the sandbox runtime's and the platform's,
 // which is rule R4 of the family.
 type Verifier struct {
-	audience  string
+	audiences []string
 	issuers   []string
 	validator *jwt.Validator
 	// warm is the last warm's verdict, stored whole so a reader sees either
@@ -122,11 +129,20 @@ func NewVerifier(ctx context.Context, o VerifierOptions) (*Verifier, error) {
 	if len(o.Issuers) == 0 {
 		return nil, errors.New("ARCA_OIDC_ISSUERS names no issuer, and there is no anonymous access to a space")
 	}
-	audience := o.Audience
-	if audience == "" {
-		audience = DefaultAudience
+	v := &Verifier{}
+	for _, raw := range o.Audiences {
+		aud := strings.TrimSpace(raw)
+		if aud == "" {
+			continue
+		}
+		if slices.Contains(v.audiences, aud) {
+			return nil, fmt.Errorf("ARCA_OIDC_AUDIENCE lists %s twice", aud)
+		}
+		v.audiences = append(v.audiences, aud)
 	}
-	v := &Verifier{audience: audience}
+	if len(v.audiences) == 0 {
+		v.audiences = []string{DefaultAudience}
+	}
 	for _, raw := range o.Issuers {
 		iss := strings.TrimRight(strings.TrimSpace(raw), "/")
 		if err := checkIssuerURL(iss, o.Insecure); err != nil {
@@ -143,7 +159,7 @@ func NewVerifier(ctx context.Context, o VerifierOptions) (*Verifier, error) {
 	}
 	v.validator = jwt.New(jwt.Config{
 		Issuers:    v.issuers,
-		Audiences:  []string{audience},
+		Audiences:  v.audiences,
 		CacheTTL:   o.CacheTTL,
 		HTTPClient: client,
 		// The family's age bound, one rule across the cores: a token is
@@ -276,8 +292,15 @@ func isLoopback(host string) bool {
 // Issuers lists the issuers this verifier accepts, in configured order.
 func (v *Verifier) Issuers() []string { return slices.Clone(v.issuers) }
 
-// Audience is the aud a token must carry to be accepted.
-func (v *Verifier) Audience() string { return v.audience }
+// Audience is the primary audience: the name this core answers to, the
+// first entry of ARCA_OIDC_AUDIENCE. It is what the start-up line prints and
+// what a report of this installation names, and it is one of Audiences.
+func (v *Verifier) Audience() string { return v.audiences[0] }
+
+// Audiences lists every audience a token's aud may carry, in configured
+// order. A token naming any of them is verified against this installation;
+// a token naming none of them is refused as another service's.
+func (v *Verifier) Audiences() []string { return slices.Clone(v.audiences) }
 
 // Authenticator is the listed issuers' validator behind the family's
 // authkit.Authenticator, which is the shape latere.ai/x/pkg/authkit's

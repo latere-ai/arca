@@ -42,6 +42,7 @@ func healthy(t *testing.T) *world {
 			BucketRegion: "us-east-1", BucketPrefix: "arca/",
 			DatabaseURL:   "postgres://arca@127.0.0.1/arca",
 			PublicURL:     public.URL,
+			BasePath:      config.DefaultBasePath,
 			OIDCIssuers:   []string{iss.URL()},
 			AuthorizerURL: authorizer.URL, AuthorizerToken: "a-token",
 		},
@@ -378,6 +379,34 @@ func TestAnAuthorizerThatIsNotConfiguredIsNotAFailure(t *testing.T) {
 	got := w.passes(t, NameAuthorizer)
 	if !strings.Contains(got.Detail, "the owner policy applies") || !strings.Contains(got.Detail, "(2 listed)") {
 		t.Errorf("the line is %q", got.Detail)
+	}
+}
+
+// TestThePublicURLLineReportsTheBasePath is criterion 10 of spec 027: the
+// one line about the address clients reach names the base the surface is
+// served under, so an operator running check beside a replica reads where
+// its routes answer rather than inferring it from a 404 at the origin.
+//
+// The prefix is reported and not dialled, on the reachable address and the
+// unreachable one alike: this requirement passes on an address nothing
+// answers by design, so a dial here could not fail where the prefix is
+// wrong. The origin is proved by the release smoke instead.
+func TestThePublicURLLineReportsTheBasePath(t *testing.T) {
+	w := healthy(t)
+	w.options.Config.BasePath = "/v1/storage"
+	got := w.passes(t, NamePublicURL)
+	if !strings.Contains(got.Detail, "serving under /v1/storage") {
+		t.Errorf("the line is %q and does not name the base path", got.Detail)
+	}
+	if !strings.Contains(got.Detail, w.options.Config.PublicURL) {
+		t.Errorf("the line is %q and does not name the origin", got.Detail)
+	}
+
+	away := healthy(t)
+	away.options.Config.BasePath = "/v1/storage"
+	away.options.Config.PublicURL = unreachable(t)
+	if line := away.passes(t, NamePublicURL); !strings.Contains(line.Detail, "serving under /v1/storage") {
+		t.Errorf("the line of an unreachable origin is %q and does not name the base path", line.Detail)
 	}
 }
 

@@ -37,6 +37,10 @@ images:
 
 patches:
   - path: public-url.yaml
+  # The two the shared origin costs: the base the surface is served under,
+  # and the second audience a credential addressed to that origin carries.
+  - path: base-path.yaml
+  - path: audience.yaml
   - path: authorizer.yaml
   - path: pull-secret.yaml
   - path: replicas.yaml

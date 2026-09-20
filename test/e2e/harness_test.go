@@ -95,7 +95,13 @@ type installation struct {
 
 // start builds the installation of spec 014's make run, in the same order,
 // and answers it once readiness passes.
-func start(t *testing.T) *installation {
+func start(t *testing.T) *installation { return startWith(t) }
+
+// startWith builds the same installation with extra NAME=value settings,
+// each winning over the ones the harness writes. It is how a tier drives an
+// installation configured the way one deployment is and the rest are not,
+// which is what the base path of spec 027 needs.
+func startWith(t *testing.T, extra ...string) *installation {
 	t.Helper()
 	s, reason := readStack()
 	if reason != "" {
@@ -132,6 +138,7 @@ func start(t *testing.T) *installation {
 		"ARCA_AUTHORIZER_TOKEN="+i.authorizer.Token(),
 		"ARCA_ADMIN_SUBJECTS="+i.issuer.URL()+"|dev",
 	)
+	i.env = append(i.env, extra...)
 
 	if out, err := i.command(t, "migrate"); err != nil {
 		t.Fatalf("arcad migrate: %v\n%s", err, out)

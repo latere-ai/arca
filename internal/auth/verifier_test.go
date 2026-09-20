@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -17,9 +18,18 @@ import (
 	"latere.ai/x/arca/internal/auth"
 )
 
-// audience is ARCA_OIDC_AUDIENCE's default, the aud every token arcad
-// accepts must carry.
+// audience is ARCA_OIDC_AUDIENCE's default and the primary name of every
+// installation: the aud a token addressed to this core carries.
 const audience = "arca"
+
+// platformAudience is the second name the hosted installation lists, the
+// platform origin in front of the core: a platform key and a personal
+// access token are addressed there rather than to a core (spec 027).
+const platformAudience = "api.latere.ai"
+
+// configured is ARCA_OIDC_AUDIENCE as the hosted installation sets it, the
+// list every audience test below is built over.
+var configured = []string{audience, platformAudience}
 
 // issuer starts the family's stub issuer, which serves a discovery document,
 // a key set, and a mint control the table below sets one field wrong on. It
@@ -32,7 +42,7 @@ func issuer(t *testing.T) *issuertest.Server {
 // verifier builds the verifier arcad runs, over the given issuers.
 func verifier(t *testing.T, issuers ...string) *auth.Verifier {
 	t.Helper()
-	v, err := auth.NewVerifier(t.Context(), auth.VerifierOptions{Issuers: issuers, Audience: audience})
+	v, err := auth.NewVerifier(t.Context(), auth.VerifierOptions{Issuers: issuers, Audiences: []string{audience}})
 	if err != nil {
 		t.Fatalf("the verifier would not build: %v", err)
 	}
@@ -172,18 +182,18 @@ func TestTheVerifierRefusesToStartOnABadDeployment(t *testing.T) {
 		opts    auth.VerifierOptions
 		mustSay string
 	}{
-		{"no issuer", auth.VerifierOptions{Audience: audience}, "ARCA_OIDC_ISSUERS names no issuer"},
+		{"no issuer", auth.VerifierOptions{Audiences: []string{audience}}, "ARCA_OIDC_ISSUERS names no issuer"},
 		{"an issuer listed twice", auth.VerifierOptions{
-			Issuers: []string{iss.URL(), iss.URL() + "/"}, Audience: audience,
+			Issuers: []string{iss.URL(), iss.URL() + "/"}, Audiences: []string{audience},
 		}, "twice"},
 		{"an issuer that is not a URL", auth.VerifierOptions{
-			Issuers: []string{"::not a url"}, Audience: audience,
+			Issuers: []string{"::not a url"}, Audiences: []string{audience},
 		}, "is not a URL"},
 		{"an issuer on a scheme that is not http", auth.VerifierOptions{
-			Issuers: []string{"ftp://issuer.example"}, Audience: audience,
+			Issuers: []string{"ftp://issuer.example"}, Audiences: []string{audience},
 		}, "a key set is read over https"},
 		{"an http issuer off loopback", auth.VerifierOptions{
-			Issuers: []string{"http://issuer.example"}, Audience: audience,
+			Issuers: []string{"http://issuer.example"}, Audiences: []string{audience},
 		}, "ARCA_OIDC_INSECURE_ISSUERS"},
 	}
 	for _, c := range cases {
@@ -207,7 +217,7 @@ func TestAnHTTPIssuerOffLoopbackNeedsTheVariable(t *testing.T) {
 		t.Fatalf("the stub issuer is at %s, and the loopback rule is what admits it", iss.URL())
 	}
 	if _, err := auth.NewVerifier(t.Context(), auth.VerifierOptions{
-		Issuers: []string{iss.URL()}, Audience: audience,
+		Issuers: []string{iss.URL()}, Audiences: []string{audience},
 	}); err != nil {
 		t.Fatalf("an http issuer on loopback was refused: %v", err)
 	}
@@ -216,7 +226,7 @@ func TestAnHTTPIssuerOffLoopbackNeedsTheVariable(t *testing.T) {
 	// what fails is the readiness check against an issuer that is not there
 	// rather than the scheme.
 	v, err := auth.NewVerifier(t.Context(), auth.VerifierOptions{
-		Issuers: []string{"http://issuer.example"}, Audience: audience, Insecure: true,
+		Issuers: []string{"http://issuer.example"}, Audiences: []string{audience}, Insecure: true,
 		HTTP: &http.Client{Timeout: 2 * time.Second},
 		Log:  slog.New(slog.DiscardHandler), WarmRetry: time.Hour, WarmRetryMax: time.Hour,
 	})
@@ -245,6 +255,68 @@ func TestTheAudienceDefaults(t *testing.T) {
 	}
 	if _, err := v.Verify(iss.Mint(issuertest.Claims{Sub: "9ab3"})); err != nil {
 		t.Errorf("a token for the default audience was refused: %v", err)
+	}
+}
+
+// TestVerifierAcceptsEveryConfiguredAudience is criterion 5 of spec 027:
+// an installation that lists two audiences verifies a token addressed to
+// either of them, and a token addressed to a third name is refused with the
+// shared reason table's audience row. The middleware is the one arcad mounts
+// the surface behind, so what the subtests read is the handler a request
+// would reach and not the verifier's own answer.
+func TestVerifierAcceptsEveryConfiguredAudience(t *testing.T) {
+	iss := issuer(t)
+	v, err := auth.NewVerifier(t.Context(), auth.VerifierOptions{
+		Issuers: []string{iss.URL()}, Audiences: configured,
+	})
+	if err != nil {
+		t.Fatalf("the verifier would not build: %v", err)
+	}
+	if got := v.Audience(); got != audience {
+		t.Errorf("the primary audience is %q, want the first entry %q", got, audience)
+	}
+	if got := v.Audiences(); !slices.Equal(got, configured) {
+		t.Errorf("the verified audiences are %v, want %v", got, configured)
+	}
+
+	reached := false
+	refusal := ""
+	handler := v.Middleware(func(w http.ResponseWriter, _ *http.Request, err error) {
+		refusal = auth.ReasonOf(err)
+		w.WriteHeader(http.StatusUnauthorized)
+	})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached = !auth.CallerFrom(r.Context()).Anonymous()
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	for _, c := range []struct {
+		name   string
+		aud    string
+		status int
+		reason string
+	}{
+		{"own", audience, http.StatusOK, ""},
+		{"platform", platformAudience, http.StatusOK, ""},
+		{"third", "cella", http.StatusUnauthorized, "audience"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			reached, refusal = false, ""
+			r := httptest.NewRequest(http.MethodGet, "/v1/trash", nil)
+			r.Header.Set("Authorization", "Bearer "+iss.Mint(issuertest.Claims{
+				Sub: "9ab3", Aud: issuertest.StringList{c.aud},
+			}))
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, r)
+			if w.Code != c.status {
+				t.Fatalf("a token for %q answered %d, want %d", c.aud, w.Code, c.status)
+			}
+			if reached != (c.status == http.StatusOK) {
+				t.Errorf("the handler was reached: %v, for a token for %q", reached, c.aud)
+			}
+			if refusal != c.reason {
+				t.Errorf("the refusal reason is %q, want %q", refusal, c.reason)
+			}
+		})
 	}
 }
 
@@ -318,7 +390,7 @@ func TestAWarmFailureNamesTheVariable(t *testing.T) {
 	url := iss.URL()
 	iss.Close()
 	v, err := auth.NewVerifier(context.Background(), auth.VerifierOptions{
-		Issuers: []string{url}, Audience: audience, HTTP: &http.Client{Timeout: 2 * time.Second},
+		Issuers: []string{url}, Audiences: []string{audience}, HTTP: &http.Client{Timeout: 2 * time.Second},
 		Log: slog.New(slog.DiscardHandler), WarmRetry: time.Hour, WarmRetryMax: time.Hour,
 	})
 	if err != nil {

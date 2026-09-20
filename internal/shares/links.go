@@ -103,7 +103,7 @@ func (s *Service) CreateLink(w http.ResponseWriter, r *http.Request) {
 	}
 	view := view(written)
 	view.Token = token
-	httpjson.Write(w, http.StatusCreated, Link{Grant: view, URL: "/v1/shares/links/" + token})
+	httpjson.Write(w, http.StatusCreated, Link{Grant: view, URL: s.basePath + "/shares/links/" + token})
 }
 
 // mint writes one token grant, its event, and, for a public grant whose

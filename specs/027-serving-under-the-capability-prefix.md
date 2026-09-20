@@ -1,6 +1,6 @@
 ---
 title: "Serving under the capability prefix: the base path, the second audience, and the one batch that moves both callers"
-status: drafted
+status: testing
 track: core
 depends_on:
   - specs/006-identity.md
@@ -259,3 +259,55 @@ in its order, the capability prefix decision fixes `storage`, the
 no-compatibility-windows decision fixes the batch, and `ci-gate`'s identity
 rule constrains the audience variable, as it stands and with no change asked
 of it.
+
+## State on 2026-09-20
+
+Built in the tree on 2026-09-20, ahead of the release that carries it. The
+status is `testing`: every criterion but the last two is proved by a test
+that runs in this repository, and the two that remain are proved at the
+origin by the release and the two consumer releases of the same window.
+
+### What was built
+
+| Where | What |
+|---|---|
+| `internal/config` | `BasePath` from `ARCA_BASE_PATH`, default `/v1`, validated at load: rooted, no trailing slash, first segment `v1`. `OIDCAudiences` from `ARCA_OIDC_AUDIENCE` read as a comma list, the default the sole entry where it is unset |
+| `internal/api` | `Options.BasePath` and `API.under`, the one swap of the leading `/v1`, read by `mount` for every pattern and by `build` for every path of the served document. The guarded subtree is `base + "/"`; `GET /openapi.json` keeps the root |
+| `internal/auth` | `VerifierOptions.Audiences` and `auth.Options.Audiences`, a distinct list refused a repeat; `Verifier.Audiences()` is the set verified against and `Verifier.Audience()` the primary, the first entry |
+| `internal/shares` | `Options.BasePath`; the URL a mint answers with is `base + "/shares/links/" + token` |
+| `internal/check` | the `public-url` line names the base path beside the origin, and dials neither |
+| `cmd/arcad` | one base path to the surface and to the shares service, and `base=` with `audience=`, the primary, on the start-up line beside the deciding mode |
+| `test/conformance` | `Options.BasePath`, applied at the one chokepoint of `client.go` and where `surface.go` reads the served document. Unset drives a root installation |
+| `deploy/prod` | `ingress.yaml` claims one `/v1/storage` Prefix rule beside the four probe rules, eight flat prefixes gone; `base-path.yaml` sets `ARCA_BASE_PATH`, `audience.yaml` sets `arca,api.latere.ai`, both on `arcad` alone |
+| `tools/smoke/release.sh` | one `check_status` for `/v1/storage/files/me/` expecting 401, and the line about it in the evidence |
+| docs | `ARCA_BASE_PATH` and the audience list in `docs/install.md`, the `check` line in `docs/operations.md`. `README.md` names no path and needed none |
+
+The two redirects are untouched, as the design said: a presigned read answers
+at the bucket endpoint and a public object at `ARCA_PUBLIC_CDN_URL`, neither
+built on `ARCA_PUBLIC_URL`.
+
+### What each criterion is proved by
+
+| # | State | Proof |
+|---|---|---|
+| 1 | written, not run here | `TestE2EEveryDocumentedPathAnswersUnderTheBasePathAndNoneAtTheRoot` drives an installation with `ARCA_BASE_PATH=/v1/storage` and holds every path of the served document to answering under the base and to a bare 404 at the root. The e2e tier needs a database and a bucket and did not run on this machine |
+| 2 | passing | `TestTheDocumentNamesThePathsTheMuxAnswersAt` in `internal/api`, over the bytes `GET /openapi.json` answers, with `servers` held to `ARCA_PUBLIC_URL` unchanged |
+| 3 | passing | `TestProdClaimsOneV1PrefixAndItIsTheBasePathItServes` derives the claim from the overlay's `ARCA_BASE_PATH` and holds every document path to `/v1/`; `TestProdRoutesWhatTheSmokeReads` treats a smoked path under a claimed Prefix rule as routed by it |
+| 4 | passing | `TestTheBasePathIsAppliedAtTheOneChokepoint` proves the default leaves every path where it is, so a suite that sets nothing drives a root installation |
+| 5 | passing | `TestVerifierAcceptsEveryConfiguredAudience/own`, `/platform`, `/third` |
+| 6 | passing | `TestServiceConformance`, one subtest per configured audience, the verifier built with the whole list each time |
+| 7 | not run here | the gate is serial on this machine and the coordinator runs it. The variable carries no address of its own beyond the origin the overlay already names |
+| 8 | passing | `TestTheLinkURLCarriesTheBasePath` in `internal/shares`, which drives the URL the mint answered as well as reading it. The redirects keep their own e2e tests, unchanged |
+| 9 | passing | `TestAPathUnderV1OutsideTheBasePathIsAPlainNotFound` and `TestAPathUnderTheBasePathIsRefusedBeforeItIsNotFound` in `internal/api`, and the same pair through the binary in `TestTheStartLineNamesTheBasePathAndTheSurfaceIsThere` |
+| 10 | half proved here | `TestThePublicURLLineReportsTheBasePath` in `internal/check`; the origin half is the release smoke, which runs after the rollout |
+| 11 | waits for the release | platform and auth move in the same window, in the order the design names |
+
+### What waits
+
+- The release. Until it runs, the origin serves the flat prefixes and the
+  smoke's prefixed check has never been answered by a live installation.
+- platform and auth, in that order, inside the same window.
+- One note for whoever runs the smoke by hand: its surface check names
+  `/v1/storage/files/me/`, the hosted prefix, so an installation at the root
+  of the version reads `/v1/files/me/` instead. `docs/install.md` says so
+  with the one command that does it.

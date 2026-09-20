@@ -97,7 +97,7 @@ func (s *session) do(t testing.TB, r request) response {
 	t.Helper()
 	url, foreign := r.path, true
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
-		url, foreign = s.options.URL+r.path, false
+		url, foreign = s.options.URL+s.under(r.path), false
 	}
 	req, err := http.NewRequestWithContext(s.context(), r.method, url, r.body)
 	failIf(t, err != nil, "build %s %s: %v", r.method, r.path, err)
@@ -123,6 +123,21 @@ func (s *session) do(t testing.TB, r request) response {
 		_ = json.Unmarshal(raw, &out.json)
 	}
 	return out
+}
+
+// under is where the target serves the path a case names. The cases are
+// written at the paths spec 013 declares, and an installation mounted under
+// a prefix answers them there, so the one chokepoint above applies
+// [Options.BasePath] and no case carries a base of its own (spec 027).
+//
+// A path outside the version is left alone: /openapi.json and the probes sit
+// at the origin root whatever the surface is mounted under.
+func (s *session) under(path string) string {
+	base := s.options.BasePath
+	if base == "" || base == DefaultBasePath || !strings.HasPrefix(path, DefaultBasePath) {
+		return path
+	}
+	return base + strings.TrimPrefix(path, DefaultBasePath)
 }
 
 // dialAt points a request at another address and leaves everything a

@@ -50,12 +50,24 @@ import (
 	"time"
 )
 
+// DefaultBasePath is where a target serves the surface unless it says
+// otherwise: the root of the version, which is what a self-hosted
+// installation runs and what every case below is written at.
+const DefaultBasePath = "/v1"
+
 // Options is what a run drives. URL and Token are required; every other
 // field admits a group of cases, and a group whose field is empty skips
 // with the reason in the report rather than silently.
 type Options struct {
 	// URL is the base URL of the installation, without /v1.
 	URL string
+	// BasePath is the base the target serves the surface under, ARCA_BASE_PATH
+	// where the target is an Arca installation. Empty is DefaultBasePath, so a
+	// suite that sets nothing drives a root installation and a published
+	// release's suite keeps running against a later binary unchanged. A target
+	// behind an origin partitioned by capability is named here, and every case
+	// reaches it through the one chokepoint of client.go.
+	BasePath string
 
 	// Token mints a bearer for a subject. The suite asks for three:
 	// "alice" and "bob", two unrelated principals, and whatever subject

@@ -26,9 +26,11 @@
 package api
 
 import (
+	"cmp"
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"latere.ai/x/pkg/ratelimit"
@@ -38,6 +40,11 @@ import (
 	"latere.ai/x/arca/internal/events"
 	"latere.ai/x/arca/internal/store"
 )
+
+// DefaultBasePath is the base the surface is registered under where nothing
+// else is configured (spec 027): the root of the version, which is what a
+// self-hosted installation serves and what the committed document names.
+const DefaultBasePath = "/v1"
 
 // The identity of the OpenAPI document, shared by the one GET /openapi.json
 // answers and the one committed at api/openapi.yaml, so the two differ in
@@ -58,9 +65,15 @@ const (
 // the two of spec 006, built once by auth.Start; PublicURL is the base the
 // OpenAPI document names; the two rates are spec 002's variables.
 type Options struct {
-	Verifier                         *auth.Verifier
-	Authorizer                       *auth.Authorizer
-	PublicURL                        string
+	Verifier   *auth.Verifier
+	Authorizer *auth.Authorizer
+	PublicURL  string
+	// BasePath is ARCA_BASE_PATH: the base every row of the route table is
+	// registered under and the base the served document writes into its
+	// paths (spec 027). Empty is DefaultBasePath, which is the table as it
+	// is declared. The value is validated where it is read, in
+	// internal/config, so the surface takes it as given.
+	BasePath                         string
 	RequestsPerMinute                int
 	UnauthenticatedRequestsPerMinute int
 	// Events is the log GET /v1/events tails and Querier the database it
@@ -98,6 +111,7 @@ type API struct {
 	verifier   *auth.Verifier
 	authorizer *auth.Authorizer
 	publicURL  string
+	basePath   string
 	perSubject *ratelimit.Buckets
 	perAddress *ratelimit.Buckets
 	links      Links
@@ -132,7 +146,8 @@ func New(o Options) (*API, error) {
 	}
 	a := &API{
 		verifier: o.Verifier, authorizer: o.Authorizer,
-		publicURL: o.PublicURL, links: o.Links, clock: o.Now,
+		publicURL: o.PublicURL, basePath: cmp.Or(o.BasePath, DefaultBasePath),
+		links: o.Links, clock: o.Now,
 		perSubject: buckets(o.RequestsPerMinute),
 		perAddress: buckets(o.UnauthenticatedRequestsPerMinute),
 		rows:       rows,
@@ -153,13 +168,21 @@ func (a *API) Authorizer() *auth.Authorizer { return a.authorizer }
 // Mount registers the surface on the public listener's mux beside the probes
 // and GET / of spec 002.
 //
+// Every row is registered under the base path: the table declares /v1 and
+// the mount swaps that leading segment for ARCA_BASE_PATH, so an
+// installation behind an origin partitioned by capability answers at the
+// prefix it was given and a self-hosted one answers at the root of the
+// version (spec 027).
+//
 // The three public routes are registered as their own patterns and the rest
-// of /v1 behind the verifier as one subtree. The router prefers the more
-// specific pattern, so a link route reaches its handler without a bearer
-// while every other path under /v1, registered or not, meets the verifier
-// first. A path nobody registered is therefore a 401 before it is a 404,
-// which is the right order: whether a route exists is not something an
-// unauthenticated caller learns.
+// of the base path behind the verifier as one subtree. The router prefers
+// the more specific pattern, so a link route reaches its handler without a
+// bearer while every other path under the base, registered or not, meets the
+// verifier first. A path nobody registered is therefore a 401 before it is a
+// 404, which is the right order: whether a route exists is not something an
+// unauthenticated caller learns. A path outside the base path matches no
+// pattern of this mux at all and takes the router's own bare 404, which is
+// the inverse of the same rule: there is no surface there to protect.
 func (a *API) Mount(mux *http.ServeMux) {
 	a.mount(mux, a.rows)
 }
@@ -170,7 +193,7 @@ func (a *API) mount(mux *http.ServeMux, rows []route) {
 	guarded := http.NewServeMux()
 	guarded.Handle("/", http.HandlerFunc(a.notFound))
 	for _, r := range rows {
-		pattern := r.method + " " + r.path
+		pattern := r.method + " " + a.under(r.path)
 		answer := r.handler
 		handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) { answer(a, w, req) })
 		if r.public {
@@ -189,12 +212,24 @@ func (a *API) mount(mux *http.ServeMux, rows []route) {
 	// through the wrapper each registration carries, the code through the
 	// one place a refusal is written, and the subject through the limit that
 	// runs the moment the verifier settles one.
-	mux.Handle("/v1/", a.requestID(a.observe(
+	mux.Handle(a.basePath+"/", a.requestID(a.observe(
 		a.verifier.Middleware(a.refuseVerification)(
 			a.limitSubject(guarded)))))
 }
 
-// notFound answers a path under /v1 that no row of the route table
+// under is the one place a declared path becomes a registered one: the
+// table of spec 013 declares /v1/files/..., and an installation serves it
+// under its base path. The mux and the document both read it, so what a
+// client generates against and what the router answers at cannot drift.
+func (a *API) under(path string) string {
+	return a.basePath + strings.TrimPrefix(path, DefaultBasePath)
+}
+
+// BasePath is the base this surface is registered under, for the node's
+// start-up line and for a test that asks where a route answers.
+func (a *API) BasePath() string { return a.basePath }
+
+// notFound answers a path under the base path that no row of the route table
 // registers, in the envelope every other refusal uses.
 func (a *API) notFound(w http.ResponseWriter, r *http.Request) {
 	WriteError(w, r, Refuse(CodeNotFound, "%s %s is not a route of this API", r.Method, r.URL.Path))
@@ -207,12 +242,27 @@ func (a *API) build(rows []route) []byte {
 	return apidocs.Build(apidocs.Options{
 		Title: Title, Version: DocumentVersion, Description: Description,
 		Server: a.publicURL,
-		Routes: routesOf(rows),
+		Routes: a.described(rows),
 		Errors: Errors(),
 	}).JSON()
 }
 
-// routesOf projects rows onto what the document reads.
+// described is what the served document reads: the rows projected once, each
+// path under the base path this build mounts at. The server stays what
+// ARCA_PUBLIC_URL names, the origin root, so the address of a route is that
+// server and the path the document writes, and the paths are the patterns
+// the mux registered because both read [API.under].
+func (a *API) described(rows []route) []apidocs.Route {
+	out := routesOf(rows)
+	for i := range out {
+		out[i].Path = a.under(out[i].Path)
+	}
+	return out
+}
+
+// routesOf projects rows onto what a document reads, at the paths the table
+// declares. The committed document of tools/apidoc is generated from these,
+// which is the self-hoster's shape and the shape a consumer reads.
 func routesOf(rows []route) []apidocs.Route {
 	out := make([]apidocs.Route, len(rows))
 	for i, r := range rows {

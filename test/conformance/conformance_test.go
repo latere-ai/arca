@@ -719,3 +719,57 @@ func watch(t *testing.T, assert func(testing.TB)) (f *fatalT) {
 
 // stopped is what a recorded Fatalf panics with.
 type stopped struct{}
+
+// TestTheBasePathIsAppliedAtTheOneChokepoint is spec 027 in the suite: the
+// cases are written at the paths spec 013 declares, and a target mounted
+// under a prefix answers them there, so the base is applied where every
+// request already goes through and no case carries one.
+//
+// A path outside the version is left where it is, because the probes and the
+// document sit at the origin root whatever the surface is mounted under, and
+// a run that sets nothing drives a root installation unchanged, which is what
+// keeps a published release's suite running against a later binary.
+func TestTheBasePathIsAppliedAtTheOneChokepoint(t *testing.T) {
+	served := []route{
+		{http.MethodGet, "/v1/events", "010"},
+		{http.MethodPost, "/v1/workspaces", "009"},
+	}
+	var asked []string
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked = append(asked, r.URL.Path)
+		if r.URL.Path != "/openapi.json" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		paths := map[string]map[string]any{}
+		for _, row := range served {
+			paths["/v1/storage"+strings.TrimPrefix(row.template(), DefaultBasePath)] = map[string]any{
+				strings.ToLower(row.method): map[string]any{},
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"openapi": "3.1.0", "paths": paths})
+	}))
+	defer target.Close()
+
+	s := newSession(Options{URL: target.URL, Token: noToken, BasePath: "/v1/storage"})
+	s.do(t, request{method: http.MethodGet, path: "/v1/workspaces"})
+	s.do(t, request{method: http.MethodGet, path: "/openapi.json"})
+	if want := []string{"/v1/storage/workspaces", "/openapi.json"}; !slices.Equal(asked, want) {
+		t.Errorf("the suite asked for %v, want %v", asked, want)
+	}
+
+	s.served = s.readSurface(t)
+	for _, row := range served {
+		if !s.served.serves(row.key()) {
+			t.Errorf("the document names %s under the base path and the suite reads it as pending", row.key())
+		}
+	}
+
+	asked = nil
+	root := newSession(Options{URL: target.URL, Token: noToken})
+	root.do(t, request{method: http.MethodGet, path: "/v1/workspaces"})
+	if want := []string{"/v1/workspaces"}; !slices.Equal(asked, want) {
+		t.Errorf("a run that set no base path asked for %v, want %v", asked, want)
+	}
+}

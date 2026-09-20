@@ -36,20 +36,32 @@ const (
 // own, reads one identity, and calls the issuer for nothing but its
 // discovery document and its key set. The authenticator under test is the
 // one arcad runs in production, built the way the node builds it.
+//
+// The suite runs once per configured audience, which is criterion 6 of spec
+// 027: an installation that lists two accepts a token addressed to either
+// and refuses a token addressed to neither, so the second audience is a
+// name this verifier answers to rather than a hole in it. The verifier is
+// built with the whole list every time and the suite is told which name it
+// is asking about, because a run that built one audience at a time would
+// prove nothing about the list arcad runs.
 func TestServiceConformance(t *testing.T) {
-	authkitconformance.Run(t, authkitconformance.Service{
-		Audience: audience,
-		New: func(tb testing.TB, issuerURL, _ string) authkit.Authenticator {
-			tb.Helper()
-			v, err := auth.NewVerifier(t.Context(), auth.VerifierOptions{
-				Issuers: []string{issuerURL}, Audience: audience,
+	for _, aud := range configured {
+		t.Run(aud, func(t *testing.T) {
+			authkitconformance.Run(t, authkitconformance.Service{
+				Audience: aud,
+				New: func(tb testing.TB, issuerURL, _ string) authkit.Authenticator {
+					tb.Helper()
+					v, err := auth.NewVerifier(t.Context(), auth.VerifierOptions{
+						Issuers: []string{issuerURL}, Audiences: configured,
+					})
+					if err != nil {
+						tb.Fatalf("the verifier arcad runs would not build: %v", err)
+					}
+					return v.Authenticator()
+				},
 			})
-			if err != nil {
-				tb.Fatalf("the verifier arcad runs would not build: %v", err)
-			}
-			return v.Authenticator()
-		},
-	})
+		})
+	}
 }
 
 // TestAuthorizerConformance is the other half: the endpoint arcad asks

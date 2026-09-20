@@ -29,8 +29,14 @@ const (
 	DefaultPublicAddr   = ":8080"
 	DefaultInternalAddr = ":8081"
 	DefaultBucketPrefix = "arca/"
-	// DefaultOIDCAudience is the aud every token must carry, spec 006.
+	// DefaultOIDCAudience is the primary aud every token must carry, spec
+	// 006. ARCA_OIDC_AUDIENCE is a list, and this is the whole of it where
+	// the variable is unset.
 	DefaultOIDCAudience = "arca"
+	// DefaultBasePath is the base every route of the surface is registered
+	// under where ARCA_BASE_PATH is unset (spec 027): the root of the
+	// version, which is what a self-hosted installation serves.
+	DefaultBasePath = "/v1"
 	// DefaultRequestsPerMinute is the token bucket per subject after
 	// authentication, and DefaultUnauthenticatedRequestsPerMinute the one
 	// per client address before it (spec 015). Zero disables either.
@@ -94,12 +100,26 @@ type Config struct {
 	// DatabaseURL is the Postgres connection string.
 	DatabaseURL string
 	// PublicURL is the address clients reach the public listener at, and
-	// the base of every URL the server writes (spec 013).
+	// the base of every URL the server writes (spec 013). It is the origin
+	// root and carries no base path: arcad check reads /version under it,
+	// and the probes sit outside the surface.
 	PublicURL string
+	// BasePath is the base every route of the surface is registered under
+	// (spec 027). The default is the root of the version, which is what a
+	// self-hosted installation serves; an installation behind an origin
+	// partitioned by capability carries the whole prefix it was given,
+	// "/v1/storage", because that literal is what the Ingress rule, the
+	// proxy target and the served document all name.
+	BasePath string
 	// OIDCIssuers are the issuers whose tokens are verified (spec 006).
 	OIDCIssuers []string
-	// OIDCAudience is the audience every token must carry.
-	OIDCAudience string
+	// OIDCAudiences are the audiences a token may carry, ARCA_OIDC_AUDIENCE
+	// read as a comma list. A token is accepted when its aud names any of
+	// them; the first is the primary, the name this core answers to and the
+	// one the verifier reports. A hosted installation lists its own name and
+	// the origin in front of it, because a platform key and a personal
+	// access token are addressed to that origin.
+	OIDCAudiences []string
 	// OIDCInsecureIssuers admits an http:// issuer that is not on loopback,
 	// for the test tiers of spec 014.
 	OIDCInsecureIssuers bool
@@ -206,8 +226,9 @@ func Load(getenv Getenv) (Config, error) {
 		DatabaseURL:     value(getenv("ARCA_DB_URL")),
 
 		PublicURL:           value(getenv("ARCA_PUBLIC_URL")),
+		BasePath:            withDefault(value(getenv("ARCA_BASE_PATH")), DefaultBasePath),
 		OIDCIssuers:         list(getenv("ARCA_OIDC_ISSUERS")),
-		OIDCAudience:        withDefault(getenv("ARCA_OIDC_AUDIENCE"), DefaultOIDCAudience),
+		OIDCAudiences:       audiences(getenv("ARCA_OIDC_AUDIENCE")),
 		OIDCInsecureIssuers: boolean(getenv("ARCA_OIDC_INSECURE_ISSUERS"), "ARCA_OIDC_INSECURE_ISSUERS", note),
 		AuthorizerURL:       value(getenv("ARCA_AUTHORIZER_URL")),
 		AuthorizerToken:     value(getenv("ARCA_AUTHORIZER_TOKEN")),
@@ -283,6 +304,9 @@ func Load(getenv Getenv) (Config, error) {
 		note("ARCA_PUBLIC_URL is unset, and every URL the server writes is built on it")
 	} else if err := checkURL(c.PublicURL); err != nil {
 		note("ARCA_PUBLIC_URL %s", err)
+	}
+	if problem := checkBasePath(c.BasePath); problem != "" {
+		problems = append(problems, problem)
 	}
 	if len(c.OIDCIssuers) == 0 {
 		note("ARCA_OIDC_ISSUERS names no issuer, and there is no anonymous access to a space")
@@ -409,6 +433,35 @@ func size(raw string, def int64, name string, note func(string, ...any)) int64 {
 		return def
 	}
 	return v
+}
+
+// audiences reads ARCA_OIDC_AUDIENCE as the comma list spec 027 makes it:
+// the names a token's aud may carry, the first of them primary. An unset
+// variable is the default alone, so an installation that configures nothing
+// answers to the name spec 001 fixes for the core.
+func audiences(raw string) []string {
+	if names := list(raw); len(names) > 0 {
+		return names
+	}
+	return []string{DefaultOIDCAudience}
+}
+
+// checkBasePath is spec 027's rule for ARCA_BASE_PATH: the base begins with
+// a slash, carries no trailing one, and its first segment is v1. The version
+// is part of the contract of spec 013, so a base that dropped it would serve
+// the surface at an address no document of this API describes.
+func checkBasePath(base string) string {
+	switch {
+	case !strings.HasPrefix(base, "/"):
+		return fmt.Sprintf("ARCA_BASE_PATH is %q, and a base path is rooted, so it begins with /", base)
+	case strings.HasSuffix(base, "/"):
+		return fmt.Sprintf("ARCA_BASE_PATH is %q, and a base path carries no trailing slash", base)
+	case strings.Split(base, "/")[1] != "v1":
+		return fmt.Sprintf(
+			"ARCA_BASE_PATH is %q, and the first segment of the base is v1, the version of the API it serves", base)
+	default:
+		return ""
+	}
 }
 
 // normalisePrefix is spec 003's rule: a missing trailing slash is appended,

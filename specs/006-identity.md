@@ -8,7 +8,7 @@ depends_on:
 affects: [authorizer/, internal/auth/, internal/api/, cmd/arcad/, .lateregate.yaml, docs/]
 effort: medium
 created: 2026-09-18
-updated: 2026-09-19
+updated: 2026-09-20
 author: changkun
 ---
 
@@ -93,7 +93,7 @@ table of [[002-repository-scaffold]]:
 |---|---|
 | issuers | `ARCA_OIDC_ISSUERS`, each with discovery and a JWKS cache that serves a stale set while a refresh fails |
 | `iss` | in the list |
-| `aud` | contains `ARCA_OIDC_AUDIENCE`, default `arca` |
+| `aud` | contains one of `ARCA_OIDC_AUDIENCE`, a comma list, default `arca` |
 | `exp`, `nbf` | enforced with the package's skew |
 | `iat` | required, and no older than 24 hours, the family's one token-age rule |
 | algorithms | RS256 and ES256 |
@@ -112,6 +112,19 @@ token its own issuer minted for the audience `arca`; how that token
 reaches the sandbox is the sandbox runtime's and the platform's, not
 Arca's. This is rule R4 of the family: each core accepts its own
 workload credentials back and no other core's.
+
+**Amended 2026-09-20 ([[027-serving-under-the-capability-prefix]]).**
+`ARCA_OIDC_AUDIENCE` is a comma list of distinct names, default `arca`, and
+a token is verified when its `aud` names any of them. The first entry is the
+primary: the name this core answers to, what `Verifier.Audience()` reports,
+what the start-up line prints, and what an installation tells its issuer to
+mint for. The hosted installation sets
+`arca,api.latere.ai`, because a platform key and a personal access token are
+addressed to the origin in front of the cores rather than to a core
+(`open-cores.md`, amended 2026-09-20). The sentence above stands as it is:
+the second entry is an origin and not another core, so each core still
+accepts its own workload credentials back and no other core's, which is rule
+R4 unchanged.
 
 ### The subject
 
@@ -325,7 +338,7 @@ and the owner policy is not consulted.
 | # | Criterion | Proved by |
 |---|---|---|
 | 1 | A request without a token, with a token from an unlisted issuer, with the wrong audience, expired, without `iat`, or older than 24 hours is a 401 with the package's reason | `internal/auth` table test over the reason table |
-| 2 | No handler under `/v1` other than the three public link routes runs before the verifier, and no request path calls the issuer for anything but the key set | `latere.ai/x/pkg/authkit/conformance.Run` in `internal/auth`, the family audience suite, and a route-table test that names the three exceptions and no more |
+| 2 | No handler under `/v1` other than the three public link routes runs before the verifier, and no request path calls the issuer for anything but the key set | `latere.ai/x/pkg/authkit/conformance.Run` in `internal/auth`, the family audience suite once per configured audience, and a route-table test that names the three exceptions and no more |
 | 3 | Every handler asks exactly one action from the table before it acts, and the table equals `authorizer/`'s | a test that walks the route table of [[013-api]] against the vocabulary; `TestVocabularyMatchesSpec006` reads this file |
 | 4 | A deny at lookup is a 404 identical in body and headers to a missing object | `test/conformance` case |
 | 5 | An authorizer that answers anything but a 200 with `allow` yields a 503 and never an allow | the stub authorizer's fault modes in [[014-test-stubs-and-tiers]] |

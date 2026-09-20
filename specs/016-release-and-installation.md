@@ -10,7 +10,7 @@ depends_on:
 affects: [.github/workflows/release.yml, .github/workflows/verify.yml, Dockerfile, Dockerfile.ci, Dockerfile.stubs, deploy/, test/deploy/, tools/smoke/, docs/install.md, docs/operations.md, SECURITY.md, CHANGELOG.md, .lateregate.yaml]
 effort: medium
 created: 2026-09-18
-updated: 2026-09-19
+updated: 2026-09-20
 author: changkun
 ---
 
@@ -535,6 +535,16 @@ followed once, by hand, by the person who wrote it.
   prefixes from `api/openapi.yaml`, which criterion 13 of [[013-api]] holds
   equal to a fresh generation, so a namespace the server grows is a red tree
   rather than a 404 after a rollout.
+
+  **Amended 2026-09-20 ([[027-serving-under-the-capability-prefix]]).** The
+  enumeration is gone with the flat prefixes. The origin claims one rule,
+  `/v1/storage`, and `arcad` serves its whole surface under
+  `ARCA_BASE_PATH`, which the overlay sets to the same value;
+  `TestProdClaimsOneV1PrefixAndItIsTheBasePathItServes` replaces the test
+  named above and derives the claim from that variable. The four probe rules
+  at the origin root are unchanged, and the release smoke grew one prefixed
+  path it holds to a 401, so an image and an Ingress that disagree fail the
+  release rather than the console.
 - **The deploy archive is not built.** The design lists
   `deploy-<tag>.tar.gz` as an artifact and `install-release` as the job
   that reads it. Both arrive together, because an archive nothing walks

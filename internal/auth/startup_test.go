@@ -26,7 +26,7 @@ import (
 func TestStartSelectsTheOwnerPolicyWithNoEndpoint(t *testing.T) {
 	iss := issuer(t)
 	id, err := auth.Start(t.Context(), auth.Options{
-		Issuers: []string{iss.URL()}, Audience: audience, AdminSubjects: []string{bob},
+		Issuers: []string{iss.URL()}, Audiences: []string{audience}, AdminSubjects: []string{bob},
 	})
 	if err != nil {
 		t.Fatalf("the node would not start: %v", err)
@@ -59,7 +59,7 @@ func TestStartSelectsTheEndpointWhenOneIsConfigured(t *testing.T) {
 	s := stub.New(t, stub.WithVocabulary(authorizer.Vocabulary()))
 	s.Allow(stub.Rule{Subject: "*", Action: "*", Resource: "*", Allow: true})
 	id, err := auth.Start(t.Context(), auth.Options{
-		Issuers: []string{iss.URL()}, Audience: audience,
+		Issuers: []string{iss.URL()}, Audiences: []string{audience},
 		AuthorizerURL: s.URL(), AuthorizerToken: s.Token(),
 		// An administrator of the owner policy, which the endpoint replaces:
 		// with an endpoint set the subject decides nothing here.
@@ -89,11 +89,11 @@ func TestStartRefusesABadDeployment(t *testing.T) {
 		mustSay string
 	}{
 		{"an endpoint with no bearer", auth.Options{
-			Issuers: []string{iss.URL()}, Audience: audience, AuthorizerURL: "https://authz.example/decide",
+			Issuers: []string{iss.URL()}, Audiences: []string{audience}, AuthorizerURL: "https://authz.example/decide",
 		}, "ARCA_AUTHORIZER_TOKEN"},
-		{"no issuer", auth.Options{Audience: audience}, "ARCA_OIDC_ISSUERS"},
+		{"no issuer", auth.Options{Audiences: []string{audience}}, "ARCA_OIDC_ISSUERS"},
 		{"an http issuer off loopback", auth.Options{
-			Issuers: []string{"http://issuer.example"}, Audience: audience,
+			Issuers: []string{"http://issuer.example"}, Audiences: []string{audience},
 		}, "ARCA_OIDC_INSECURE_ISSUERS"},
 	}
 	for _, c := range cases {
@@ -113,7 +113,7 @@ func TestStartRefusesABadDeployment(t *testing.T) {
 func TestStartWiresTheGrantsAndLinksIntoTheOwnerPolicy(t *testing.T) {
 	iss := issuer(t)
 	id, err := auth.Start(t.Context(), auth.Options{
-		Issuers: []string{iss.URL()}, Audience: audience,
+		Issuers: []string{iss.URL()}, Audiences: []string{audience},
 		Grants: shares.Grants(pool{}, granted(auth.PermissionRead, "files/reports")),
 		Links:  shares.Links(pool{}, granted(auth.PermissionRead, "files/reports")),
 	})
@@ -133,7 +133,7 @@ func TestStartWiresTheGrantsAndLinksIntoTheOwnerPolicy(t *testing.T) {
 // test tier and the check command all verify the same way.
 func TestTheVerifierStartedByStartIsTheOneTheNodeRuns(t *testing.T) {
 	iss := issuer(t)
-	id, err := auth.Start(t.Context(), auth.Options{Issuers: []string{iss.URL()}, Audience: audience})
+	id, err := auth.Start(t.Context(), auth.Options{Issuers: []string{iss.URL()}, Audiences: []string{audience}})
 	if err != nil {
 		t.Fatalf("the node would not start: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestStartWarmsBestEffort(t *testing.T) {
 		iss := gated(t)
 		iss.open.Store(true)
 		id, err := auth.Start(t.Context(), auth.Options{
-			Issuers: []string{iss.URL()}, Audience: audience, Log: quiet(),
+			Issuers: []string{iss.URL()}, Audiences: []string{audience}, Log: quiet(),
 		})
 		if err != nil {
 			t.Fatalf("the node would not start: %v", err)
@@ -226,7 +226,7 @@ func TestStartWarmsBestEffort(t *testing.T) {
 	t.Run("the issuer answers later", func(t *testing.T) {
 		iss := gated(t)
 		id, err := auth.Start(t.Context(), auth.Options{
-			Issuers: []string{iss.URL()}, Audience: audience, Log: quiet(),
+			Issuers: []string{iss.URL()}, Audiences: []string{audience}, Log: quiet(),
 			WarmRetry: 5 * time.Millisecond, WarmRetryMax: 20 * time.Millisecond,
 		})
 		if err != nil {
@@ -246,7 +246,7 @@ func TestStartWarmsBestEffort(t *testing.T) {
 		// deployment runs on: the first is a second away, so nothing has
 		// retried by the time the check below reads the verdict.
 		id, err := auth.Start(t.Context(), auth.Options{
-			Issuers: []string{iss.URL()}, Audience: audience,
+			Issuers: []string{iss.URL()}, Audiences: []string{audience},
 			Log: slog.New(slog.NewTextHandler(&log, nil)),
 		})
 		if err != nil {
@@ -273,7 +273,7 @@ func TestStartWarmsBestEffort(t *testing.T) {
 	t.Run("the first request pays the discovery the warm did not", func(t *testing.T) {
 		iss := gated(t)
 		id, err := auth.Start(t.Context(), auth.Options{
-			Issuers: []string{iss.URL()}, Audience: audience, Log: quiet(),
+			Issuers: []string{iss.URL()}, Audiences: []string{audience}, Log: quiet(),
 			WarmRetry: time.Hour, WarmRetryMax: time.Hour,
 		})
 		if err != nil {
