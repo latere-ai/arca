@@ -282,7 +282,8 @@ move it during the cutover, in this order: `migrate-drive` copies its metadata
 into an Arca database, and `move-objects` copies its objects to the keys the
 copied rows name. The first reads the old database and writes the new one; the
 second copies inside your bucket. Neither changes anything in the old
-database, and neither deletes an object.
+database, and neither deletes an object during the cutover. Deleting the old
+keys is a later step, run with a flag of its own once the new service holds.
 
 Read this whole section before you start. Both commands have to succeed before
 you switch a route.
@@ -519,9 +520,53 @@ noted
   copied; only the stamp is the policy's job.
 
 The run exits 0 when nothing mismatched and nothing failed, 1 when anything
-did or the command was refused, and 2 on a bad flag. It never deletes: the old
-keys stay where they are until you retire the old service, and the manifest is
-what tells you which they were.
+did or the command was refused, and 2 on a bad flag. Without
+`-delete-sources` it deletes nothing: the old keys stay where they are, and
+the manifest is what tells you which they were.
 
 Both halves have to hold before the routes switch: the copy's report and this
 one. Spec 019 in this repository records why.
+
+### Deleting the old keys
+
+After the move, every object is in your bucket twice: under the old key and
+under the key its object id derives. When you retire the old service, and not
+before, the same command deletes the old ones.
+
+```sh
+go run ./tools/move-objects \
+  -manifest manifest.tsv \
+  -bucket arca-prod \
+  -endpoint https://s3.example \
+  -region us-east-1 \
+  -path-style \
+  -prefix drive/ \
+  -delete-sources
+```
+
+The flag adds a pass of its own after the move. The move runs first and
+verifies every destination exactly as it did before; only then is each source
+key deleted, one key per request, and only where its destination held. A
+source whose destination mismatched, failed, or is not in the bucket is kept
+and named: the bytes under it are your only copy of that object, and the run
+exits 1 so that you look at it.
+
+```
+sources
+  deleted drive/u-1/files/notes.md
+  kept drive/u-1/files/logo.png: drive/20/b did not verify: the destination holds 3 bytes and the manifest says 10
+
+1 source key deleted, 1 kept, 0 the store would not delete
+```
+
+- Add `-dry-run` first. It names every key it would delete and calls nothing.
+- The manifest is the only list. No key outside its first column is touched,
+  which is what makes this safe to run against a bucket Arca is already
+  serving from.
+- `-verify-bytes=false` is refused with this flag. A delete leaves one copy of
+  the bytes, and a length is not a proof to leave it on.
+- Rerunning is safe: a destination that is already right is skipped, and a key
+  that is already gone deletes cleanly.
+
+Run it only after a person has read an object through the new service. Until
+then, a byte the move got wrong is still under its old key.
