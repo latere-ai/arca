@@ -203,5 +203,5 @@ func TestTheReportCountsADeleteTakenOnALengthApart(t *testing.T) {
 		{Source: logoKey, Fate: Deleted, Proof: OnSize},
 	}
 	out := rendered(r)
-	says(t, out, "2 source keys deleted", "1 of the deleted were proved on their length alone")
+	says(t, out, "2 source keys deleted", "1 deleted on the size alone")
 }

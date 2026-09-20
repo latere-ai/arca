@@ -243,7 +243,7 @@ func (r *Report) sourceCount() string {
 	count := fmt.Sprintf("%s deleted, %d kept, %d the store would not delete",
 		sourceKeys(deleted), kept, r.Sources(DeleteFailed))
 	if onSize := r.deletedOnSize(); onSize > 0 {
-		count += fmt.Sprintf("; %d of the deleted were proved on their length alone", onSize)
+		count += fmt.Sprintf("; %d deleted on the size alone", onSize)
 	}
 	return count
 }
