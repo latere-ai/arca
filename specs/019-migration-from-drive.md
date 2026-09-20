@@ -1,6 +1,6 @@
 ---
 title: "Migration from Drive: the order the code moves, the data, the consumers, the sunset, the archive"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/001-architecture.md
@@ -467,6 +467,32 @@ limit variables join the configuration table
 | 7 | Every consumer in the table above is repointed by a commit that names this spec | `git log --grep` in each repository, listed in the Outcome |
 | 8 | The maintainer's smoke holds: a put through the console, a read through the origin with a narrowed key, a refused write with reason `grant` | the maintainer, recorded in the Outcome with the date |
 | 9 | Drive's deployment is gone, its host answers a redirect and a 410, its repository is archived, and its database is dropped, all on the cutover day | the cluster, the host, GitHub, and the Outcome's dates |
+
+## Outcome
+
+Complete on 2026-09-20. The cutover ran on the night of 2026-09-19 (the
+table under Current state) and the sunset on 2026-09-20; the family's
+runbook, `infrastructure/arca-cutover.md` in the specs repository, holds
+the minute-by-minute record and the post-mortem of every lost tag and
+every console fault.
+
+| # | Result |
+|---|---|
+| 4b | Holds in production: 3 keys moved at 22:26:02 on 2026-09-19 and verified on bytes; the source keys deleted at 03:26:51 on 2026-09-20 by `tools/move-objects -delete-sources` after each destination read back to its digest; `drive/u-` and `drive/o-` list nothing |
+| 6 | Holds: `api.latere.ai` is Arca's alone (one Ingress claims the host); `/v1/admin` joined the routed prefixes in v0.1.8 with a test deriving every `/v1/<segment>` from the OpenAPI document, after the console's Admin screen met nginx's 404 |
+| 7 | platform: the console repoint, the Agent zone removal and the Drive sweep are on main (`af07595`), released as v0.13.0 from `console-on-green` and awaiting v0.13.1 from main; auth: v0.38.0 (avatar upload onto Arca, `platform-web` mints for `arca`); latere-ui v1.29.0 and latere-ai v0.2.147 drop Drive from the public site and add `/open-source`. latere-cli, sandbox and agents carry deletions on their `arca-cutover` branches, to ride their next releases |
+| 8 | The maintainer used the console the same night and found the faults the runbook lists (storage origin, actor audience, bucket CORS, Agent zone, Admin route), each fixed live and carried into a manifest; the three-step smoke as written was not recorded as such |
+| 9 | Diverged on the host: rather than a redirect and a 410, `drive.latere.ai` left DNS (the record destroyed through terraform at 12:07 on 2026-09-20; the authoritative server answers NXDOMAIN). Deployment, Service, Ingress and Secrets deleted 01:26:39; `latere-ai/drive` archived after a final README commit; the database and `drive-pool` destroyed 12:07, `arca-pool` taking the budget line |
+
+What the migration taught, in one sentence each, with the fix each carries:
+a value held in two places with no tier across them cost seven tags and
+six console faults (the ingress prefix list now derives from the served
+document, the bucket CORS origin has a test, the kind stub's bearer and
+URL are read from one source); a green gate is not a deployable manifest
+(the server-side dry run precedes a first deploy); a readiness 503 is a
+check, not a crash (the failure dump reads `/readyz`'s body); the pooled
+DSN's mode is `cache_describe`, not `exec` (terraform and the standard
+agree). Follow-ups split from the deck: 020 to 026.
 
 ## Not in this spec
 

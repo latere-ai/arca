@@ -65,7 +65,7 @@ validated spec is dispatched when every spec in its `depends_on` is at
 | [016](016-release-and-installation.md) | Release and installation: images, binaries, deploy manifests, the operator's overlay | complete |
 | [017](017-conformance-suite.md) | Conformance suite: the contract as an importable test package | complete |
 | [018](018-observability.md) | Observability: traces, metrics, logs, the alert rules | complete |
-| [019](019-migration-from-drive.md) | Migration from Drive: the order the code moves, the data, the consumers, the sunset, the archive | in-progress |
+| [019](019-migration-from-drive.md) | Migration from Drive: the order the code moves, the data, the consumers, the sunset, the archive | complete |
 | [020](020-per-part-checksums.md) | Per-part checksums: a digest the client declares, the store verifies, and the completion carries | validated |
 | [021](021-transactional-audit-events.md) | Transactional audit events: the append that commits with the mutation it records | validated |
 | [022](022-api-response-validation.md) | API response validation: the e2e tier checked against the served OpenAPI document | validated |
