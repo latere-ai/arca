@@ -66,13 +66,17 @@ for all four.
 
 ## Status
 
-The stores are in the tree: `arcad` reaches an S3 compatible bucket and
-a Postgres database, migrates its schema, answers its probes from both,
-and passes its quality gate and its store and end-to-end tiers against
-MinIO and Postgres. The release pipeline and the deploy manifests are
-written. The API, identity, files, shares, workspaces, events and the
-rest are specified and arrive in the order the specs number them; the
-migration spec says how the code arrives from the service it replaces.
+Arca is in production. The cutover of 2026-09-19 moved Latere's storage
+API onto it, and v0.1.8 is the release serving that origin now. Every
+spec through 018 is built: the API, identity, files and uploads, shares
+and links, workspaces, events and the reaper, administration,
+observability, the release pipeline and the deploy manifests are in the
+tree, each with its tests against MinIO and Postgres, and the follow-ups
+numbered 020 to 026 are specified and queued. What holds an installation
+to the contract is the conformance suite of spec 017, an importable test
+package you run against your own deployment; spec 019 records how the
+data arrived from the service Arca replaces, and what its sunset still
+removes.
 
 ## Documentation
 
