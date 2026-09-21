@@ -138,17 +138,20 @@ func Table() []api.Route {
 		{
 			Method: http.MethodPost, Path: "/v1/uploads",
 			Action: authorizer.ActionUploadWrite, Status: http.StatusCreated,
-			Summary: "Open an upload session and answer its presigned part URLs.",
+			Summary:     "Start upload",
+			Description: "Open an upload session and answer its presigned part URLs.",
 		},
 		{
 			Method: http.MethodPost, Path: "/v1/uploads/{id}/complete",
 			Action: authorizer.ActionUploadWrite, Status: http.StatusCreated,
-			Summary: "Assemble the parts into the object at the session's path.",
+			Summary:     "Complete upload",
+			Description: "Assemble the parts into the object at the session's path.",
 		},
 		{
 			Method: http.MethodDelete, Path: "/v1/uploads/{id}",
 			Action: authorizer.ActionUploadWrite, Status: http.StatusNoContent,
-			Summary: "Abort the session and discard its parts.",
+			Summary:     "Abort upload",
+			Description: "Abort the session and discard its parts.",
 		},
 	}
 }

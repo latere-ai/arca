@@ -28,9 +28,9 @@ import (
 
 // row is one route of this package: the declaration and the handler.
 type row struct {
-	method, path, action, summary string
-	status                        int
-	answer                        func(*Service, http.ResponseWriter, *http.Request)
+	method, path, action, summary, description string
+	status                                     int
+	answer                                     func(*Service, http.ResponseWriter, *http.Request)
 }
 
 // rows is the twelve routes of spec 013's workspace table.
@@ -38,74 +38,86 @@ var rows = []row{
 	{
 		method: http.MethodPost, path: "/v1/workspaces",
 		action: authorizer.ActionWorkspaceCreate, status: http.StatusCreated,
-		summary: "Create a workspace in a space.",
-		answer:  (*Service).create,
+		summary:     "Create workspace",
+		description: "Create a workspace in a space.",
+		answer:      (*Service).create,
 	},
 	{
 		method: http.MethodGet, path: "/v1/workspaces",
 		action: authorizer.ActionWorkspaceList, status: http.StatusOK,
-		summary: "List the workspaces of a space.",
-		answer:  (*Service).list,
+		summary:     "List workspaces",
+		description: "List the workspaces of a space.",
+		answer:      (*Service).list,
 	},
 	{
 		method: http.MethodGet, path: "/v1/workspaces/deleted",
 		action: authorizer.ActionWorkspaceList, status: http.StatusOK,
-		summary: "List the soft deleted workspaces of a space that are still restorable.",
-		answer:  (*Service).listDeleted,
+		summary:     "List deleted workspaces",
+		description: "List the soft deleted workspaces of a space that are still restorable.",
+		answer:      (*Service).listDeleted,
 	},
 	{
 		method: http.MethodGet, path: "/v1/workspaces/{id}",
 		action: authorizer.ActionWorkspaceRead, status: http.StatusOK,
-		summary: "Read one workspace with its lease and the counters of its subtree.",
-		answer:  (*Service).read,
+		summary:     "Get workspace",
+		description: "Read one workspace with its lease and the counters of its subtree.",
+		answer:      (*Service).read,
 	},
 	{
 		method: http.MethodPatch, path: "/v1/workspaces/{id}",
 		action: authorizer.ActionWorkspaceWrite, status: http.StatusOK,
-		summary: "Rename a workspace, which moves its rows and no bucket key.",
-		answer:  (*Service).rename,
+		summary:     "Rename workspace",
+		description: "Rename a workspace, which moves its rows and no bucket key.",
+		answer:      (*Service).rename,
 	},
 	{
 		method: http.MethodDelete, path: "/v1/workspaces/{id}",
 		action: authorizer.ActionWorkspaceDelete, status: http.StatusNoContent,
-		summary: "Soft delete a workspace, leaving it restorable.",
-		answer:  (*Service).remove,
+		summary:     "Delete workspace",
+		description: "Soft delete a workspace, leaving it restorable.",
+		answer:      (*Service).remove,
 	},
 	{
 		method: http.MethodPost, path: "/v1/workspaces/{id}/restore",
 		action: authorizer.ActionWorkspaceRestore, status: http.StatusOK,
-		summary: "Undo a soft delete.",
-		answer:  (*Service).restore,
+		summary:     "Restore workspace",
+		description: "Undo a soft delete.",
+		answer:      (*Service).restore,
 	},
 	{
 		method: http.MethodPost, path: "/v1/workspaces/{id}/attach",
 		action: authorizer.ActionWorkspaceRead, status: http.StatusCreated,
-		summary: "Open an attachment, taking the writer lease for a rw mount.",
-		answer:  (*Service).attach,
+		summary:     "Attach workspace",
+		description: "Open an attachment, taking the writer lease for a rw mount.",
+		answer:      (*Service).attach,
 	},
 	{
 		method: http.MethodPost, path: "/v1/workspaces/{id}/attach/{aid}/renew",
 		action: authorizer.ActionWorkspaceRead, status: http.StatusOK,
-		summary: "Push the attachment's deadline forward.",
-		answer:  (*Service).renew,
+		summary:     "Renew attachment",
+		description: "Push the attachment's deadline forward.",
+		answer:      (*Service).renew,
 	},
 	{
 		method: http.MethodDelete, path: "/v1/workspaces/{id}/attach/{aid}",
 		action: authorizer.ActionWorkspaceRead, status: http.StatusNoContent,
-		summary: "Release an attachment and the lease it held.",
-		answer:  (*Service).release,
+		summary:     "Release attachment",
+		description: "Release an attachment and the lease it held.",
+		answer:      (*Service).release,
 	},
 	{
 		method: http.MethodGet, path: "/v1/workspaces/{id}/materialize",
 		action: authorizer.ActionWorkspaceRead, status: http.StatusOK,
-		summary: "The attachment's pinned manifest with a presigned read per file.",
-		answer:  (*Service).materialize,
+		summary:     "Get workspace manifest",
+		description: "The attachment's pinned manifest with a presigned read per file.",
+		answer:      (*Service).materialize,
 	},
 	{
 		method: http.MethodPost, path: "/v1/workspaces/{id}/sync",
 		action: authorizer.ActionWorkspaceSync, status: http.StatusOK,
-		summary: "Declare the post-state manifest of the subtree; the server reconciles.",
-		answer:  (*Service).sync,
+		summary:     "Sync workspace",
+		description: "Declare the post-state manifest of the subtree; the server reconciles.",
+		answer:      (*Service).sync,
 	},
 }
 
@@ -116,7 +128,7 @@ func Routes(s *Service) []api.Route {
 		answer := r.answer
 		out = append(out, api.Route{
 			Method: r.method, Path: r.path, Action: r.action,
-			Summary: r.summary, Status: r.status,
+			Summary: r.summary, Description: r.description, Status: r.status,
 			Handler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 				// Every route here answers JSON, so a caller that accepts
 				// none of it is told before the handler reads a row.
@@ -139,7 +151,7 @@ func Table() []api.Route {
 	for _, r := range rows {
 		out = append(out, api.Route{
 			Method: r.method, Path: r.path, Action: r.action,
-			Summary: r.summary, Status: r.status,
+			Summary: r.summary, Description: r.description, Status: r.status,
 		})
 	}
 	return out

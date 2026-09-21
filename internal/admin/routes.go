@@ -24,9 +24,9 @@ import (
 
 // row is one route of this package: the declaration and the handler.
 type row struct {
-	method, path, action, summary string
-	status                        int
-	answer                        func(*Service, http.ResponseWriter, *http.Request)
+	method, path, action, summary, description string
+	status                                     int
+	answer                                     func(*Service, http.ResponseWriter, *http.Request)
 }
 
 // rows is the two routes of spec 013's administration table.
@@ -34,14 +34,16 @@ var rows = []row{
 	{
 		method: http.MethodGet, path: "/v1/admin/overview",
 		action: authorizer.ActionSpaceAdmin, status: http.StatusOK,
-		summary: "One row per space with its usage and its counts.",
-		answer:  (*Service).overview,
+		summary:     "List space usage",
+		description: "One row per space with its usage and its counts.",
+		answer:      (*Service).overview,
 	},
 	{
 		method: http.MethodPost, path: "/v1/admin/spaces/{owner}/restore",
 		action: authorizer.ActionSpaceAdmin, status: http.StatusOK,
-		summary: "Restore one deleted object or workspace of a space.",
-		answer:  (*Service).restore,
+		summary:     "Restore deleted item",
+		description: "Restore one deleted object or workspace of a space.",
+		answer:      (*Service).restore,
 	},
 }
 
@@ -52,7 +54,7 @@ func Routes(s *Service) []api.Route {
 		answer := r.answer
 		out = append(out, api.Route{
 			Method: r.method, Path: r.path, Action: r.action,
-			Summary: r.summary, Status: r.status,
+			Summary: r.summary, Description: r.description, Status: r.status,
 			Handler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 				// Both routes answer JSON, so a caller that accepts none of
 				// it is told before the handler asks anything.
@@ -75,7 +77,7 @@ func Table() []api.Route {
 	for _, r := range rows {
 		out = append(out, api.Route{
 			Method: r.method, Path: r.path, Action: r.action,
-			Summary: r.summary, Status: r.status,
+			Summary: r.summary, Description: r.description, Status: r.status,
 		})
 	}
 	return out

@@ -7,8 +7,8 @@ paths:
   /v1/admin/overview:
     get:
       operationId: getV1AdminOverview
-      summary: One row per space with its usage and its counts.
-      description: Asks the authorizer for space.admin before it acts.
+      summary: List space usage
+      description: One row per space with its usage and its counts. Asks the authorizer for space.admin before it acts.
       security:
       - bearer: []
       responses:
@@ -36,8 +36,8 @@ paths:
   /v1/admin/spaces/{owner}/restore:
     post:
       operationId: postV1AdminSpacesByOwnerRestore
-      summary: Restore one deleted object or workspace of a space.
-      description: Asks the authorizer for space.admin before it acts.
+      summary: Restore deleted item
+      description: Restore one deleted object or workspace of a space. Asks the authorizer for space.admin before it acts.
       parameters:
       - name: owner
         in: path
@@ -71,8 +71,8 @@ paths:
   /v1/events:
     get:
       operationId: getV1Events
-      summary: One page of a space's log, oldest first.
-      description: Asks the authorizer for event.read before it acts.
+      summary: List events
+      description: One page of a space's log, oldest first. Asks the authorizer for event.read before it acts.
       security:
       - bearer: []
       responses:
@@ -100,8 +100,8 @@ paths:
   /v1/files/materialize:
     get:
       operationId: getV1FilesMaterialize
-      summary: One space as a manifest of presigned URLs.
-      description: Asks the authorizer for file.list before it acts.
+      summary: Get space manifest
+      description: One space as a manifest of presigned URLs. Asks the authorizer for file.list before it acts.
       security:
       - bearer: []
       responses:
@@ -129,8 +129,8 @@ paths:
   /v1/files/{owner}/{path}:
     delete:
       operationId: deleteV1FilesByOwnerByPath
-      summary: Trash the object; ?permanent=1 removes it and ?version=N prunes one version.
-      description: Asks the authorizer for file.delete before it acts.
+      summary: Delete file
+      description: Trash the object; ?permanent=1 removes it and ?version=N prunes one version. Asks the authorizer for file.delete before it acts.
       parameters:
       - name: owner
         in: path
@@ -169,8 +169,8 @@ paths:
                 $ref: "#/components/schemas/Error"
     get:
       operationId: getV1FilesByOwnerByPath
-      summary: Read one object, its subtree with ?list=1, which carries the space's usage at a plane root, or its versions with ?versions=1.
-      description: Asks the authorizer for file.read before it acts.
+      summary: Read or list files
+      description: Read one object, its subtree with ?list=1, which carries the space's usage at a plane root, or its versions with ?versions=1. Asks the authorizer for file.read before it acts.
       parameters:
       - name: owner
         in: path
@@ -209,8 +209,8 @@ paths:
                 $ref: "#/components/schemas/Error"
     head:
       operationId: headV1FilesByOwnerByPath
-      summary: The object's headers with no body.
-      description: Asks the authorizer for file.read before it acts.
+      summary: Get file headers
+      description: The object's headers with no body. Asks the authorizer for file.read before it acts.
       parameters:
       - name: owner
         in: path
@@ -249,8 +249,8 @@ paths:
                 $ref: "#/components/schemas/Error"
     post:
       operationId: postV1FilesByOwnerByPath
-      summary: Move the object with move_to, or bring a version forward with restore_version.
-      description: Asks the authorizer for file.write before it acts.
+      summary: Move or restore file
+      description: Move the object with move_to, or bring a version forward with restore_version. Asks the authorizer for file.write before it acts.
       parameters:
       - name: owner
         in: path
@@ -289,8 +289,8 @@ paths:
                 $ref: "#/components/schemas/Error"
     put:
       operationId: putV1FilesByOwnerByPath
-      summary: Write one object; the body is the bytes.
-      description: Asks the authorizer for file.write before it acts.
+      summary: Write file
+      description: Write one object; the body is the bytes. Asks the authorizer for file.write before it acts.
       parameters:
       - name: owner
         in: path
@@ -330,8 +330,8 @@ paths:
   /v1/shares:
     get:
       operationId: getV1Shares
-      summary: The grants on a space.
-      description: Asks the authorizer for share.list before it acts.
+      summary: List grants
+      description: The grants on a space. Asks the authorizer for share.list before it acts.
       security:
       - bearer: []
       responses:
@@ -358,8 +358,8 @@ paths:
                 $ref: "#/components/schemas/Error"
     post:
       operationId: postV1Shares
-      summary: Grant a subject a permission on a subtree of a space.
-      description: Asks the authorizer for share.create before it acts.
+      summary: Create grant
+      description: Grant a subject a permission on a subtree of a space. Asks the authorizer for share.create before it acts.
       security:
       - bearer: []
       responses:
@@ -387,8 +387,8 @@ paths:
   /v1/shares/links:
     get:
       operationId: getV1SharesLinks
-      summary: The token grants on a space.
-      description: Asks the authorizer for link.read before it acts.
+      summary: List links
+      description: The token grants on a space. Asks the authorizer for link.read before it acts.
       security:
       - bearer: []
       responses:
@@ -415,8 +415,8 @@ paths:
                 $ref: "#/components/schemas/Error"
     post:
       operationId: postV1SharesLinks
-      summary: Mint a token grant on a subtree; the token is answered once.
-      description: Asks the authorizer for link.create before it acts.
+      summary: Create link
+      description: Mint a token grant on a subtree; the token is answered once. Asks the authorizer for link.create before it acts.
       security:
       - bearer: []
       responses:
@@ -444,8 +444,8 @@ paths:
   /v1/shares/links/{id}:
     delete:
       operationId: deleteV1SharesLinksById
-      summary: Revoke a token grant.
-      description: Asks the authorizer for link.revoke before it acts.
+      summary: Revoke link
+      description: Revoke a token grant. Asks the authorizer for link.revoke before it acts.
       parameters:
       - name: id
         in: path
@@ -479,8 +479,8 @@ paths:
   /v1/shares/links/{token}:
     get:
       operationId: getV1SharesLinksByToken
-      summary: A listing of the subtree a link token names.
-      description: "Carries no bearer token: the token in the URL is the whole of the authorization."
+      summary: List linked files
+      description: "A listing of the subtree a link token names. Carries no bearer token: the token in the URL is the whole of the authorization."
       parameters:
       - name: token
         in: path
@@ -501,8 +501,8 @@ paths:
   /v1/shares/links/{token}/files/{path}:
     get:
       operationId: getV1SharesLinksByTokenFilesByPath
-      summary: One object under the subtree a link token names.
-      description: "Carries no bearer token: the token in the URL is the whole of the authorization."
+      summary: Read linked file
+      description: "One object under the subtree a link token names. Carries no bearer token: the token in the URL is the whole of the authorization."
       parameters:
       - name: token
         in: path
@@ -529,8 +529,8 @@ paths:
   /v1/shares/links/{token}/meta:
     get:
       operationId: getV1SharesLinksByTokenMeta
-      summary: What a link token names, before anything is fetched.
-      description: "Carries no bearer token: the token in the URL is the whole of the authorization."
+      summary: Get link metadata
+      description: "What a link token names, before anything is fetched. Carries no bearer token: the token in the URL is the whole of the authorization."
       parameters:
       - name: token
         in: path
@@ -551,8 +551,8 @@ paths:
   /v1/shares/with-me:
     get:
       operationId: getV1SharesWithMe
-      summary: The grants whose grantee is the caller.
-      description: Asks the authorizer for share.list before it acts.
+      summary: List received grants
+      description: The grants whose grantee is the caller. Asks the authorizer for share.list before it acts.
       security:
       - bearer: []
       responses:
@@ -580,8 +580,8 @@ paths:
   /v1/shares/{id}:
     delete:
       operationId: deleteV1SharesById
-      summary: Revoke a grant.
-      description: Asks the authorizer for share.revoke before it acts.
+      summary: Revoke grant
+      description: Revoke a grant. Asks the authorizer for share.revoke before it acts.
       parameters:
       - name: id
         in: path
@@ -614,8 +614,8 @@ paths:
                 $ref: "#/components/schemas/Error"
     get:
       operationId: getV1SharesById
-      summary: One grant.
-      description: Asks the authorizer for share.read before it acts.
+      summary: Get grant
+      description: One grant. Asks the authorizer for share.read before it acts.
       parameters:
       - name: id
         in: path
@@ -649,8 +649,8 @@ paths:
   /v1/stars:
     delete:
       operationId: deleteV1Stars
-      summary: Unstar an object; idempotent.
-      description: Asks the authorizer for file.write before it acts.
+      summary: Unstar file
+      description: Unstar an object; idempotent. Asks the authorizer for file.write before it acts.
       security:
       - bearer: []
       responses:
@@ -677,8 +677,8 @@ paths:
                 $ref: "#/components/schemas/Error"
     get:
       operationId: getV1Stars
-      summary: The caller's stars across every space.
-      description: Asks the authorizer for file.list before it acts.
+      summary: List starred files
+      description: The caller's stars across every space. Asks the authorizer for file.list before it acts.
       security:
       - bearer: []
       responses:
@@ -705,8 +705,8 @@ paths:
                 $ref: "#/components/schemas/Error"
     put:
       operationId: putV1Stars
-      summary: Star an object; idempotent.
-      description: Asks the authorizer for file.write before it acts.
+      summary: Star file
+      description: Star an object; idempotent. Asks the authorizer for file.write before it acts.
       security:
       - bearer: []
       responses:
@@ -734,8 +734,8 @@ paths:
   /v1/trash:
     delete:
       operationId: deleteV1Trash
-      summary: Empty the trash, or one path with ?path=.
-      description: Asks the authorizer for file.delete before it acts.
+      summary: Empty trash
+      description: Empty the trash, or one path with ?path=. Asks the authorizer for file.delete before it acts.
       security:
       - bearer: []
       responses:
@@ -762,8 +762,8 @@ paths:
                 $ref: "#/components/schemas/Error"
     get:
       operationId: getV1Trash
-      summary: What is trashed and still restorable, newest first.
-      description: Asks the authorizer for file.list before it acts.
+      summary: List trash
+      description: What is trashed and still restorable, newest first. Asks the authorizer for file.list before it acts.
       security:
       - bearer: []
       responses:
@@ -791,8 +791,8 @@ paths:
   /v1/trash/restore:
     post:
       operationId: postV1TrashRestore
-      summary: Return one object to its path.
-      description: Asks the authorizer for file.restore before it acts.
+      summary: Restore file
+      description: Return one object to its path. Asks the authorizer for file.restore before it acts.
       security:
       - bearer: []
       responses:
@@ -820,8 +820,8 @@ paths:
   /v1/uploads:
     post:
       operationId: postV1Uploads
-      summary: Open an upload session and answer its presigned part URLs.
-      description: Asks the authorizer for upload.write before it acts.
+      summary: Start upload
+      description: Open an upload session and answer its presigned part URLs. Asks the authorizer for upload.write before it acts.
       security:
       - bearer: []
       responses:
@@ -849,8 +849,8 @@ paths:
   /v1/uploads/{id}:
     delete:
       operationId: deleteV1UploadsById
-      summary: Abort the session and discard its parts.
-      description: Asks the authorizer for upload.write before it acts.
+      summary: Abort upload
+      description: Abort the session and discard its parts. Asks the authorizer for upload.write before it acts.
       parameters:
       - name: id
         in: path
@@ -884,8 +884,8 @@ paths:
   /v1/uploads/{id}/complete:
     post:
       operationId: postV1UploadsByIdComplete
-      summary: Assemble the parts into the object at the session's path.
-      description: Asks the authorizer for upload.write before it acts.
+      summary: Complete upload
+      description: Assemble the parts into the object at the session's path. Asks the authorizer for upload.write before it acts.
       parameters:
       - name: id
         in: path
@@ -919,8 +919,8 @@ paths:
   /v1/workspaces:
     get:
       operationId: getV1Workspaces
-      summary: List the workspaces of a space.
-      description: Asks the authorizer for workspace.list before it acts.
+      summary: List workspaces
+      description: List the workspaces of a space. Asks the authorizer for workspace.list before it acts.
       security:
       - bearer: []
       responses:
@@ -947,8 +947,8 @@ paths:
                 $ref: "#/components/schemas/Error"
     post:
       operationId: postV1Workspaces
-      summary: Create a workspace in a space.
-      description: Asks the authorizer for workspace.create before it acts.
+      summary: Create workspace
+      description: Create a workspace in a space. Asks the authorizer for workspace.create before it acts.
       security:
       - bearer: []
       responses:
@@ -976,8 +976,8 @@ paths:
   /v1/workspaces/deleted:
     get:
       operationId: getV1WorkspacesDeleted
-      summary: List the soft deleted workspaces of a space that are still restorable.
-      description: Asks the authorizer for workspace.list before it acts.
+      summary: List deleted workspaces
+      description: List the soft deleted workspaces of a space that are still restorable. Asks the authorizer for workspace.list before it acts.
       security:
       - bearer: []
       responses:
@@ -1005,8 +1005,8 @@ paths:
   /v1/workspaces/{id}:
     delete:
       operationId: deleteV1WorkspacesById
-      summary: Soft delete a workspace, leaving it restorable.
-      description: Asks the authorizer for workspace.delete before it acts.
+      summary: Delete workspace
+      description: Soft delete a workspace, leaving it restorable. Asks the authorizer for workspace.delete before it acts.
       parameters:
       - name: id
         in: path
@@ -1039,8 +1039,8 @@ paths:
                 $ref: "#/components/schemas/Error"
     get:
       operationId: getV1WorkspacesById
-      summary: Read one workspace with its lease and the counters of its subtree.
-      description: Asks the authorizer for workspace.read before it acts.
+      summary: Get workspace
+      description: Read one workspace with its lease and the counters of its subtree. Asks the authorizer for workspace.read before it acts.
       parameters:
       - name: id
         in: path
@@ -1073,8 +1073,8 @@ paths:
                 $ref: "#/components/schemas/Error"
     patch:
       operationId: patchV1WorkspacesById
-      summary: Rename a workspace, which moves its rows and no bucket key.
-      description: Asks the authorizer for workspace.write before it acts.
+      summary: Rename workspace
+      description: Rename a workspace, which moves its rows and no bucket key. Asks the authorizer for workspace.write before it acts.
       parameters:
       - name: id
         in: path
@@ -1108,8 +1108,8 @@ paths:
   /v1/workspaces/{id}/attach:
     post:
       operationId: postV1WorkspacesByIdAttach
-      summary: Open an attachment, taking the writer lease for a rw mount.
-      description: Asks the authorizer for workspace.read before it acts.
+      summary: Attach workspace
+      description: Open an attachment, taking the writer lease for a rw mount. Asks the authorizer for workspace.read before it acts.
       parameters:
       - name: id
         in: path
@@ -1143,8 +1143,8 @@ paths:
   /v1/workspaces/{id}/attach/{aid}:
     delete:
       operationId: deleteV1WorkspacesByIdAttachByAid
-      summary: Release an attachment and the lease it held.
-      description: Asks the authorizer for workspace.read before it acts.
+      summary: Release attachment
+      description: Release an attachment and the lease it held. Asks the authorizer for workspace.read before it acts.
       parameters:
       - name: id
         in: path
@@ -1183,8 +1183,8 @@ paths:
   /v1/workspaces/{id}/attach/{aid}/renew:
     post:
       operationId: postV1WorkspacesByIdAttachByAidRenew
-      summary: Push the attachment's deadline forward.
-      description: Asks the authorizer for workspace.read before it acts.
+      summary: Renew attachment
+      description: Push the attachment's deadline forward. Asks the authorizer for workspace.read before it acts.
       parameters:
       - name: id
         in: path
@@ -1223,8 +1223,8 @@ paths:
   /v1/workspaces/{id}/materialize:
     get:
       operationId: getV1WorkspacesByIdMaterialize
-      summary: The attachment's pinned manifest with a presigned read per file.
-      description: Asks the authorizer for workspace.read before it acts.
+      summary: Get workspace manifest
+      description: The attachment's pinned manifest with a presigned read per file. Asks the authorizer for workspace.read before it acts.
       parameters:
       - name: id
         in: path
@@ -1258,8 +1258,8 @@ paths:
   /v1/workspaces/{id}/restore:
     post:
       operationId: postV1WorkspacesByIdRestore
-      summary: Undo a soft delete.
-      description: Asks the authorizer for workspace.restore before it acts.
+      summary: Restore workspace
+      description: Undo a soft delete. Asks the authorizer for workspace.restore before it acts.
       parameters:
       - name: id
         in: path
@@ -1293,8 +1293,8 @@ paths:
   /v1/workspaces/{id}/sync:
     post:
       operationId: postV1WorkspacesByIdSync
-      summary: Declare the post-state manifest of the subtree; the server reconciles.
-      description: Asks the authorizer for workspace.sync before it acts.
+      summary: Sync workspace
+      description: Declare the post-state manifest of the subtree; the server reconciles. Asks the authorizer for workspace.sync before it acts.
       parameters:
       - name: id
         in: path

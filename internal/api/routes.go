@@ -31,8 +31,9 @@ type route struct {
 	// public registers the route outside the verifier. It is the exception
 	// to invariant 5 of spec 001, and the route table test names every row
 	// that carries it.
-	public  bool
-	summary string
+	public      bool
+	summary     string
+	description string
 	// status is the status a success answers.
 	status int
 	// pending marks a row whose behaviour has not landed.
@@ -83,26 +84,30 @@ var routeTable = []route{
 	{
 		method: http.MethodGet, path: "/v1/events",
 		action: authorizer.ActionEventRead, status: http.StatusOK,
-		summary: "One page of a space's log, oldest first.",
-		handler: (*API).events,
+		summary:     "List events",
+		description: "One page of a space's log, oldest first.",
+		handler:     (*API).events,
 	},
 	{
 		method: http.MethodGet, path: "/v1/shares/links/{token}/meta",
 		public: true, status: http.StatusOK,
-		summary: "What a link token names, before anything is fetched.",
-		handler: func(a *API, w http.ResponseWriter, r *http.Request) { a.link(w, r, Links.LinkMeta) },
+		summary:     "Get link metadata",
+		description: "What a link token names, before anything is fetched.",
+		handler:     func(a *API, w http.ResponseWriter, r *http.Request) { a.link(w, r, Links.LinkMeta) },
 	},
 	{
 		method: http.MethodGet, path: "/v1/shares/links/{token}",
 		public: true, status: http.StatusOK,
-		summary: "A listing of the subtree a link token names.",
-		handler: func(a *API, w http.ResponseWriter, r *http.Request) { a.link(w, r, Links.LinkList) },
+		summary:     "List linked files",
+		description: "A listing of the subtree a link token names.",
+		handler:     func(a *API, w http.ResponseWriter, r *http.Request) { a.link(w, r, Links.LinkList) },
 	},
 	{
 		method: http.MethodGet, path: "/v1/shares/links/{token}/files/{path...}",
 		public: true, status: http.StatusOK,
-		summary: "One object under the subtree a link token names.",
-		handler: func(a *API, w http.ResponseWriter, r *http.Request) { a.link(w, r, Links.LinkFile) },
+		summary:     "Read linked file",
+		description: "One object under the subtree a link token names.",
+		handler:     func(a *API, w http.ResponseWriter, r *http.Request) { a.link(w, r, Links.LinkFile) },
 	},
 }
 

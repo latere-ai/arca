@@ -296,3 +296,31 @@ func TestTheQuestionCarriesTheRequestId(t *testing.T) {
 		t.Error("the question carries no peer address")
 	}
 }
+
+// TestOpenAPIServesNavigationLabelsAndDetails exercises route metadata through
+// registration, document construction, and the public HTTP document endpoint.
+func TestOpenAPIServesNavigationLabelsAndDetails(t *testing.T) {
+	const detail = "Read one object or list its subtree with ?list=1."
+	h := newHarness(t, func(o *Options) {
+		o.Routes[0].Summary = "Read or list files"
+		o.Routes[0].Description = detail
+	})
+	w := h.do(t, http.MethodGet, "/openapi.json", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("the document answered %d: %s", w.Code, w.Body)
+	}
+	var doc apidocs.Document
+	if err := json.Unmarshal(w.Body.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct{ path, summary, description string }{
+		{"/v1/files/{owner}/{path}", "Read or list files", detail + " Asks the authorizer for file.read before it acts."},
+		{"/v1/shares/links/{token}", "List linked files", "A listing of the subtree a link token names. Carries no bearer token: the token in the URL is the whole of the authorization."},
+	}
+	for _, tc := range cases {
+		op := doc.Paths[tc.path]["get"]
+		if op.Summary != tc.summary || op.Description != tc.description {
+			t.Errorf("GET %s metadata = %q / %q, want %q / %q", tc.path, op.Summary, op.Description, tc.summary, tc.description)
+		}
+	}
+}

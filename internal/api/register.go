@@ -48,8 +48,10 @@ type Route struct {
 	// asks the one the request selected. Spec 013 names two such rows, the
 	// attach and the two that follow the action the attach asked.
 	Action string
-	// Summary is the one line a reader of the document sees.
+	// Summary is a verb-first navigation label of at most four words.
 	Summary string
+	// Description preserves behavior, qualifications, and alternatives.
+	Description string
 	// Status is the status a success answers.
 	Status int
 	// Handler answers the route, behind the verifier and the rate limit.
@@ -136,7 +138,7 @@ func merge(frame []route, added []Route) ([]route, error) {
 		handler := r.Handler
 		rows = append(rows, route{
 			method: r.Method, path: r.Path, action: r.Action,
-			summary: r.Summary, status: r.Status,
+			summary: r.Summary, description: r.Description, status: r.Status,
 			handler: func(_ *API, w http.ResponseWriter, req *http.Request) {
 				handler.ServeHTTP(w, req)
 			},
@@ -176,7 +178,7 @@ func Described(rows []Route) []apidocs.Route {
 	for _, r := range rows {
 		out = append(out, apidocs.Route{
 			Method: r.Method, Path: r.Path, Action: r.Action,
-			Summary: r.Summary, Status: r.Status,
+			Summary: r.Summary, Description: r.Description, Status: r.Status,
 		})
 	}
 	return out

@@ -24,6 +24,7 @@ type row struct {
 	method, path string
 	action       string
 	summary      string
+	description  string
 	status       int
 	answer       func(*Service, http.ResponseWriter, *http.Request)
 }
@@ -32,50 +33,58 @@ var rows = []row{
 	{
 		method: http.MethodPost, path: "/v1/shares",
 		action: authorizer.ActionShareCreate, status: http.StatusCreated,
-		summary: "Grant a subject a permission on a subtree of a space.",
-		answer:  (*Service).CreateGrant,
+		summary:     "Create grant",
+		description: "Grant a subject a permission on a subtree of a space.",
+		answer:      (*Service).CreateGrant,
 	},
 	{
 		method: http.MethodGet, path: "/v1/shares",
 		action: authorizer.ActionShareList, status: http.StatusOK,
-		summary: "The grants on a space.",
-		answer:  (*Service).ListGrants,
+		summary:     "List grants",
+		description: "The grants on a space.",
+		answer:      (*Service).ListGrants,
 	},
 	{
 		method: http.MethodGet, path: "/v1/shares/with-me",
 		action: authorizer.ActionShareList, status: http.StatusOK,
-		summary: "The grants whose grantee is the caller.",
-		answer:  (*Service).GrantsWithMe,
+		summary:     "List received grants",
+		description: "The grants whose grantee is the caller.",
+		answer:      (*Service).GrantsWithMe,
 	},
 	{
 		method: http.MethodGet, path: "/v1/shares/{id}",
 		action: authorizer.ActionShareRead, status: http.StatusOK,
-		summary: "One grant.",
-		answer:  (*Service).ReadGrant,
+		summary:     "Get grant",
+		description: "One grant.",
+		answer:      (*Service).ReadGrant,
 	},
 	{
 		method: http.MethodDelete, path: "/v1/shares/{id}",
 		action: authorizer.ActionShareRevoke, status: http.StatusNoContent,
-		summary: "Revoke a grant.",
-		answer:  (*Service).RevokeGrant,
+		summary:     "Revoke grant",
+		description: "Revoke a grant.",
+		answer:      (*Service).RevokeGrant,
 	},
 	{
 		method: http.MethodPost, path: "/v1/shares/links",
 		action: authorizer.ActionLinkCreate, status: http.StatusCreated,
-		summary: "Mint a token grant on a subtree; the token is answered once.",
-		answer:  (*Service).CreateLink,
+		summary:     "Create link",
+		description: "Mint a token grant on a subtree; the token is answered once.",
+		answer:      (*Service).CreateLink,
 	},
 	{
 		method: http.MethodGet, path: "/v1/shares/links",
 		action: authorizer.ActionLinkRead, status: http.StatusOK,
-		summary: "The token grants on a space.",
-		answer:  (*Service).ListLinks,
+		summary:     "List links",
+		description: "The token grants on a space.",
+		answer:      (*Service).ListLinks,
 	},
 	{
 		method: http.MethodDelete, path: "/v1/shares/links/{id}",
 		action: authorizer.ActionLinkRevoke, status: http.StatusNoContent,
-		summary: "Revoke a token grant.",
-		answer:  (*Service).RevokeLink,
+		summary:     "Revoke link",
+		description: "Revoke a token grant.",
+		answer:      (*Service).RevokeLink,
 	},
 }
 
@@ -86,7 +95,7 @@ func Routes(s *Service) []api.Route {
 		answer := r.answer
 		out = append(out, api.Route{
 			Method: r.method, Path: r.path, Action: r.action,
-			Summary: r.summary, Status: r.status,
+			Summary: r.summary, Description: r.description, Status: r.status,
 			Handler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 				answer(s, w, req)
 			}),
@@ -103,7 +112,7 @@ func Table() []api.Route {
 	for _, r := range rows {
 		out = append(out, api.Route{
 			Method: r.method, Path: r.path, Action: r.action,
-			Summary: r.summary, Status: r.status,
+			Summary: r.summary, Description: r.description, Status: r.status,
 		})
 	}
 	return out

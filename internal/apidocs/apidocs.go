@@ -53,8 +53,10 @@ type Route struct {
 	// Public reports a route registered outside the verifier, which carries
 	// no bearer token.
 	Public bool
-	// Summary is the one line a reader of the document sees.
+	// Summary is a verb-first navigation label of at most four words.
 	Summary string
+	// Description preserves behavior, qualifications, and alternatives.
+	Description string
 	// Status is the status a success answers.
 	Status int
 	// Pending reports a route the frame registers and does not yet answer,
@@ -292,11 +294,12 @@ func sentenceOf(code string, sharing []ErrorCode) string {
 	return ""
 }
 
-// describe is the operation's prose: the action it asks, so a reader of the
-// document knows what an authorizer will be asked before the route acts, and
-// the note that a pending route answers nothing yet.
+// describe combines operation details with authorization and availability.
 func describe(r Route) string {
 	var parts []string
+	if r.Description != "" {
+		parts = append(parts, r.Description)
+	}
 	switch {
 	case r.Action != "":
 		parts = append(parts, "Asks the authorizer for "+r.Action+" before it acts.")

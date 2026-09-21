@@ -268,7 +268,7 @@ func routesOf(rows []route) []apidocs.Route {
 	for i, r := range rows {
 		out[i] = apidocs.Route{
 			Method: r.method, Path: r.path, Action: r.action, Public: r.public,
-			Summary: r.summary, Status: r.status, Pending: r.pending,
+			Summary: r.summary, Description: r.description, Status: r.status, Pending: r.pending,
 		}
 	}
 	return out
