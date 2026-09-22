@@ -8,6 +8,8 @@ in place.
 
 ```sh
 kubectl apply -f deploy/bootstrap/namespace.yaml
+# Only if a pipeline deploys for you: the identity it deploys with.
+kubectl apply -f deploy/bootstrap/rollout-identity.yaml
 
 cp deploy/bootstrap/secrets.example.yaml /tmp/arcad-secrets.yaml
 # fill in the bucket, the database, and the issuers, then
@@ -27,6 +29,11 @@ Set the Job's image to the release you are installing first. Migrations are
 forward-only and a server refuses to serve against a schema below its own,
 so a rollout that skipped the Job fails its readiness probe instead of
 serving against the wrong shape.
+
+`rollout-identity.yaml` is written for the `latere` namespace, where the
+hosted installation runs; an installation elsewhere changes the namespace
+before applying it. The pipeline's kubeconfig is built from the token
+Secret it creates and held in the repository secret `ARCA_KUBECONFIG`.
 
 [`../../docs/install.md`](../../docs/install.md) is the whole walk from an
 empty cluster to a serving installation, and
