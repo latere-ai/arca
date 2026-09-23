@@ -173,7 +173,7 @@ func TestAMoveThatIsNotCleanIsAnError(t *testing.T) {
 	}
 }
 
-func TestThePrefixIsNormalisedTheWayAKeyReadsIt(t *testing.T) {
+func TestThePrefixIsNormalizedTheWayAKeyReadsIt(t *testing.T) {
 	for raw, want := range map[string]string{
 		"drive":   "drive/",
 		"drive/":  "drive/",
@@ -181,8 +181,8 @@ func TestThePrefixIsNormalisedTheWayAKeyReadsIt(t *testing.T) {
 		"":        "",
 		"/":       "",
 	} {
-		if got := normalisePrefix(raw); got != want {
-			t.Errorf("normalisePrefix(%q) = %q, want %q", raw, got, want)
+		if got := normalizePrefix(raw); got != want {
+			t.Errorf("normalizePrefix(%q) = %q, want %q", raw, got, want)
 		}
 	}
 }

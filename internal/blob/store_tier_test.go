@@ -511,7 +511,7 @@ func TestStoreACopyAboveTheLimitGoesThroughTheTail(t *testing.T) {
 	}
 }
 
-// TestStoreTheConditionalCopyIsNotHonouredByEveryStore records what the
+// TestStoreTheConditionalCopyIsNotHonoredByEveryStore records what the
 // stack's MinIO answers to If-None-Match: * on a copy, which is the finding
 // the object move of spec 019 rests its resume on.
 //
@@ -521,7 +521,7 @@ func TestStoreACopyAboveTheLimitGoesThroughTheTail(t *testing.T) {
 // which is what tools/move-objects does before it copies anything. The
 // completion of a copied tail is the other half of the finding: the same
 // store does hold to the condition there.
-func TestStoreTheConditionalCopyIsNotHonouredByEveryStore(t *testing.T) {
+func TestStoreTheConditionalCopyIsNotHonoredByEveryStore(t *testing.T) {
 	store, prefix := tierCopying(t)
 	from, to := prefix+"drive/u-1/files/notes.md", prefix+"1f/contended"
 	body := []byte("the first bytes")

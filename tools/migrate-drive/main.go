@@ -158,14 +158,14 @@ func (o options) check() (string, error) {
 	if o.orgIssuer != "" && !absolute(o.orgIssuer) {
 		missing.Refuse("-org-issuer is %q, which is not an absolute URL", o.orgIssuer)
 	}
-	prefix := normalisePrefix(o.prefix)
+	prefix := normalizePrefix(o.prefix)
 	if prefix == "" {
 		missing.Refuse("-prefix names the bucket prefix the source wrote and cannot be empty")
 	}
 	// The prefix the operator names and the prefix the installation is
 	// deployed with are two values that have to agree, because the copy is
 	// read against one and served against the other.
-	if deployed := normalisePrefix(o.bucketPrefix); deployed != "" && deployed != prefix {
+	if deployed := normalizePrefix(o.bucketPrefix); deployed != "" && deployed != prefix {
 		missing.Refuse("-prefix is %q and %s is %q; the copy and the installation have to name one prefix",
 			prefix, BucketPrefixVar, deployed)
 	}
@@ -183,9 +183,9 @@ func absolute(raw string) bool {
 	return err == nil && u.Scheme != "" && u.Host != ""
 }
 
-// normalisePrefix ends a prefix in one slash and begins it in none, which is
+// normalizePrefix ends a prefix in one slash and begins it in none, which is
 // the shape a key derivation reads it in (spec 003).
-func normalisePrefix(prefix string) string {
+func normalizePrefix(prefix string) string {
 	prefix = strings.Trim(prefix, "/")
 	if prefix == "" {
 		return ""

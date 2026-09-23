@@ -86,7 +86,7 @@ func case013ErrorTable(t *testing.T, s *session) {
 			return s.call(t, Alice, http.MethodPost, "/v1/workspaces", body(fields{"owner": "me"}))
 		}},
 		{CodeUnknownField, func() response {
-			return s.call(t, Alice, http.MethodPost, "/v1/workspaces", body(fields{"owner": "me", "slug": s.name("x"), "colour": "green"}))
+			return s.call(t, Alice, http.MethodPost, "/v1/workspaces", body(fields{"owner": "me", "slug": s.name("x"), "color": "green"}))
 		}},
 		{CodeInvalidField, func() response {
 			return s.call(t, Alice, http.MethodGet, "/v1/workspaces?limit=5000", "")

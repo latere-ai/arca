@@ -62,7 +62,7 @@ jobs:
       arcad_digest: ${{ steps.arcad.outputs.digest }}
       stubs_digest: ${{ steps.stubs.outputs.digest }}
     steps:
-      # docker/metadata-action and the registry sanitise an image tag to
+      # docker/metadata-action and the registry sanitize an image tag to
       # [a-zA-Z0-9._-], so a SemVer build-metadata tag would push as
       # v1.0.0-exp-sha.5114f85 while `kubectl set image` below still names
       # the raw ref with its '+'. The deploy needs image tag == git tag, so

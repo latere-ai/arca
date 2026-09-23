@@ -230,7 +230,7 @@ One finding the build made, recorded here because the move rests on it:
 `CopyObject` nor refuses it, it overwrites**, where it does honor the
 same condition on the completion of a copied tail. So the guard is not
 what makes the move idempotent on every store, and the move reads its
-destination before it copies instead. `TestStoreTheConditionalCopyIsNotHonouredByEveryStore`
+destination before it copies instead. `TestStoreTheConditionalCopyIsNotHonoredByEveryStore`
 in `internal/blob/store_tier_test.go` holds the store to whichever of the
 three answers it gives.
 

@@ -225,14 +225,14 @@ func (o options) check() (string, error) {
 		missing.Refuse("-delete-sources deletes the last other copy of every byte it verifies and " +
 			"-verify-bytes is off, which leaves the destinations proved on their length alone")
 	}
-	prefix := normalisePrefix(o.prefix)
+	prefix := normalizePrefix(o.prefix)
 	if prefix == "" {
 		missing.Refuse("-prefix names the bucket prefix the keys are written under and cannot be empty")
 	}
 	// The prefix the operator names and the prefix the installation is
 	// deployed with are two values that have to agree, because the objects
 	// are moved under one and served under the other.
-	if deployed := normalisePrefix(o.bucketPrefix); deployed != "" && deployed != prefix {
+	if deployed := normalizePrefix(o.bucketPrefix); deployed != "" && deployed != prefix {
 		missing.Refuse("-prefix is %q and %s is %q; the move and the installation have to name one prefix",
 			prefix, BucketPrefixVar, deployed)
 	}
@@ -257,9 +257,9 @@ func (r *Refusal) Refuse(format string, args ...any) {
 	r.Reasons = append(r.Reasons, fmt.Sprintf(format, args...))
 }
 
-// normalisePrefix ends a prefix in one slash and begins it in none, which is
+// normalizePrefix ends a prefix in one slash and begins it in none, which is
 // the shape a key derivation reads it in (spec 003).
-func normalisePrefix(prefix string) string {
+func normalizePrefix(prefix string) string {
 	prefix = strings.Trim(prefix, "/")
 	if prefix == "" {
 		return ""

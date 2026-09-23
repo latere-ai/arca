@@ -46,7 +46,7 @@ func TestDeltaChargesWhatAWriteAdds(t *testing.T) {
 // no write is refused at any usage, a write that lands exactly on the limit
 // is admitted, the next byte over is refused with the two figures, and a
 // delete is admitted over the limit.
-func TestChargeHonoursTheLimitTheAnswerCarried(t *testing.T) {
+func TestChargeHonorsTheLimitTheAnswerCarried(t *testing.T) {
 	for _, c := range []struct {
 		name    string
 		delta   int64

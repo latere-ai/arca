@@ -186,7 +186,7 @@ func TestADestinationOfTheRightSizeAndAnotherLabelIsAMismatch(t *testing.T) {
 	}
 
 	o := moved(t, b, false, entry(notesKey, idNotes, notes, false))[notesKey]
-	if o.State != Mismatched || !strings.Contains(o.Why, "labelled") {
+	if o.State != Mismatched || !strings.Contains(o.Why, "labeled") {
 		t.Fatalf("the run is %s: %s", name(o.State), o.Why)
 	}
 }
@@ -233,7 +233,7 @@ func TestADestinationAssembledFromRangesIsVerifiedOnItsSize(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.HasSuffix(assembled.ETag, "-1") {
-		t.Fatalf("the destination is labelled %q, which is not composite", assembled.ETag)
+		t.Fatalf("the destination is labeled %q, which is not composite", assembled.ETag)
 	}
 
 	o := moved(t, b, false, entry(notesKey, idNotes, notes, false))[notesKey]

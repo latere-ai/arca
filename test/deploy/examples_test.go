@@ -236,7 +236,7 @@ func TestTheStackScriptsAreExecutable(t *testing.T) {
 // TestProdAdmitsTheDatabasePortsThisInstallationUses in prod_test.go, beside
 // the database ports, which is the only place the pairing of a port with an
 // endpoint no file in this tree carries can be asserted at all.
-var dialled = []string{
+var dialed = []string{
 	"ARCA_OIDC_ISSUERS",
 	"ARCA_AUTHORIZER_URL",
 	"ARCA_BUCKET_ENDPOINT",
@@ -259,7 +259,7 @@ func endpoints(t *testing.T, dir string) map[string]string {
 	t.Helper()
 	out := map[string]string{}
 	keep := func(name, value string) {
-		if !slices.Contains(dialled, name) || value == "" {
+		if !slices.Contains(dialed, name) || value == "" {
 			return
 		}
 		// ARCA_OIDC_ISSUERS is a list, read the way internal/config reads it.

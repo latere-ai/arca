@@ -104,7 +104,7 @@ func TestThePrefixAndTheInstallationHaveToAgree(t *testing.T) {
 	}
 }
 
-func TestNormalisePrefixEndsInOneSlash(t *testing.T) {
+func TestNormalizePrefixEndsInOneSlash(t *testing.T) {
 	for _, c := range []struct{ from, want string }{
 		{"drive/", "drive/"},
 		{"drive", "drive/"},
@@ -113,8 +113,8 @@ func TestNormalisePrefixEndsInOneSlash(t *testing.T) {
 		{"", ""},
 		{"/", ""},
 	} {
-		if got := normalisePrefix(c.from); got != c.want {
-			t.Errorf("normalisePrefix(%q) = %q, want %q", c.from, got, c.want)
+		if got := normalizePrefix(c.from); got != c.want {
+			t.Errorf("normalizePrefix(%q) = %q, want %q", c.from, got, c.want)
 		}
 	}
 }

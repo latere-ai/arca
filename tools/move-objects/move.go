@@ -236,7 +236,7 @@ func (m *Move) compare(o *Outcome, held blob.Object) {
 		// fail a healthy copy. The byte read is what proves these.
 		o.State, o.Verified = Copied, OnSize
 	case held.ETag != o.Entry.Checksum:
-		o.State, o.Why = Mismatched, fmt.Sprintf("the destination is labelled %q and the manifest says %q", held.ETag, o.Entry.Checksum)
+		o.State, o.Why = Mismatched, fmt.Sprintf("the destination is labeled %q and the manifest says %q", held.ETag, o.Entry.Checksum)
 	default:
 		o.State, o.Verified = Copied, OnLabel
 	}

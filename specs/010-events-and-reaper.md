@@ -138,7 +138,7 @@ writes the status, the one user sentence and the request id.
 
 | # | State |
 |---|---|
-| 1 | Holds. `TestLimitOfReadsWhatTheAnswerCarried` and `TestChargeHonoursTheLimitTheAnswerCarried` over an answer with no limits, and `0005_usage_events.up.sql` holds no limit column |
+| 1 | Holds. `TestLimitOfReadsWhatTheAnswerCarried` and `TestChargeHonorsTheLimitTheAnswerCarried` over an answer with no limits, and `0005_usage_events.up.sql` holds no limit column |
 | 2 | Holds. `TestTheLimitLivesAsLongAsTheAnswerAndNoLonger` runs the shared client over a stub authorizer on a clock the test moves |
 | 3 | Holds at the ledger: `TestStoreUsageAdmitsTheLimitAndRefusesTheByteAfterIt` against Postgres carries the used and limit figures. The `413` itself waits on a write route ([[005-files]], [[013-api]]) |
 | 4 | Holds. The same test releases bytes on a space over the limit |
@@ -572,7 +572,7 @@ Where each criterion is proved:
 
 | # | Proved by |
 |---|---|
-| 1 | `TestLimitOfReadsWhatTheAnswerCarried` and `TestChargeHonoursTheLimitTheAnswerCarried`; `0005_usage_events.up.sql` holds no limit column |
+| 1 | `TestLimitOfReadsWhatTheAnswerCarried` and `TestChargeHonorsTheLimitTheAnswerCarried`; `0005_usage_events.up.sql` holds no limit column |
 | 2 | `TestTheLimitLivesAsLongAsTheAnswerAndNoLonger`, the shared client over a stub authorizer on a clock the test moves |
 | 3 | `TestStoreUsageAdmitsTheLimitAndRefusesTheByteAfterIt` against Postgres, with the used and limit figures in the refusal; the `413` rendering is [[005-files]]' |
 | 4 | the same test's release arm, on a space already over the answer's limit |

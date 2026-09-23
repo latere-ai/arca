@@ -267,7 +267,7 @@ func Load(getenv Getenv) (Config, error) {
 			problems = append(problems, "ARCA_BUCKET_ENDPOINT "+err.Error())
 		}
 	}
-	prefix, err := normalisePrefix(c.BucketPrefix)
+	prefix, err := normalizePrefix(c.BucketPrefix)
 	if err != nil {
 		problems = append(problems, "ARCA_BUCKET_PREFIX "+err.Error())
 	}
@@ -464,10 +464,10 @@ func checkBasePath(base string) string {
 	}
 }
 
-// normalisePrefix is spec 003's rule: a missing trailing slash is appended,
+// normalizePrefix is spec 003's rule: a missing trailing slash is appended,
 // a leading slash is a configuration error, and the value holds only the
 // characters a key is built from.
-func normalisePrefix(prefix string) (string, error) {
+func normalizePrefix(prefix string) (string, error) {
 	if strings.HasPrefix(prefix, "/") {
 		return "", fmt.Errorf("is %q, and a key is not rooted, so the prefix carries no leading slash", prefix)
 	}
