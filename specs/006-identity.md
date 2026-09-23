@@ -187,7 +187,7 @@ Rules of the table:
   reason `grant`, indistinguishable on the wire from any other deny.
 
 A `File` and a `Workspace` carry `grant`: the highest live grant the
-caller holds on a prefix of the resource's path in the caller's favour,
+caller holds on a prefix of the resource's path in the caller's favor,
 `read`, `write` or `manage`, absent where they hold none and absent on a
 question about the caller's own space, because ownership is not a grant
 and is more than any grant on a subtree of that space could confer.

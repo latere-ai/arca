@@ -67,7 +67,7 @@ const idLen = 36
 //
 //	arca/1f/0192f0c3-6c1a-7b3e-9a2e-6b7c8d9e0a1f
 //
-// The prefix is what an operator sets in ARCA_BUCKET_PREFIX, normalised to
+// The prefix is what an operator sets in ARCA_BUCKET_PREFIX, normalized to
 // end in a slash before it reaches here. An id that came from neither NewID
 // nor ParseID has no key, and Key answers the empty string.
 func (id ID) Key(prefix string) string {

@@ -222,7 +222,7 @@ func TestTheStackScriptsAreExecutable(t *testing.T) {
 	}
 }
 
-// dialled are the variables whose value is an address arcad opens a
+// dialed are the variables whose value is an address arcad opens a
 // connection to. ARCA_PUBLIC_URL is not one of them: it is the origin
 // clients reach this installation at, and nothing in the process dials it.
 //
@@ -241,7 +241,7 @@ var dialled = []string{
 	"ARCA_AUTHORIZER_URL",
 	"ARCA_BUCKET_ENDPOINT",
 	// The database endpoint arrives under two spellings and both are
-	// dialled. ARCA_DB_URL is the variable arcad reads; ARCA_DATABASE_URL is
+	// dialed. ARCA_DB_URL is the variable arcad reads; ARCA_DATABASE_URL is
 	// the key inside the arcad-database Secret, which the Deployment maps to
 	// that variable. The key is the Secret's contract with whoever wrote it
 	// by hand, so it is not the variable's name and does not follow it.
@@ -288,7 +288,7 @@ func endpoints(t *testing.T, dir string) map[string]string {
 }
 
 // egressPorts is the union of the TCP ports the NetworkPolicies of these
-// documents admit to a pod labelled app.kubernetes.io/name: arcad. Policies
+// documents admit to a pod labeled app.kubernetes.io/name: arcad. Policies
 // are additive, so the union is what a replica may reach.
 func egressPorts(sets ...[]document) map[string]bool {
 	out := map[string]bool{}

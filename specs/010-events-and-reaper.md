@@ -52,7 +52,7 @@ cursor tail), the usage accounting inside `internal/handler/quota.go` (the
 admission delta and the charge, not the stored limit), `internal/gc`
 (every pass and the first-seen grace window), and migrations
 `000005_quotas_events` and `000008_events_move`, folded into `0005` with the
-action `CHECK` dropped in favour of the table in `internal/events`. What
+action `CHECK` dropped in favor of the table in `internal/events`. What
 changed on the way is the table in "What arrives from Drive" below, as
 written.
 
@@ -481,7 +481,7 @@ loses and is recomputed on the next run instead of erasing the charge.
 | `drive/internal/handler/quota.go` | the admission delta and the charge, now applied to a stored counter inside the write's own transaction rather than recomputed per request behind a thirty second cache |
 | `drive/internal/handler/events.go` | the append and the cursor tail |
 | `drive/internal/gc` | every pass, and the first-seen grace window |
-| migrations `000005_quotas_events`, `000008_events_move` | folded into `0005_usage_events.up.sql` of [[004-metadata-store]], with the action `CHECK` dropped in favour of the table in `internal/events` |
+| migrations `000005_quotas_events`, `000008_events_move` | folded into `0005_usage_events.up.sql` of [[004-metadata-store]], with the action `CHECK` dropped in favor of the table in `internal/events` |
 
 Owner addressing changes from `(owner_type, owner_id)` to the subject
 `<issuer>|<sub>`, and the event's `actor_id` becomes the subject
@@ -523,7 +523,7 @@ restore, which read this spec's numbers but are their own surface
 | # | Criterion | Proved by |
 |---|---|---|
 | 1 | With no `limits.quota_bytes` in the answer no write is refused for size at any usage, and no table holds a limit | `internal/events` test over a stub authorizer that sends no limits, plus a schema test |
-| 2 | A limit from the authorizer's `limits` is honoured for that answer's `ttl` and no longer | `internal/events` test with a stub authorizer and a fake clock |
+| 2 | A limit from the authorizer's `limits` is honored for that answer's `ttl` and no longer | `internal/events` test with a stub authorizer and a fake clock |
 | 3 | A write exactly at that limit is admitted and the next byte over is refused `413` with used and limit in the developer detail | store-tier test against Postgres |
 | 4 | A delete on a space over the answer's limit is admitted | the same |
 | 5 | A versioned overwrite is charged the full new size and a non-versioned one the difference | `internal/events` table test |
@@ -594,7 +594,7 @@ Where each criterion is proved:
 | 19 | `TestDryRunReportsWhatARunWouldChange`, one fixture run dry and live with the found counts held equal, over every pass whose statements this package owns |
 | 20 | `TestServeSaysWhetherThisReplicaReconciles` and `TestE2EReapRunsOneSequenceAndExits` |
 
-Three provers are not the artefact the criteria table named, and each
+Three provers are not the artifact the criteria table named, and each
 substitution is deliberate. Criterion 7 named `TestOpenSessionsCount`; no
 test shipped under that name, and the claim is split across the two tiers
 above because the three-table sum is a claim about one SQL statement and the

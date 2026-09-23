@@ -48,7 +48,7 @@ func wsRow(t *testing.T, db *DB, owner, slug string) Workspace {
 //
 // Every writer runs the attach exactly as the handler does, the conditional
 // update and the attachment insert in one transaction. The condition is in
-// the statement, so the losers match no row; nothing in Go serialises them.
+// the statement, so the losers match no row; nothing in Go serializes them.
 func TestStoreTwoConcurrentWritersLeaveOneLease(t *testing.T) {
 	db := tier(t)
 	owner := wsSpace(t)

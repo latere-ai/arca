@@ -36,7 +36,7 @@ Built and in the tree on 2026-09-18, phase 3 of [[019-migration-from-drive]].
 the write arms, the trash, the versions and the stars over the tables
 [[004-metadata-store]] created; `internal/config` reads
 `ARCA_INLINE_BYTES`, `ARCA_MAX_UPLOAD_BYTES` and `ARCA_TRASH_RETENTION`;
-`internal/api` takes the rows of the specs that own their behaviour; and
+`internal/api` takes the rows of the specs that own their behavior; and
 `arcad` mounts them. The commits are `d9622c5` (the queries), `3ba4536`
 (the variables), `aebc79e` (the route seam and the JSON decoder), `8e106f0`
 (the handlers), `0cb8d7e` (the wiring and the document), `2742b24` (the
@@ -252,7 +252,7 @@ creators commits and the other reads `412`.
 | `size <= ARCA_INLINE_BYTES` | `200`, the body streamed from the bucket, with `ETag`, `Content-Type`, `Content-Length` |
 | `size > ARCA_INLINE_BYTES` | `302` to a presigned URL, five minute expiry |
 
-`?inline=1` asks for the bytes and is honoured only at or below the
+`?inline=1` asks for the bytes and is honored only at or below the
 inline size: above it the redirect stands, because invariant 4 is not a
 default a caller may waive. `?inline=0` asks for the redirect at any
 size, for a client that would rather not hold a connection open.
@@ -520,7 +520,7 @@ Where each criterion is proved:
 | 15 | `TestEveryHandlerAsksExactlyOneActionBeforeItActs` at the unit tier, one case per handler against a recording seam, and the nine conformance cases of [[017-conformance-suite]] on the wire |
 | 16 | `TestARootListingCarriesWhatTheSpaceHolds` over both plane roots and a prefix below one, `TestARootListingWhoseLedgerCannotAnswerIsAnOutage`, and `test/conformance`'s `case005RootUsage` |
 
-Two provers are not the artefact the criteria table named, and each
+Two provers are not the artifact the criteria table named, and each
 substitution is deliberate. Criterion 8's table assertion is at the store
 tier for the grants and at the unit tier for all four, because a recording
 seam sees the statement and Postgres sees the row, and neither alone answers

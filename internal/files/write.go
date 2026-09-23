@@ -67,7 +67,7 @@ type Result struct {
 
 // Commit writes the row of a put or of a completed upload session in one
 // transaction, and is taken by both so the two writes cannot drift apart in
-// their conditional behaviour, their version capture or their charge.
+// their conditional behavior, their version capture or their charge.
 //
 // In order: hold the row, read the precondition against what the lock
 // answered, capture the version an overwrite supersedes, apply the write

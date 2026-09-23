@@ -233,7 +233,7 @@ func TestTheDocumentIsObservedToo(t *testing.T) {
 }
 
 // TestASurfaceWithNoSeamRecordsNothingAndStillServes: the node that exports
-// nothing and the test that asserts on behaviour both build the frame with
+// nothing and the test that asserts on behavior both build the frame with
 // no recording surface, and the request path costs no branch.
 func TestASurfaceWithNoSeamRecordsNothingAndStillServes(t *testing.T) {
 	h := newHarness(t)

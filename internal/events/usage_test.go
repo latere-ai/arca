@@ -311,7 +311,7 @@ func TestLimitOfReadsWhatTheAnswerCarried(t *testing.T) {
 	}
 }
 
-// Criterion 2 of spec 010: the limit an answer carried is honoured for that
+// Criterion 2 of spec 010: the limit an answer carried is honored for that
 // answer's ttl and no longer. The ttl belongs to the decision cache of spec
 // 006, so the proof runs the shared client over a stub authorizer on a clock
 // the test moves.

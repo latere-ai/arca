@@ -417,7 +417,7 @@ func duration(raw string, def time.Duration, name string, offSwitch bool, note f
 // size reads a byte count. Unset is the default, and a value that is not a
 // whole number above zero is a problem rather than a silent default: a
 // server that accepted no object at all because a variable read as zero
-// would be a deployment nobody could debug from its behaviour.
+// would be a deployment nobody could debug from its behavior.
 func size(raw string, def int64, name string, note func(string, ...any)) int64 {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

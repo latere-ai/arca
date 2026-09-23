@@ -24,7 +24,7 @@ import (
 //
 // It is not a substitute for the store tier. A fake that accepts a
 // conditional create whenever a real store would is the bug invariant 1 is
-// written against, so the same table of behaviours runs against MinIO too.
+// written against, so the same table of behaviors runs against MinIO too.
 type Memory struct {
 	// PresignBase is the origin the signed URLs of this store point at. A
 	// test that reads one only checks its shape.

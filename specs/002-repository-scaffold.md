@@ -167,7 +167,7 @@ refuses to serve bytes. [[018-observability]] carries the reasoning.
 `go.mod`. `.lateregate.yaml` holds only what is specific to this
 repository: the coverage prefix, the spec lifecycle of [specs/README.md](README.md),
 the hermetic allow list (empty: `arcad` forks nothing), the dependency
-allow list of invariant 9, the licence identifier, and the identity block
+allow list of invariant 9, the license identifier, and the identity block
 of the family's shape with `role: core`. Two identity rules, `verifier`
 and `authorizer`, carry dated waivers until [[006-identity]] mounts the
 shared packages; the waivers name that spec and expire on 2026-10-31.
@@ -214,7 +214,7 @@ in the tree:
   local state, so the data directory, the runtime selector, and the disk
   readiness check that Cella's server carries were removed with their
   tests, and readiness today is the draining check alone.
-- The licence is MIT, the family's choice for Origo and Lux; Cella is
+- The license is MIT, the family's choice for Origo and Lux; Cella is
   Apache-2.0. The SPDX headers and `license.spdx` say MIT.
 - Two identity rules, `verifier` and `authorizer`, carry dated waivers
   naming [[006-identity]], the same bridge Cella used until its own

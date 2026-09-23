@@ -44,7 +44,7 @@ detail a refusal carries). The gate passes at each of them, with
 
 The row write at completion is [[005-files]]'s `Commit`, taken by both, so a
 put and a completed session cannot drift apart in their conditional
-behaviour, their version capture, their charge or their event. Two fields
+behavior, their version capture, their charge or their event. Two fields
 were added to that write for this spec: what the space has already paid, so
 a session that opened and completed is charged once, and a hook that runs in
 the same transaction, so the session row leaves in the commit the object
@@ -284,7 +284,7 @@ who needs another number is describing a different product.
 of this flow that touch the bucket are [[003-object-store]]'s, the row
 work is [[004-metadata-store]]'s `Sessions`, and the row-write at
 completion is the same code path [[005-files]] uses for a `PUT`, taken
-by both so the two writes cannot drift apart in their CAS behaviour,
+by both so the two writes cannot drift apart in their CAS behavior,
 version capture, or event.
 
 ### What arrives from Drive

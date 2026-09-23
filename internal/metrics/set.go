@@ -163,7 +163,7 @@ func (s *Set) RequestStarted() { s.inFlight.Add(1) }
 // took. The route is the mux pattern and never the path.
 func (s *Set) RequestFinished(route, statusClass, code string, took time.Duration) {
 	s.inFlight.Add(-1)
-	// The duration is labelled by the route alone, so there is no
+	// The duration is labeled by the route alone, so there is no
 	// vocabulary that could refuse it and a request whose status or code
 	// this table does not name was still served in some amount of time.
 	s.RequestDuration.Observe(map[string]string{"route": route}, took.Seconds())

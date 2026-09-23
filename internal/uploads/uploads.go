@@ -11,7 +11,7 @@
 //
 // The row write at completion is [files.Service.Commit], the same code path
 // a put of spec 005 takes, so the two writes cannot drift apart in their
-// conditional behaviour, their version capture, their charge or their event.
+// conditional behavior, their version capture, their charge or their event.
 //
 // A session's key is its own object id and never the key of the object it
 // will replace, so nothing a session does, and nothing an abandoned session

@@ -15,7 +15,7 @@ import (
 
 // The rows of this package held to spec 013's table, read out of the spec.
 // The frame's own test holds the frame's rows the same way; this is the half
-// of criterion 1 that belongs to the package owning the behaviour.
+// of criterion 1 that belongs to the package owning the behavior.
 
 var (
 	// routeRow matches one row of a route table of spec 013: the method,

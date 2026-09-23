@@ -156,7 +156,7 @@ func each(ctx context.Context, c Conn, sql string, fn func(Rows) error, args ...
 
 // copySubjects moves Drive's principal directory. The table is presentation
 // only in both schemas: it resolves a subject to something a person
-// recognises and no authorization reads it.
+// recognizes and no authorization reads it.
 func copySubjects(ctx context.Context, r *Run) error {
 	return r.table(ctx, func(write insert) error {
 		return each(ctx, r.Source,

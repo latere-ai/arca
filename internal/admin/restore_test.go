@@ -57,7 +57,7 @@ func TestARestoreBringsBackWhatTheIdNames(t *testing.T) {
 
 // TestARestoreWithNoSeamBoundIsNotImplemented: the row is registered at its
 // right place and answers the one code spec 013 reserves for a route whose
-// behaviour has not landed.
+// behavior has not landed.
 func TestARestoreWithNoSeamBoundIsNotImplemented(t *testing.T) {
 	h := newHarness(t)
 	got := h.do(t, http.MethodPost, restorePath("https://other.example|c1d0"), map[string]any{"id": "01J8R4A"})

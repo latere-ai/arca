@@ -370,7 +370,7 @@ func (l *ledger) all() []shares.Event {
 }
 
 // reader stands in for the read path of spec 005: it records what it was
-// asked for and writes a body a test can recognise.
+// asked for and writes a body a test can recognize.
 type reader struct {
 	owner, path string
 	asked       int

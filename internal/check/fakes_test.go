@@ -176,7 +176,7 @@ func discovery(t *testing.T, jwksURI string) string {
 }
 
 // unreachable is an address nothing listens on, for the two cases a
-// dependency that cannot be dialled at all is read differently.
+// dependency that cannot be dialed at all is read differently.
 func unreachable(t *testing.T) string {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))

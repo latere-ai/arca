@@ -37,7 +37,7 @@ const DefaultCopyPartSize = 1 << 30
 // a key derives from an id that is minted once, so a copy onto a key that
 // already holds bytes is a fault and never an overwrite. A store that answers
 // NotImplemented to the guard is retried once without it and recorded as
-// unconditional, the degraded mode of spec 003. A store that neither honours
+// unconditional, the degraded mode of spec 003. A store that neither honors
 // the guard nor refuses it overwrites silently, which is why a caller proving
 // a move reads the destination back rather than trusting the copy's answer.
 //
@@ -137,7 +137,7 @@ func (s *S3) copyParts(ctx context.Context, from, to, uploadID string, source Ob
 
 // completeCopy assembles the copied parts under the same guard the one call
 // carries, so both branches of a copy refuse a destination that already
-// exists wherever the store honours the condition.
+// exists wherever the store honors the condition.
 func (s *S3) completeCopy(ctx context.Context, to, uploadID string, parts []s3types.CompletedPart, source Object, contentType string) (Object, error) {
 	input := &s3.CompleteMultipartUploadInput{
 		Bucket:          aws.String(s.bucket),

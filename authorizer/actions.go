@@ -66,7 +66,7 @@ const (
 
 // table is spec 006's action table in its order, one row per action, and the
 // one place the pairing of an action with its kind is written. An action acts
-// on exactly one kind, so every row's kind is its prefix capitalised.
+// on exactly one kind, so every row's kind is its prefix capitalized.
 var table = []authz.Action{
 	{Name: ActionFileRead, Kind: KindFile},
 	{Name: ActionFileWrite, Kind: KindFile},

@@ -60,7 +60,7 @@ type Route struct {
 	// Status is the status a success answers.
 	Status int
 	// Pending reports a route the frame registers and does not yet answer,
-	// whose behaviour belongs to a spec that has not landed. It answers
+	// whose behavior belongs to a spec that has not landed. It answers
 	// not_implemented, and the document says so rather than describing a
 	// body nothing returns.
 	Pending bool

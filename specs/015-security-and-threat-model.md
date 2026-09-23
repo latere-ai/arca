@@ -137,7 +137,7 @@ and the request-forgery surface behind it.
 | a sandbox holding a lease | a token for the audience `arca`, one lease | another workspace, a lease it should have lost, bytes outside its subtree |
 | a revoked collaborator | an id it was shown before the revoke | to learn whether what it once saw is still there |
 | a network position | the wire | a bearer, a link token, a presigned URL |
-| a compromised authorizer | the decision | to allow every action for every subject, including actions it does not recognise |
+| a compromised authorizer | the decision | to allow every action for every subject, including actions it does not recognize |
 | a compromised replica | the pod | the rest of the cluster |
 | a consumer of the module | an import of `object/`, `authorizer/` | to derive a key for an object it does not own |
 
@@ -232,7 +232,7 @@ installation that needs none.
 package. `object.ID.Key` derives a key from the object id and the
 prefix and from nothing else, so a path that slipped every check
 addresses nothing, and a move is one `UPDATE` that touches no key. Every
-key carries `ARCA_BUCKET_PREFIX`, normalised at start-up, which is what
+key carries `ARCA_BUCKET_PREFIX`, normalized at start-up, which is what
 separates two installations sharing one bucket. Every put carries
 `If-None-Match: *`; a store that answers `NotImplemented` degrades once,
 says so, and fails `arcad check`. A presigned read is one key, one
@@ -344,7 +344,7 @@ it. Names are as they appear in the tree.
 |---|---|---|---|
 | a caller reaching another subject's space | every handler reads, asks, then acts; a deny on the caller's own action is 403, a deny while resolving a reference is the answer an absence gives, on every route that reads a row before it asks | 006, 013 | `TestEveryHandlerAsksExactlyOneActionBeforeItActs`, `TestEveryLookupDenyIsTheAnswerAnAbsenceGives`, `TestEveryShareLookupDenyIsTheAnswerAnAbsenceGives`, `TestEveryWorkspaceLookupDenyIsTheAnswerAnAbsenceGives`, `TestADenyOnAnotherSpaceIsAMissingObject` |
 | a route that acts before it asks, or asks twice | every registered route declares one action and is held to it | 013 | `TestEveryRouteAsksExactlyOneAction`, `TestARouteThatIsDeniedDoesNotAct` |
-| a revoked permission still honoured | an allow is cached per replica for the answer's `ttl`, a deny briefly, unavailability never; the key is subject, action and resource id. The window is the accepted staleness and the authorizer sets it per answer | 006 | `TestAnAllowIsCachedPerSubjectActionAndResource`, `TestAnExpiredAnswerIsAskedAgain` |
+| a revoked permission still honored | an allow is cached per replica for the answer's `ttl`, a deny briefly, unavailability never; the key is subject, action and resource id. The window is the accepted staleness and the authorizer sets it per answer | 006 | `TestAnAllowIsCachedPerSubjectActionAndResource`, `TestAnExpiredAnswerIsAskedAgain` |
 | an allow that was never decided | the client fails closed on anything but a 200 carrying `allow` | 006 | `TestUnavailableIsNeverAnAllow`, `TestAnAuthorizerThatAnswersNothingIsNeverAnAllow` |
 | an authorizer that allows everything, including actions it does not know | the probe resource, the reserved id every authorizer must deny, is asked by `arcad check` and by readiness, and an allow fails the installation | 012, 006 | `TestTheProbeIsDeniedAndAnEndpointThatAllowsItIsReported`, `TestAnUnavailableEndpointFailsTheCheck` |
 | a token minted for another service replayed at Arca | `aud` must contain `ARCA_OIDC_AUDIENCE`, `iss` must be listed, `iat` is required and bounds the age at a day, `exp` and `nbf` are enforced | 006 | `TestServiceConformance`, the family's audience suite in process; `TestATokenWithNoSubjectIsRefused`, `TestTheAudienceDefaults` |
@@ -357,7 +357,7 @@ it. Names are as they appear in the tree.
 | a presigned URL leaking from a redirect, a log, or a history | one object, one method, one expiry of `blob.PresignTTL`; no log attribute carries a signed URL, a credential, or the path | 003, 018 | `TestStoreAPresignedReadIsOneKeyAndOneMethod`, `TestTheRequestLineCarriesTheIdsAndNothingSecret` |
 | path traversal into another object | a path holding an empty or relative segment, a leading or trailing slash, a control character, or an unknown plane is refused before anything else on every route that takes one | 005, 013 | `TestAPathIsTheShapeSpec005Names`, `TestAPathThatIsNotOneIsRefusedBeforeTheBucketIsReached` |
 | key confusion: a path that reaches another object's bytes | the bucket key derives from the object id, never from the path or the owner, so a path that slipped every check addresses nothing. A move touches no key | 003, 001, 005 | `TestKeyPutsTheShardFromTheTailUnderThePrefix`, `TestParseKeyReadsBackTheIDAndRefusesTheRest`, `TestAMoveTouchesNoBucketKey`, `TestStoreAMoveMakesNoBucketCallAndCarriesWhatKeysOnThePath` |
-| one installation reading another's objects in a shared bucket | every key carries `ARCA_BUCKET_PREFIX`, normalised at start-up, and a leading slash in it is a configuration error | 003, 002 | `TestThePrefixGainsItsSlashAndRefusesAnythingElse`, `TestKeyPutsTheShardFromTheTailUnderThePrefix` |
+| one installation reading another's objects in a shared bucket | every key carries `ARCA_BUCKET_PREFIX`, normalized at start-up, and a leading slash in it is a configuration error | 003, 002 | `TestThePrefixGainsItsSlashAndRefusesAnythingElse`, `TestKeyPutsTheShardFromTheTailUnderThePrefix` |
 | public link enumeration | 256 bits from `crypto/rand` under a unique index, and a token bucket per client address in front of the routes that take no bearer | 008, 013 | `TestTheTokenCarriesTheEntropySpec015Requires`, `TestTheAddressRateLimitBoundsWhatHasNoSubject` |
 | a link refusal that says which refusal it was | an unknown, revoked, or expired token, a path outside the prefix, and a denied `link.read` are one sentence naming neither token nor path | 008 | `TestARefusedRedemptionNamesNoToken`, `TestATokenThatResolvesToNothingIsNotFoundBeforeAnyQuestion`, `TestAnAuthorizerThatDeniesLinkReadStopsEveryLink` |
 | a link token in an access log or a referrer | a link response sets `Referrer-Policy: no-referrer`, and the access log names the mux pattern rather than the path, so a token in a path segment reaches no line. The cited tests prove the header and that no bearer reaches a line; that the pattern is logged for a link route in particular is structural and is one of the gaps criterion 23 would surface | 008, 018 | `TestTheThreeRoutesRedeemATokenWithNoBearer`, `TestE2EAPublicLinkIsReadWithNoBearer`, `TestTheRequestLineCarriesTheIdsAndNothingSecret` |

@@ -26,10 +26,10 @@ it.
 
 ## 1. A bucket
 
-Any store with the S3 API that honours `If-None-Match: *` on put. Arca uses
+Any store with the S3 API that honors `If-None-Match: *` on put. Arca uses
 that header to make a write conditional, which is what keeps two concurrent
 writes from losing one of them; a store that ignores it silently drops
-writes under load. AWS S3, MinIO, Tigris and Cloudflare R2 honour it.
+writes under load. AWS S3, MinIO, Tigris and Cloudflare R2 honor it.
 
 Create one bucket and a credential that may put, get, head, delete, list
 and presign under a single prefix, and nothing else.

@@ -281,7 +281,7 @@ func (s *S3) degrade() {
 	s.unconditional.Store(true)
 	s.warnOnce.Do(func() {
 		s.log.Warn("the store refuses a conditional create; writes run unguarded",
-			"bucket", s.bucket, "remedy", "a store that honours If-None-Match: *")
+			"bucket", s.bucket, "remedy", "a store that honors If-None-Match: *")
 	})
 }
 

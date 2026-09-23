@@ -72,7 +72,7 @@ func TestStartSelectsTheEndpointWhenOneIsConfigured(t *testing.T) {
 		t.Errorf("the mode is %q, want %q", id.Mode, auth.ModeAuthorizer)
 	}
 	if _, err := id.Authorizer.Decide(serving(carol), authorizer.ActionFileRead, aFile("01J8R4")); err != nil {
-		t.Errorf("the endpoint's allow was not honoured: %v", err)
+		t.Errorf("the endpoint's allow was not honored: %v", err)
 	}
 	if got := len(s.Requests()); got != 1 {
 		t.Errorf("the endpoint was asked %d times; every decision is one call", got)
@@ -198,7 +198,7 @@ func awaitWarm(t *testing.T, id *auth.Identity) {
 }
 
 // TestStartWarmsBestEffort is spec 006's warm-up row and spec 002's issuers
-// check together: the warm is an optimisation and not a gate, so the three
+// check together: the warm is an optimization and not a gate, so the three
 // states it can be in are a replica that serves, a replica that serves and
 // is ready, and a replica that serves and is not.
 //

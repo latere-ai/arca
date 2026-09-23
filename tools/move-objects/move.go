@@ -129,7 +129,7 @@ func (m *Move) Run(ctx context.Context, entries []manifest.Entry) []Outcome {
 }
 
 // one moves a single object: the destination first, so a run resumes on any
-// store rather than on one whose conditional copy is honoured.
+// store rather than on one whose conditional copy is honored.
 func (m *Move) one(ctx context.Context, e manifest.Entry) Outcome {
 	o := Outcome{Entry: e, Destination: e.ID.Key(m.Prefix)}
 	if o.Destination == "" {

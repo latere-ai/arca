@@ -281,7 +281,7 @@ surface  = frame ∪ ⋃ contributed(p)      p over the five route owners
 |surface|      = 41
 ```
 
-A package that owns behaviour declares `api.Route` values and the node
+A package that owns behavior declares `api.Route` values and the node
 passes them to `api.New`. `merge` refuses a set that could not be a
 surface, and each refusal is a start-up failure rather than a route
 nobody decided:
@@ -354,7 +354,7 @@ does; the intersection is the shared library's.
 | the authorizer | the operator | `POST` one question, `200` one answer ([[006-identity]]) |
 | the route seam | an installation building on Arca | declare `api.Route` values, pass them to `api.New`; behind the verifier, one action each |
 | the event log | a consumer | tail by cursor ([[010-events-and-reaper]]) |
-| the bucket | the operator | the S3 API, any implementation that honours `If-None-Match: *` on put |
+| the bucket | the operator | the S3 API, any implementation that honors `If-None-Match: *` on put |
 | the database | the operator | Postgres 16 or newer |
 
 ### What Arca is not

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Latere AI
 // SPDX-License-Identifier: MIT
 
-// Package manifest is the one artefact that ties a copied row to a byte.
+// Package manifest is the one artifact that ties a copied row to a byte.
 //
 // Drive built a bucket key from an owner and a path and Arca derives one from
 // an object id (spec 003), so a Drive key holds no id to keep and

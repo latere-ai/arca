@@ -34,7 +34,7 @@ type storeUnderTest struct {
 	publicSupported bool
 }
 
-// runStoreTable is the one table of behaviours every Store holds to.
+// runStoreTable is the one table of behaviors every Store holds to.
 func runStoreTable(t *testing.T, open func(t *testing.T) storeUnderTest) {
 	t.Helper()
 

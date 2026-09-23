@@ -175,7 +175,7 @@ func (s *Service) readVersion(w http.ResponseWriter, r *http.Request) {
 // answer is the size rule of spec 005 applied to one object: the bytes at or
 // below the inline size, a presigned redirect above it.
 //
-// ?inline=1 asks for the bytes and is honoured only at or below the
+// ?inline=1 asks for the bytes and is honored only at or below the
 // boundary, because invariant 4 of spec 001 is not a default a caller
 // waives. ?inline=0 asks for the redirect at any size, for a client that
 // would rather not hold a connection open.

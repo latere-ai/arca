@@ -409,7 +409,7 @@ func TestARateOfZeroIsOff(t *testing.T) {
 // 007 read. A value that does not parse, and one that parses to a size no
 // object could be written inside, are problems and not silent defaults: a
 // server accepting no object is a deployment nobody could debug from its
-// behaviour. The third row of those specs, ARCA_TRASH_RETENTION, is a window
+// behavior. The third row of those specs, ARCA_TRASH_RETENTION, is a window
 // and is checked with the reconciler's above.
 func TestTheSizeVariablesRefuseWhatIsNotOne(t *testing.T) {
 	for _, c := range []struct{ variable, value, want string }{

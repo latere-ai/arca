@@ -50,7 +50,7 @@ func TestAQuestionAboutAnotherSpaceIsALookup(t *testing.T) {
 
 // TestTheReferenceCheckOverTheSchemaReadsTheDatabaseAndNothingElse: the
 // default the node binds is the statement of spec 004, and a database that
-// will not answer it is not a licence to delete.
+// will not answer it is not a license to delete.
 func TestTheReferenceCheckOverTheSchemaReadsTheDatabaseAndNothingElse(t *testing.T) {
 	referenced, err := schemaReferences{}.Referenced(t.Context(), refusing{}, object.NewID())
 	if err == nil || referenced {

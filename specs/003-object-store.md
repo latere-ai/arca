@@ -116,7 +116,7 @@ dependency and its packages join the `depcheck` allow list of
 | `ARCA_PUBLIC_CDN_URL` | the base a public object's redirect points at |
 
 The table is [[002-repository-scaffold]]'s; this spec gives the rows
-their meaning and adds none. `ARCA_BUCKET_PREFIX` is normalised at
+their meaning and adds none. `ARCA_BUCKET_PREFIX` is normalized at
 start-up: a missing trailing `/` is appended, a leading `/` is a
 configuration error, and the value must match `[A-Za-z0-9._/-]*`.
 
@@ -380,7 +380,7 @@ lifecycle or replication configuration, which is the operator's
 | 9 | `List` pages on the truncation flag and not on a short result | the store tier, seeded past one page |
 | 10 | `AbortMultipart` on an already finished upload succeeds | the store tier |
 | 11 | `SetPublic` on a store without object ACLs returns `ErrNotSupported` and the read still answers | `internal/blob` test, plus [[005-files]]'s handler test |
-| 12 | `blob.Memory` and the MinIO client pass one shared table of behaviours | one test table run against both, in `internal/blob` |
+| 12 | `blob.Memory` and the MinIO client pass one shared table of behaviors | one test table run against both, in `internal/blob` |
 
 
 ## Outcome

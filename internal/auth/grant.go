@@ -15,7 +15,7 @@ import (
 
 // The grant step of the question (spec 006). Every question about a file or
 // a workspace carries the highest live grant the caller holds on a prefix of
-// the resource's path, in the caller's favour, resolved here before the
+// the resource's path, in the caller's favor, resolved here before the
 // question goes out.
 //
 // It is resolved in both modes, and that is the point. With

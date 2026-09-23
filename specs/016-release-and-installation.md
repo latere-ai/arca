@@ -75,7 +75,7 @@ died on `warm http://arca-stubs:8081: Client.Timeout exceeded while
 awaiting headers`. `deploy/examples/kind/networkpolicy-stack.yaml` now
 admits 8081, 8082 and 9000, and
 `TestEveryOverlayAdmitsTheEgressItsEndpointsNeed` holds every overlay's
-dialled endpoints against the ports its policies admit, so the class is
+dialed endpoints against the ports its policies admit, so the class is
 covered and not only the instance. The Design's deploy tree says the
 rule below.
 
@@ -321,7 +321,7 @@ skipped.
 
 | Step | What the operator does | Checked by |
 |---|---|---|
-| 1 | create a bucket on any store with the S3 API that honours `If-None-Match: *` on put ([[003-object-store]]), and a credential that may put, get, head, delete, list, and presign under one prefix | `arcad check` |
+| 1 | create a bucket on any store with the S3 API that honors `If-None-Match: *` on put ([[003-object-store]]), and a credential that may put, get, head, delete, list, and presign under one prefix | `arcad check` |
 | 2 | create a Postgres 16 or newer database and a role that owns its schema | `arcad check` |
 | 3 | choose the issuers whose tokens are verified and set `ARCA_OIDC_ISSUERS`; tokens must carry `aud: arca` unless `ARCA_OIDC_AUDIENCE` says otherwise ([[006-identity]]) | `arcad check` reaches each issuer's key set |
 | 4 | optionally set `ARCA_AUTHORIZER_URL` and `ARCA_AUTHORIZER_TOKEN`; with neither, the owner policy applies and `ARCA_ADMIN_SUBJECTS` names the administrators | `arcad check` asks one probe question about a reserved space that belongs to nobody, and the line passes only on a deny: an endpoint that answers `200` to everything fails it. The owner policy denies the probe too, so the line holds in both configurations |

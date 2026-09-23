@@ -160,7 +160,7 @@ func TestTheDocumentIsWhatPromtoolReads(t *testing.T) {
 			t.Errorf("rule %d reads %+v", i, r)
 		}
 		if r.Annotations["summary"] != a.Summary {
-			t.Errorf("%s summarises itself as %q", a.Name, r.Annotations["summary"])
+			t.Errorf("%s summarizes itself as %q", a.Name, r.Annotations["summary"])
 		}
 	}
 }

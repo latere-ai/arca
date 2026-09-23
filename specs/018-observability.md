@@ -260,7 +260,7 @@ carries a path, an object name, a principal's subject, a workspace
 slug, or a token. `route` is the
 `http.ServeMux` pattern, taken from a context value a middleware behind
 the mux fills, because the route template is not known before the mux
-matches. Every histogram names its bounds. A labelled counter is
+matches. Every histogram names its bounds. A labeled counter is
 registered with one zero observation per combination of its
 vocabularies, so a series exists before the first event.
 

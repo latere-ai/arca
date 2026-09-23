@@ -387,7 +387,7 @@ func TestAnAuthorizerThatIsNotConfiguredIsNotAFailure(t *testing.T) {
 // served under, so an operator running check beside a replica reads where
 // its routes answer rather than inferring it from a 404 at the origin.
 //
-// The prefix is reported and not dialled, on the reachable address and the
+// The prefix is reported and not dialed, on the reachable address and the
 // unreachable one alike: this requirement passes on an address nothing
 // answers by design, so a dial here could not fail where the prefix is
 // wrong. The origin is proved by the release smoke instead.

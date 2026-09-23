@@ -20,7 +20,7 @@
 // outside the verifier, resolve the token first, and ask link.read with an
 // anonymous subject. Nothing else is outside it.
 //
-// The behaviour of each route is the owning spec's. This package holds the
+// The behavior of each route is the owning spec's. This package holds the
 // wire and the frame, and a row whose spec has not landed answers
 // not_implemented from its right place in the router.
 package api
@@ -86,11 +86,11 @@ type Options struct {
 	// Links answers the three public link routes of spec 008. They are the
 	// frame's own rows, because a row contributed through Routes is behind
 	// the verifier and these three are the exception to it, so the service
-	// that holds their behaviour is handed over rather than registered. A
+	// that holds their behavior is handed over rather than registered. A
 	// build that binds none answers not_implemented from them.
 	Links Links
 	// Routes are the rows of spec 013's table the packages that own their
-	// behaviour contribute. See register.go: a contributed row is behind
+	// behavior contribute. See register.go: a contributed row is behind
 	// the verifier, asks one action of spec 006's vocabulary, and joins the
 	// one list the mux and the document are both built from.
 	Routes []Route

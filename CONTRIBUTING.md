@@ -33,7 +33,7 @@ make check-all    # the gate and both tiers, before pushing something that touch
 A tier without the stack skips itself and says what to run, so
 `go test ./...` on a clean clone is green with no services.
 
-Install the hooks once with `make hooks`. They run formatting and licence
+Install the hooks once with `make hooks`. They run formatting and license
 checks before a commit and the linter before a push, so you see a finding
 before CI does.
 
@@ -55,7 +55,7 @@ reasoning attached.
 linter, modernization, known vulnerabilities, the suite with and without
 the race detector, per-package coverage at 90% or more, the suite with
 only the toolchain on `PATH`, the suite against an empty temporary
-directory, the licence notice, the dependency allow list, and the spec
+directory, the license notice, the dependency allow list, and the spec
 tree. `go tool lateregate list` names the gates and
 `go tool lateregate <name>` runs one.
 

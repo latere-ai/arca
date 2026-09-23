@@ -236,7 +236,7 @@ func algorithmOf(alg, kty string) string {
 // denies for every subject.
 //
 // An endpoint that allows it is a failure and not a warning: an endpoint that
-// allows an action it does not recognise allows every action Arca will ever
+// allows an action it does not recognize allows every action Arca will ever
 // add, which is the one misconfiguration that cannot be noticed from the
 // outside.
 //
@@ -278,7 +278,7 @@ func checkAuthorizer(ctx context.Context, o Options) Requirement {
 // ordinary case rather than a misconfiguration.
 //
 // The line names ARCA_BASE_PATH beside the origin, which is the whole of what
-// this command can say about it (spec 027). The prefix is not dialled: the
+// this command can say about it (spec 027). The prefix is not dialed: the
 // requirement passes on an unreachable address by design, so a dial there
 // could not fail where the prefix is wrong, and the address that proves it is
 // the origin the release smoke reads from outside the cluster.
@@ -299,7 +299,7 @@ func checkPublicURL(ctx context.Context, o Options) Requirement {
 	return passed(NamePublicURL, "%s: answers the version endpoint", where)
 }
 
-// errUnreachable is a dependency that could not be dialled at all, which the
+// errUnreachable is a dependency that could not be dialed at all, which the
 // public URL alone reads as something other than a failure.
 var errUnreachable = errors.New("nothing answered")
 

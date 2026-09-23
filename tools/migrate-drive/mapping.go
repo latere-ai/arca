@@ -23,7 +23,7 @@ import (
 //	organization,subject
 //	7b1d…,https://issuer.example|org-acme
 //
-// The CSV header is optional and is recognised by its first field. Every row
+// The CSV header is optional and is recognized by its first field. Every row
 // needs both columns; a blank line is skipped and anything else is an error,
 // because a mapping read half way is a copy that refuses part way through.
 func ReadMapping(path string) (map[string]string, error) {

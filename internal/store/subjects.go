@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// Subject is one space Arca has seen, as something a person recognises. It
+// Subject is one space Arca has seen, as something a person recognizes. It
 // is presentation only: no authorization reads it, and a subject that is not
 // here is a subject like any other.
 type Subject struct {

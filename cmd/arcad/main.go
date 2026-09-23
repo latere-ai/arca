@@ -4,7 +4,7 @@
 // Command arcad is the Arca server: durable storage for people, agents,
 // and sandboxes over an S3 compatible bucket and a Postgres database. This
 // file is the entry point and holds wiring only: configuration, the
-// listeners, and the run group. The behaviour lives in the packages under
+// listeners, and the run group. The behavior lives in the packages under
 // internal/ and in the exported packages at the module root.
 package main
 

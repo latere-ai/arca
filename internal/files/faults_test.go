@@ -180,7 +180,7 @@ func TestBytesNothingCanRemoveAreLeftForTheReaper(t *testing.T) {
 	}
 }
 
-// refused is a reference check that answers nothing, which is not a licence
+// refused is a reference check that answers nothing, which is not a license
 // to delete.
 type refused struct{}
 

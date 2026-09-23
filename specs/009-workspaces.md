@@ -505,7 +505,7 @@ unchanged. Five things do not fit, and each is a line of
 
 | What the client does | What Arca answers |
 |---|---|
-| reads a 409 as `{"error": "writer_held", "holder_sandbox_id": …}` and as `{"error": "manifest_incomplete", "missing": […]}` | the family envelope of [[013-api]], so `WriterHeldError.HolderSandboxID` comes back empty and `ManifestIncompleteError` is never recognised. Both 409 branches are rewritten against `error.code`, and the missing paths move to `error.details.fields` |
+| reads a 409 as `{"error": "writer_held", "holder_sandbox_id": …}` and as `{"error": "manifest_incomplete", "missing": […]}` | the family envelope of [[013-api]], so `WriterHeldError.HolderSandboxID` comes back empty and `ManifestIncompleteError` is never recognized. Both 409 branches are rewritten against `error.code`, and the missing paths move to `error.details.fields` |
 | sends `kind` on a create | `unknown_field`, 400. There is no kind |
 | sends `?kind=` and `?scope=all` on a list | both are ignored. A shared workspace reaches a caller through the grant and the narrowing of a list is the authorizer's `filter` |
 | reads `kind`, `locked` and `agent_access` off a workspace | `lease`, an object that is null when no writer holds one, and neither of the other two |
@@ -556,7 +556,7 @@ spec's table, the second in `arcad reap` as well, because it puts no
 question.
 
 Every criterion's claim holds against the tree. Two of them are proved by a
-different artefact than the Proved by column named, criterion 9 by the shape
+different artifact than the Proved by column named, criterion 9 by the shape
 of the code rather than by a race and criterion 17 by the gate rather than by
 an in-package test, and each is written out below rather than left for a
 reader to find.

@@ -22,7 +22,7 @@ import (
 // frame binds it, because that package is under this one and a row it
 // contributed would be an import cycle.
 //
-// Every other row's behaviour belongs to a package above this one, which
+// Every other row's behavior belongs to a package above this one, which
 // holds its own handlers, so it declares its rows and the node hands them
 // here. The mux and the OpenAPI document are still built from one list read
 // twice, which is the property the frame exists to keep.
@@ -34,7 +34,7 @@ import (
 // opens by passing a field.
 
 // Route is one row of spec 013's table contributed by the package that owns
-// its behaviour.
+// its behavior.
 type Route struct {
 	// Method and Path are the registration, with the wildcards in the
 	// router's own spelling: "/v1/workspaces/{id}/attach/{aid}/renew".

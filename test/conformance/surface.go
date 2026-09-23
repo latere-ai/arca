@@ -22,10 +22,10 @@ import (
 // the difference is the pending set.
 
 // route is one row of spec 013's table: the registration in the router's
-// spelling, and the spec that owns the behaviour behind it.
+// spelling, and the spec that owns the behavior behind it.
 type route struct {
 	method, path string
-	// spec is the number of the spec that owns the behaviour, which is what
+	// spec is the number of the spec that owns the behavior, which is what
 	// the pending group reports a route as waiting on.
 	spec string
 }

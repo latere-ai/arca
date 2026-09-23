@@ -31,7 +31,7 @@ import (
 // real store will not produce on demand.
 //
 // It is not a substitute for MinIO. The store tier runs the same table of
-// behaviours against a real store, which is where a signature, a policy, and
+// behaviors against a real store, which is where a signature, a policy, and
 // a store's own idea of an ETag are proved.
 type fakeS3 struct {
 	srv       *httptest.Server

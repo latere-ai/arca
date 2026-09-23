@@ -4,7 +4,7 @@
 //go:build tiers
 
 // The store tier of spec 014: internal/blob against a real MinIO. What it
-// proves is what a fake cannot: that a store honours the conditional create
+// proves is what a fake cannot: that a store honors the conditional create
 // under a race, that a presigned URL is one key and one method, that a
 // listing pages the way the API pages, and that a body corrupted in flight
 // is refused.
@@ -515,7 +515,7 @@ func TestStoreACopyAboveTheLimitGoesThroughTheTail(t *testing.T) {
 // stack's MinIO answers to If-None-Match: * on a copy, which is the finding
 // the object move of spec 019 rests its resume on.
 //
-// The store neither honours the condition nor refuses it: it overwrites. So
+// The store neither honors the condition nor refuses it: it overwrites. So
 // a move cannot read a refusal as "the destination is already there" and
 // cannot read a success as "it was not". It reads the destination instead,
 // which is what tools/move-objects does before it copies anything. The
@@ -535,7 +535,7 @@ func TestStoreTheConditionalCopyIsNotHonouredByEveryStore(t *testing.T) {
 
 	switch _, err := store.Copy(t.Context(), from, to, PutOptions{}); {
 	case errors.Is(err, ErrPreconditionFailed):
-		t.Log("the store honours the conditional copy")
+		t.Log("the store honors the conditional copy")
 	case err == nil:
 		t.Log("the store ignores the conditional copy and overwrites; the move reads the destination first")
 	default:

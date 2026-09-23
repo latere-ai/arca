@@ -393,7 +393,7 @@ $ echo $?
 **Amended 2026-09-20 ([[027-serving-under-the-capability-prefix]]).** The
 `public-url` line reports `ARCA_BASE_PATH` beside the origin, the base this
 server registers its routes under. No requirement is added and the count of
-five is unchanged: the prefix is reported and not dialled, because this
+five is unchanged: the prefix is reported and not dialed, because this
 requirement passes on an address nothing answers by design, so a dial there
 could not fail where the base is wrong. What proves the prefix at the origin
 is the release smoke of [[016-release-and-installation]], which reads one
@@ -407,7 +407,7 @@ output is printed in the order of the table, not the order they
 finished, so two runs of a healthy installation print identical output.
 
 An authorizer that allows the probe is a failure and not a warning. An
-authorizer that allows an action it does not recognise allows every
+authorizer that allows an action it does not recognize allows every
 action Arca will ever add, which is the one misconfiguration that cannot
 be noticed from the outside. `ARCA_AUTHORIZER_URL` unset is not a
 failure: the line reads `ok authorizer not configured; the owner policy

@@ -142,7 +142,7 @@ func TestADestinationThatIsAlreadyThereIsASkip(t *testing.T) {
 	}
 	// A killed run resumes, and a finished run repeats, by reading the
 	// destination rather than by trusting a conditional copy: the store the
-	// stack pins honours none.
+	// stack pins honors none.
 	second := moved(t, b, false, line)[notesKey]
 	if second.State != Skipped {
 		t.Fatalf("the second run is %s: %s", name(second.State), second.Why)

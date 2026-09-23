@@ -161,7 +161,7 @@ What the implementation decided, where this spec was silent:
   directly, and repeating the create stamps what the first attempt could
   not. A revoke whose stamp fails leaves the grant live over an object that
   is no longer public. Both failures land on the side that grants less.
-- The prefix a grant carries is normalised: a trailing slash is not part of
+- The prefix a grant carries is normalized: a trailing slash is not part of
   a subtree's name, and the whole of a plane is a prefix, since a path in no
   plane is a path this server does not serve.
 - A grant's listing is keyset paginated on the id as text, and the cursor is
@@ -198,7 +198,7 @@ What the implementation decided, where this spec was silent:
 | `created_at` | when |
 
 [[004-metadata-store]] owns the table and its indexes. The columns above
-are the ones behaviour in this spec depends on.
+are the ones behavior in this spec depends on.
 
 A grant covers a subtree, so a grant on a workspace root is a share of
 that workspace and [[009-workspaces]] needs no grant table of its own.
@@ -502,7 +502,7 @@ Where each criterion is proved:
 | 10 | `TestACreateWritesTheGrantAndAppendsOneEvent` and the revoke's half of `TestRevokingALinkStopsTheNextRedemption`; `cmd/arcad`'s `shareLedger` case for the closed vocabulary, and the e2e tail asserting two `share_created` and one `share_revoked` |
 | 11 | `TestNoHandlerReadsAClaimForMeaning`, which reads this package's own non-test files, beside the `identity` rule of `.lateregate.yaml` |
 
-Two of those proofs are not the artefact the table above named, and the
+Two of those proofs are not the artifact the table above named, and the
 substitution is deliberate. Criterion 2 named a conformance row per action
 driven against a recording authorizer; the conformance suite of
 [[017-conformance-suite]] is black box and cannot see what was asked, so the

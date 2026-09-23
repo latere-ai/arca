@@ -113,7 +113,7 @@ One package per stub under `test/stubs/`, each with a handler and a test
 that drives every flag, and `test/stubs/cmd/arca-stubs` serving both on
 two ports.
 
-| Stub | Serves | Behaviour |
+| Stub | Serves | Behavior |
 |---|---|---|
 | issuer | `/.well-known/openid-configuration`, `/jwks`, `POST /mint {sub, aud?, exp?, iat?, authorization_details?}` | a real OIDC issuer over an RS256 key set; mints any subject asked; `-alg es256` adds a second key and signs with it, for the ES256 case and the start-up key-set check of [[006-identity]]; `iat` and `exp` are settable so the 24 hour token-age rule is testable; `authorization_details` is passed through so a narrowed personal key is minted here and nowhere else. A token signed with an algorithm outside RS256 and ES256 is built by the verifier's own test, not offered here |
 | authorizer | the envelope of [[006-identity]], over the stub `latere.ai/x/pkg/authz` ships | allows everything except the probe resource, the id `probe` of kind `Space`, which is always denied, so `arcad check` has something to check; `-deny <action>` or the request header `X-Stub-Deny: <action>` refuses one action; `-filter <json>`, `-limits <json>`, and `-ttl <seconds>` ride every allow, so the byte limit of [[010-events-and-reaper]] and the list filter of [[013-api]] are exercised; `-fail-mode timeout\|malformed\|status:<code>\|no-allow\|conn-drop` produces each failure [[006-identity]] names, with `conn-drop` closing before a response line so the one retry runs; `-grants`, and `PUT /grants` on the control API, answers a request the rule table denied by the `grant` on its resource, admitting the ladder's actions of that rung, which is the one row a platform's decider adds to read [[006-identity]]'s grant and is what lets a tier prove a grantee reads a shared object under an external authorizer; every request is recorded and served at `GET /requests` so a tier asserts the action and the resource fields a handler asked with |
@@ -124,7 +124,7 @@ stand in for.
 
 Neither store is stubbed. A fake bucket that accepts `If-None-Match: *`
 whenever a real one would is the bug invariant 1 of [[001-architecture]]
-is written against, and a fake Postgres that serialises the way the
+is written against, and a fake Postgres that serializes the way the
 driver does is the reaper's failure mode. The tiers use the real ones.
 
 `Dockerfile.stubs` builds the image [[016-release-and-installation]]
@@ -145,7 +145,7 @@ to describe the same stack beside the one `make run` needs anyway, and
 it would make the store tier's failure mode a Go stack trace rather than
 `docker compose` output. The cost of the choice is that a tier cannot
 start its own stack and must skip when the stack is absent, which is the
-behaviour below. Nothing in the tree imports a container library, so the
+behavior below. Nothing in the tree imports a container library, so the
 choice is reversible in one package.
 
 Ports are published on loopback and derive from the checkout's directory

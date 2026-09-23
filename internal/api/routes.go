@@ -18,7 +18,7 @@ import (
 //
 // A row with pending set is registered at its right place, behind the right
 // verifier exception, and answers not_implemented until the spec that owns
-// its behaviour arrives. A later phase does not add rows here: it declares
+// its behavior arrives. A later phase does not add rows here: it declares
 // them as [Route] values and the node contributes them (register.go).
 type route struct {
 	method string
@@ -36,7 +36,7 @@ type route struct {
 	description string
 	// status is the status a success answers.
 	status int
-	// pending marks a row whose behaviour has not landed.
+	// pending marks a row whose behavior has not landed.
 	pending bool
 	// handler answers the route.
 	handler func(*API, http.ResponseWriter, *http.Request)
@@ -79,7 +79,7 @@ func (a *API) link(w http.ResponseWriter, r *http.Request, h func(Links, http.Re
 // somewhere else, and the event tail of spec 010, whose handler this package
 // binds because internal/events is under it. Every other row of spec 013's
 // table arrives through the seam of register.go, declared by the package
-// that owns its behaviour, on the phases of spec 019.
+// that owns its behavior, on the phases of spec 019.
 var routeTable = []route{
 	{
 		method: http.MethodGet, path: "/v1/events",

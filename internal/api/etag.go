@@ -124,7 +124,7 @@ func (p Precondition) Allows(checksum string) bool {
 
 // validators splits a header into its checksums and strips the quotes. A
 // weak validator is invalid_field: this API compares byte for byte, and a
-// caller that sent W/ meant something the server cannot honour.
+// caller that sent W/ meant something the server cannot honor.
 func validators(raw, header string) ([]string, error) {
 	var out []string
 	for part := range strings.SplitSeq(raw, ",") {

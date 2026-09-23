@@ -84,7 +84,7 @@ that miscounted is refused before a multipart exists. A create naming
 `checksum` and no digests is `invalid_field`: an algorithm with nothing
 to verify against is a client that believes it is protected and is not.
 
-A create that names no checksum keeps today's behaviour exactly. The
+A create that names no checksum keeps today's behavior exactly. The
 field is optional and stays optional: a client that cannot hash a part
 before it sends it, which is every client streaming from a source it
 reads once, is not locked out of resumable uploads.

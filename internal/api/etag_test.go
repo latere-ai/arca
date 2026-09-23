@@ -108,7 +108,7 @@ func TestConditionalRequests(t *testing.T) {
 
 // TestAWeakValidatorIsRefused: this API compares checksums byte for byte, so
 // a caller that sent a weak validator asked for something the server cannot
-// honour, and is told rather than quietly given a strong comparison.
+// honor, and is told rather than quietly given a strong comparison.
 func TestAWeakValidatorIsRefused(t *testing.T) {
 	for _, header := range []string{HeaderIfMatch, HeaderIfNoneMatch} {
 		t.Run(header, func(t *testing.T) {

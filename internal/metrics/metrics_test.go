@@ -33,7 +33,7 @@ func expose(t *testing.T, record func(*Set)) string {
 }
 
 // TestRegisterWithoutARegistryKeepsItsOwn: a recording package under test
-// asserts on behaviour and not on exposition, so it builds the surface with
+// asserts on behavior and not on exposition, so it builds the surface with
 // no registry and records into one of this package's own.
 func TestRegisterWithoutARegistryKeepsItsOwn(t *testing.T) {
 	s := Register(nil)
@@ -90,7 +90,7 @@ func TestALabelOutsideItsVocabularyIsNotRecorded(t *testing.T) {
 		strings.Contains(text, "teleported") || strings.Contains(text, "ignored") {
 		t.Error("a value outside a closed vocabulary reached the exposition")
 	}
-	// The duration is labelled by the route alone and carries no refused
+	// The duration is labeled by the route alone and carries no refused
 	// value, so its series exists; the counter's does not.
 	if !strings.Contains(text, `arca_request_duration_seconds_count{route="/v1/files/{path...}"}`) {
 		t.Error("a request the table could not classify was not timed")
@@ -501,7 +501,7 @@ func TestTheAccessorsAnswerCopies(t *testing.T) {
 	}
 }
 
-// TestADurationIsObservedWhateverTheStatus: the duration is labelled by the
+// TestADurationIsObservedWhateverTheStatus: the duration is labeled by the
 // route alone, so a request whose status or code the table does not name was
 // still served in some amount of time and the histogram says so.
 func TestADurationIsObservedWhateverTheStatus(t *testing.T) {

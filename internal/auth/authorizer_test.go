@@ -166,7 +166,7 @@ func TestUnavailableIsNeverAnAllow(t *testing.T) {
 // sentence.
 func TestADenyIsForbiddenAndALookupIsNotFound(t *testing.T) {
 	s := endpoint(t)
-	s.Deny(stub.Rule{Subject: "*", Action: "*", Resource: "*"}, "bob is not a member of the space's organisation")
+	s.Deny(stub.Rule{Subject: "*", Action: "*", Resource: "*"}, "bob is not a member of the space's organization")
 	a := asking(t, s, nil)
 
 	_, err := a.Decide(serving(bob), authorizer.ActionFileRead, aFile("01J8R4"))
