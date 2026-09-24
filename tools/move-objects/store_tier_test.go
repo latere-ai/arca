@@ -66,8 +66,8 @@ func tierBodies() map[string][]byte {
 }
 
 // TestStoreTheTwoCommandsOfStepThreeLeaveEveryByteAtItsObjectIDsKey is the
-// cutover's step 3, run the way docs/operations.md tells an operator to run
-// it: the row copy with a manifest, then the move.
+// cutover's step 3, run the way docs/internals/drive-migration.md tells an
+// operator to run it: the row copy with a manifest, then the move.
 func TestStoreTheTwoCommandsOfStepThreeLeaveEveryByteAtItsObjectIDsKey(t *testing.T) {
 	endpoint := os.Getenv("E2E_S3_ENDPOINT")
 	if endpoint == "" || os.Getenv("E2E_DATABASE_URL") == "" {
