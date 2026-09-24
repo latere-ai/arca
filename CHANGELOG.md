@@ -6,6 +6,12 @@ refused before it is pushed.
 
 ## Unreleased
 
+- **The local stack and the kind example run MinIO from the maintained
+  fork's images.** `compose.yaml` and `deploy/examples/kind` pin
+  `ghcr.io/latere-ai/minio` and `ghcr.io/latere-ai/mc` by tag and digest.
+  MinIO's own community images no longer answer anonymous pulls, so the
+  kind example of an earlier release stops at MinIO in `ImagePullBackOff`.
+
 ## v0.2.0 - 2026-09-20
 
 - **The surface is served under `ARCA_BASE_PATH`, and the production origin

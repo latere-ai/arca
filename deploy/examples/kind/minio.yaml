@@ -32,7 +32,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: minio
-          image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+          image: ghcr.io/latere-ai/minio:RELEASE.2026-09-24T20-02-18Z@sha256:889173592b42fb0ff8d00d540ddbdcecbb4607115160b8e29243b3ed51a4aceb
           args: ["server", "/data", "--console-address", ":9001"]
           env:
             - name: MINIO_ROOT_USER
@@ -104,7 +104,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: mc
-          image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+          image: ghcr.io/latere-ai/mc:RELEASE.2026-09-24T19-45-33Z@sha256:6e37dec77ff93cb690b9ba3f1fe2c3b34efa1cd77181fca909039819bd670a24
           command: ["/bin/sh", "-c"]
           args: ["mc alias set local http://minio:9000 minioadmin minioadmin && mc mb --ignore-existing local/arca-test"]
           env:
