@@ -1,8 +1,9 @@
 # Operating Arca
 
 What to do after [`install.md`](install.md): checking an installation,
-upgrades, rollbacks, what a version number promises, and what happens when
-something a replica depends on goes away.
+verifying a release, upgrades and rollbacks, what a version number
+promises, what happens when something a replica depends on goes away, and
+what to watch.
 
 ## Checking an installation
 
@@ -62,7 +63,7 @@ cosign verify ghcr.io/latere-ai/arcad:vX.Y.Z \
   --certificate-identity-regexp '^https://github\.com/.+/\.github/workflows/release\.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
-gh attestation verify oci://ghcr.io/latere-ai/arcad:vX.Y.Z --repo <owner>/arca
+gh attestation verify oci://ghcr.io/latere-ai/arcad:vX.Y.Z --repo latere-ai/arca
 
 cosign verify-blob --bundle checksums.txt.cosign.bundle checksums.txt \
   --certificate-identity-regexp '^https://github\.com/.+/\.github/workflows/release\.yml@refs/tags/v' \
@@ -92,21 +93,34 @@ The two most recent minor series receive patches.
 
 ## Upgrading
 
-```sh
-# 1. Read the changelog section for the version you are going to.
-# 2. Run the migration, with the Job's image set to that version.
-kubectl -n arca delete job arcad-migrate --ignore-not-found
-kubectl -n arca apply -f deploy/bootstrap/migrate-job.yaml
-kubectl -n arca wait --for=condition=complete job/arcad-migrate --timeout=300s
+1. Read the [changelog](../CHANGELOG.md) section of every release between
+   the one you run and the one you are going to. A break is named there.
+2. Take a `pg_dump` of the database. It is the only way back across a
+   migration; see [rolling back](#rolling-back).
+3. Run the migration with the new release's image:
 
-# 3. Roll the replicas.
-kubectl -n arca set image deployment/arcad arcad=ghcr.io/latere-ai/arcad:vX.Y.Z
-kubectl -n arca rollout status deployment/arcad --timeout=600s
+   ```sh
+   kubectl -n arca delete job arcad-migrate --ignore-not-found
+   sed 's|ghcr.io/latere-ai/arcad:unreleased|ghcr.io/latere-ai/arcad:vX.Y.Z|' \
+     deploy/bootstrap/migrate-job.yaml | kubectl -n arca apply -f -
+   kubectl -n arca wait --for=condition=complete job/arcad-migrate --timeout=300s
+   ```
 
-# 4. Prove it.
-kubectl -n arca exec deploy/arcad -- arcad check
-BASE_URL=https://arca.example.com TAG=vX.Y.Z tools/smoke/release.sh
-```
+4. Set `newTag` in your overlay's `images:` entry to the new release and
+   apply it. The one entry covers the API replicas and the reconciler,
+   which run the same image.
+
+   ```sh
+   kubectl apply -k deploy/mine
+   kubectl -n arca rollout status deployment/arcad --timeout=600s
+   ```
+
+5. Check it, and confirm the served version is the new one:
+
+   ```sh
+   kubectl -n arca exec deploy/arcad -- arcad check
+   curl -s https://arca.example.com/version
+   ```
 
 The migration runs before the rollout, and there is no window in which it
 must not. Each migration is additive, or is preceded by one release that
@@ -114,9 +128,9 @@ writes both shapes, so a replica of release N and a replica of release N+1
 serve the same database while the rollout is half done. That is what makes
 a rolling update safe rather than a maintenance window.
 
-The smoke's `TAG` is the step that catches a rollout that returned while
-replicas of the previous release were still in the endpoint list: the
-served version would be the old one, and the smoke fails.
+Reading `/version` through your hostname catches a rollout that reported
+done while replicas of the previous release were still behind the
+Service.
 
 ## Rolling back
 
@@ -126,15 +140,21 @@ Inside a minor series, a rollback is a rollback of the image:
 kubectl -n arca rollout undo deployment/arcad
 ```
 
-Across a migration it is not. A binary started against a schema recorded
-above its own refuses to start and names both versions, so the rollback
-stops before it corrupts anything rather than after. To go back across a
-migration you restore the database from a `pg_dump` taken before it, and
-leave the bucket alone: the bucket holds no schema, and a key the restored
-database no longer names is something the reconciler finds and reports, not
-a loss.
+or set the previous tag in your overlay and apply it.
 
-Take that dump before every migration. It is the only rollback there is.
+An image rollback across a migration is not refused either: `arcad` starts
+against a database whose schema is ahead of its own. That is safe only
+because every migration is additive, or is preceded by a release that
+writes both shapes, so the older binary reads what the newer one wrote. A
+binary refuses to start only against a schema behind its own.
+
+When a migration itself has to be undone, restore the database from a
+`pg_dump` taken before it, and leave the bucket alone. The bucket holds no
+schema. An object written after the dump has a key the restored database
+no longer names, and the reconciler removes such keys after its 24 hour
+grace, so copy out anything written since the dump before you restore.
+
+Take that dump before every migration. It is the only way back across one.
 
 ## When a store goes away
 
@@ -266,11 +286,25 @@ serves.
 
 ## Running the reconciler on its own
 
-The reconciler sweeps for objects the database no longer names, for trash
-past its retention, for workspaces deleted longer ago than that, and for
-grants that expired that long ago. It runs inside `arcad serve` by default, which is
-what a small installation wants.
+The reconciler removes bytes the database no longer names, reports rows
+whose bytes are missing, purges trash past its retention and workspaces
+deleted longer ago than that, aborts expired upload sessions, ends expired
+writer leases, removes grants that expired that long ago, prunes stars
+whose file is gone and events older than 30 days, and corrects the usage
+counters. It runs inside `arcad serve` every `ARCA_REAP_INTERVAL`, which is
+what a small installation wants. Every pass is safe to run on several
+replicas at once.
 
-To move it off the API replicas, patch `arcad-reaper` to one replica in your
-overlay and set `ARCA_REAP_INTERVAL=0` on `arcad`. Exactly one replica: the
-sweep is over the whole installation, and two would do the same work twice.
+To move it off the API replicas, patch the `arcad-reaper` Deployment to one
+replica in your overlay and set `ARCA_REAP_INTERVAL=0` on `arcad`. Exactly
+one replica: the sweep is over the whole installation, and two would do the
+same work twice. `arcad reap` runs every pass except the lease expiry, which
+needs a serving replica; with the loop off everywhere, an expired writer
+lease still yields to the next writer that attaches, but no `reap` event is
+recorded for it.
+
+To see what a pass would do without changing anything:
+
+```sh
+kubectl -n arca exec deploy/arcad -- arcad reap -once -dry-run
+```
