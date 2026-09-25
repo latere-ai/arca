@@ -6,6 +6,10 @@ refused before it is pushed.
 
 ## Unreleased
 
+- **The local stack and the kind example run MinIO
+  `RELEASE.2026-09-25T12-30-31Z`,** which adds the maintained fork's
+  security fixes. The conditional writes Arca relies on behave as before.
+
 - **The production overlay no longer admits egress to 40318.** The
   telemetry collector the namespace injects is dialed on that host port,
   but Cilium translates it to the collector Pod's 4318 before policy is
