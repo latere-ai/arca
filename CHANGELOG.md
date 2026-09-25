@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.2.1 - 2026-09-25
+
 - **The local stack and the kind example run MinIO from the maintained
   fork's images.** `compose.yaml` and `deploy/examples/kind` pin
   `ghcr.io/latere-ai/minio` and `ghcr.io/latere-ai/mc` by tag and digest.
