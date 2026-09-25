@@ -22,12 +22,11 @@
 # the base writes it. The reaper carries the same label as the server and
 # reads the same database, so one policy covers both.
 #
-# 40318 is the telemetry collector's. The namespace carries a monitoring
-# resource that instruments every workload in it, and the collector it
-# injects is reached on the node at 40318 rather than on the 4317 and 4318
-# the base admits. Telemetry is not readiness, so a dropped export fails
-# nothing and says nothing: the service would have gone dark while looking
-# healthy, which spec 018 exists to prevent.
+# The telemetry collector needs no port here. The namespace's monitoring
+# injects an endpoint on the node's host port 40318, but Cilium translates
+# that to the collector Pod's container port 4318 before policy is
+# evaluated, so the base's 4317 and 4318 rule is the one that admits the
+# export. A rule naming 40318 matches nothing, which is why none is here.
 #
 # 25061 is admitted although nothing dials it yet. The pooled DSN is
 # written into `arcad-database` from the cutover and read by a later
@@ -51,8 +50,6 @@ spec:
         - port: 25060
           protocol: TCP
         - port: 25061
-          protocol: TCP
-        - port: 40318
           protocol: TCP
         # 8081 is platformd's internal container port, where the Arca
         # decider answers. arcad dials the Service on port 80, but a

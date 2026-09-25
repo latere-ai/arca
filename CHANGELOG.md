@@ -6,6 +6,13 @@ refused before it is pushed.
 
 ## Unreleased
 
+- **The production overlay no longer admits egress to 40318.** The
+  telemetry collector the namespace injects is dialed on that host port,
+  but Cilium translates it to the collector Pod's 4318 before policy is
+  evaluated, so the base's 4318 rule is what admits the export and a rule
+  naming 40318 matched nothing. Exports are unchanged. A test now refuses
+  any policy that names the collector's host port.
+
 ## v0.2.1 - 2026-09-25
 
 - **The local stack and the kind example run MinIO from the maintained

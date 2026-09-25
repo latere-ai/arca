@@ -397,12 +397,43 @@ func TestProdAdmitsTheDatabasePortsThisInstallationUses(t *testing.T) {
 	for _, c := range []struct{ port, why string }{
 		{"25060", "the managed database listens there and the base names only 5432"},
 		{"25061", "the database's connection pool listens there"},
-		{"40318", "the telemetry collector injected into this namespace is reached there, not on the 4317 and 4318 the base admits"},
 		{"8081", "platformd's internal container port answers the Arca decider; policy is evaluated on the pod port after the Service translation, so the base's 80 does not cover it"},
 	} {
 		if !admitted[c.port] {
 			t.Errorf("deploy/prod admits no egress to %s; %s", c.port, c.why)
 		}
+	}
+}
+
+// TestNoPolicyAdmitsTheCollectorsHostPort: the collector the namespace
+// injects is dialed on the node's host port (40317 for gRPC, 40318 for
+// HTTP), and Cilium translates that to the collector Pod's container port
+// before policy is evaluated. A rule naming the host port matches nothing,
+// so it reads as coverage while the export would be dropped; the base's
+// 4317 and 4318 rule is what admits it, and it must stay.
+func TestNoPolicyAdmitsTheCollectorsHostPort(t *testing.T) {
+	collectorPort := false
+	for _, dir := range []string{"deploy/base", "deploy/prod"} {
+		for _, d := range read(t, dir) {
+			if d.kind() != "NetworkPolicy" {
+				continue
+			}
+			for _, rule := range d.at("spec").items("egress") {
+				for _, port := range rule.items("ports") {
+					switch port.text("port") {
+					case "40317", "40318":
+						t.Errorf("%s admits egress to %s, the collector's host port, which no packet matches after Cilium's translation; admit the collector's container port instead", d.rel, port.text("port"))
+					case "4318":
+						if dir == "deploy/base" {
+							collectorPort = true
+						}
+					}
+				}
+			}
+		}
+	}
+	if !collectorPort {
+		t.Error("deploy/base admits no egress to 4318, the collector's container port, so no export reaches it")
 	}
 }
 

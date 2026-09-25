@@ -231,11 +231,11 @@ func TestTheStackScriptsAreExecutable(t *testing.T) {
 // instruments a whole namespace injects. An overlay that writes either into a
 // manifest is held to the same egress rule as the bucket and the database.
 //
-// An injected endpoint reaches no manifest, so this test cannot see it and
-// nothing here holds deploy/prod's collector port: 40318 is asserted by
-// TestProdAdmitsTheDatabasePortsThisInstallationUses in prod_test.go, beside
-// the database ports, which is the only place the pairing of a port with an
-// endpoint no file in this tree carries can be asserted at all.
+// An injected endpoint reaches no manifest, so this test cannot see it. The
+// injected collector is dialed on a host port that Cilium translates to the
+// collector Pod's 4318 before policy is evaluated, so the base's 4318 rule
+// admits it; TestNoPolicyAdmitsTheCollectorsHostPort in prod_test.go holds
+// that rule and refuses a policy naming the host port.
 var dialed = []string{
 	"ARCA_OIDC_ISSUERS",
 	"ARCA_AUTHORIZER_URL",

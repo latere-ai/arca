@@ -265,9 +265,13 @@ are additive, so widening one overlay leaves the confinement every other
 installation inherits as the base writes it. Two overlays in this tree
 need one. The kind stack reaches the stub issuer on 8081, the stub
 authorizer on 8082 and MinIO on 9000, and crash-looped the `v0.1.1` run
-before it had one. `deploy/prod` reaches a managed Postgres on 25060,
-its connection pool on 25061, and the collector the namespace injects on
-40318. `TestEveryOverlayAdmitsTheEgressItsEndpointsNeed` reads every
+before it had one. `deploy/prod` reaches a managed Postgres on 25060
+and its connection pool on 25061. The collector the namespace injects is
+dialed on the node's host port 40318, which Cilium translates to the
+collector Pod's 4318 before policy is evaluated, so the base's 4318 rule
+admits it and a rule naming 40318 would match nothing (corrected
+2026-09-25; the overlay admitted 40318 until then).
+`TestEveryOverlayAdmitsTheEgressItsEndpointsNeed` reads every
 address an overlay configures out of its manifests and its Secrets and
 holds it to the admitted ports; an address the tree does not hold,
 because it is in a Secret an operator fills in, is named in the
