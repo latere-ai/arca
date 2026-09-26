@@ -95,6 +95,15 @@ func attributeOf(s sdktrace.ReadOnlySpan, key attribute.Key) string {
 	return ""
 }
 
+// spanName is the name of a request span: its method and its route, or its
+// method alone for a request no route serves.
+func spanName(method, route string) string {
+	if route == "" {
+		return method
+	}
+	return method + " " + route
+}
+
 // measuredRoutes is how many requests the request histogram counted under
 // each http.route, with "" for a data point that carries none.
 func measuredRoutes(t *testing.T, reader *sdkmetric.ManualReader) map[string]uint64 {
@@ -159,7 +168,8 @@ func send(t *testing.T, method, target, bearer string) *http.Response {
 // measurement of the request histogram, both named by the pattern of the row
 // it matched and never by the path it was sent. A request the verifier
 // refused is named by the route it asked for, so a 401 is counted where it
-// happened.
+// happened. A request no route serves carries no http.route and its span is
+// named by its method alone.
 func TestEveryRequestIsOneServerSpanAndOneMeasurementNamedByItsRoute(t *testing.T) {
 	spans, reader := recording(t)
 	iss := issuertest.New(t, issuertest.WithDefaultAudience("arca"))
@@ -184,10 +194,10 @@ func TestEveryRequestIsOneServerSpanAndOneMeasurementNamedByItsRoute(t *testing.
 		// method no link route takes, which the verifier refuses, and a
 		// path the router redirects before any handler runs, which is named
 		// by the row the redirect leads to.
-		{http.MethodPost, links, "", api.Unmatched},
+		{http.MethodPost, links, "", ""},
 		{http.MethodGet, links + "/files", "", "/v1/shares/links/{token}/files/{path...}"},
-		{http.MethodGet, publicURL + "/v1/nothing/here", bearer, api.Unmatched},
-		{http.MethodGet, publicURL + "/nothing", "", api.Unmatched},
+		{http.MethodGet, publicURL + "/v1/nothing/here", bearer, ""},
+		{http.MethodGet, publicURL + "/nothing", "", ""},
 		{http.MethodGet, internalURL + "/version", "", "/version"},
 	}
 	probed := []string{
@@ -221,12 +231,12 @@ func TestEveryRequestIsOneServerSpanAndOneMeasurementNamedByItsRoute(t *testing.
 	}
 	var want, got []string
 	for _, o := range observed {
-		want = append(want, o.method+" "+o.route)
+		want = append(want, spanName(o.method, o.route))
 	}
 	for _, s := range server {
 		got = append(got, s.Name())
 		method := attributeOf(s, "http.request.method")
-		if route := attributeOf(s, "http.route"); method+" "+route != s.Name() {
+		if route := attributeOf(s, "http.route"); spanName(method, route) != s.Name() {
 			t.Errorf("the span %q carries http.route %q", s.Name(), route)
 		}
 		if path := attributeOf(s, "url.path"); strings.Contains(path, linkToken) {
@@ -264,6 +274,31 @@ func TestEveryRequestIsOneServerSpanAndOneMeasurementNamedByItsRoute(t *testing.
 	for route, n := range measured {
 		if _, ok := wantMeasured[route]; !ok {
 			t.Errorf("%s counted %d requests under http.route %q, which no observed request matched", requestDuration, n, route)
+		}
+	}
+}
+
+// TestARequestNoRouteServesHasNoRouteTemplate: the template a listener
+// hands the request span is the path of a pattern registered on it, and ""
+// where none serves the request: a path nobody registered, a method the
+// pattern does not take, and a mount the surface owns, which names its rows
+// itself. A value in that place would be carried as http.route.
+func TestARequestNoRouteServesHasNoRouteTemplate(t *testing.T) {
+	const version = "GET /version"
+	mux := http.NewServeMux()
+	mux.HandleFunc(version, identify)
+	mux.Handle("/v1/", http.NotFoundHandler())
+	// A surface that was never mounted names no request, so every name
+	// below comes from the patterns this listener registered.
+	l := listener{mux: mux, own: []string{version}, surface: &api.API{}}
+	for _, c := range []struct{ method, path, want string }{
+		{http.MethodGet, "/version", "/version"},
+		{http.MethodPost, "/version", ""},
+		{http.MethodGet, "/v1/nothing/here", ""},
+		{http.MethodGet, "/nothing", ""},
+	} {
+		if got := l.route(httptest.NewRequestWithContext(t.Context(), c.method, c.path, nil)); got != c.want {
+			t.Errorf("%s %s has the route template %q, want %q", c.method, c.path, got, c.want)
 		}
 	}
 }

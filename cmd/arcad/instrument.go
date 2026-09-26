@@ -75,9 +75,11 @@ func instrument(l listener) http.Handler {
 
 // route is the route template of the listener's request span and request
 // metrics: the path of the pattern a request matches, such as
-// "/v1/files/{owner}/{path...}", with the method left to its own attribute,
-// or api.Unmatched. It is read from the router's tables before the request
-// is served, which is when the span is named.
+// "/v1/files/{owner}/{path...}", with the method left to its own attribute.
+// It is "" for a request no route serves, which leaves the span and the
+// metrics without http.route and names the span by its method alone, as the
+// OpenTelemetry HTTP conventions ask. It is read from the router's tables
+// before the request is served, which is when the span is named.
 //
 // The surface names its own rows. A pattern this file registered is taken
 // from the mux, and only when it is one of the patterns registered here: the
@@ -93,9 +95,6 @@ func (l listener) route(r *http.Request) string {
 		if _, p := l.mux.Handler(r); slices.Contains(l.own, p) {
 			pattern = p
 		}
-	}
-	if pattern == "" {
-		return api.Unmatched
 	}
 	if _, path, found := strings.Cut(pattern, " "); found {
 		return path

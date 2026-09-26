@@ -18,7 +18,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.44.0
 	go.opentelemetry.io/otel/sdk/metric v1.44.0
 	go.opentelemetry.io/otel/trace v1.44.0
-	latere.ai/x/pkg v0.86.0
+	latere.ai/x/pkg v0.87.0
 )
 
 require (
