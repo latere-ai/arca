@@ -6,6 +6,20 @@ refused before it is pushed.
 
 ## Unreleased
 
+- **A request carries one route on its span, its metrics and its log line.**
+  `arca_requests_total`, `arca_request_duration_seconds` and the request line
+  now name a request refused with a 401 or a 429, and one the router
+  redirects to a route, by the route it asked for, as its span already did.
+  Those requests were counted under `unmatched` before, so a query that reads
+  refusals from `route="unmatched"` now finds them under their routes. A path
+  no route serves is still `unmatched` there.
+
+- **A request no route serves carries no `http.route`.** Its span is named by
+  its method alone, such as `GET`, and its measurement of
+  `http.server.request.duration` has no `http.route`, where both carried
+  `unmatched` before. This follows the OpenTelemetry HTTP conventions and
+  comes with `latere.ai/x/pkg` v0.87.0.
+
 ## v0.3.0 - 2026-09-27
 
 - **A stopping `arcad` pod keeps its listener open for 5 more seconds.** The

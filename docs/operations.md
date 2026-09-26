@@ -257,11 +257,11 @@ Every request either listener serves is one span, named by its method and
 the route it matched, such as `PUT /v1/files/{owner}/{path...}`, and one
 measurement of `http.server.request.duration` carrying the same route as
 `http.route`. A request refused for want of a valid bearer is recorded under
-the route it asked for, and a path no route registers under `unmatched`. The
-probes and the scrape of `/metrics` are served but not recorded. The calls a
-request makes to the bucket are spans under its own, `bucket.put`,
-`bucket.get` and the rest, so a trace shows one request with its storage
-operations.
+the route it asked for. A request no route serves carries no `http.route`,
+and its span is named by its method alone. The probes and the scrape of
+`/metrics` are served but not recorded. The calls a request makes to the
+bucket are spans under its own, `bucket.put`, `bucket.get` and the rest, so a
+trace shows one request with its storage operations.
 
 Traces are sampled when they start: `OTEL_TRACES_SAMPLER_ARG` is the share
 of new traces kept, 0.2 unless you set it, and a trace your ingress or a
@@ -297,13 +297,14 @@ what your tracing backend indexes, and both are on the line, so you can go
 from a user's complaint to a trace and back. While traces are exported, a
 response carries the trace id too, in `X-Trace-Id`.
 
-The route on a line and on a metric is the pattern a route is registered
-under, such as `GET /v1/workspaces/{id}/sync`, never the path a caller sent.
-A path carries what a person called their file, and it belongs in neither.
-The line and `arca_requests_total` name a route once the request reaches it,
-so a request refused before that, a 401 or a 429 of the per-caller limit,
-carries `unmatched` there while its span and `http.server.request.duration`
-name the route it asked for.
+The route on a line and on `arca_requests_total` and
+`arca_request_duration_seconds` is the pattern a route is registered under,
+such as `GET /v1/workspaces/{id}/sync`, never the path a caller sent. A path
+carries what a person called their file, and it belongs in neither. It is
+the route the request's span is named by, with the method in front. A
+request refused before it reaches its route, a 401 or a 429 of either rate
+limit, carries the route it asked for, and a request no route serves carries
+`unmatched`, where its span carries no route.
 
 `arcad reap`, run as a job of its own, opens no listener. Its traces and its
 lines still reach the collector; its counters are scraped from a replica that

@@ -12,7 +12,7 @@ depends_on:
 affects: [internal/api/, internal/auth/, internal/store/, internal/files/, internal/metrics/, internal/reaper/, cmd/arcad/, test/conformance/]
 effort: medium
 created: 2026-09-20
-updated: 2026-09-26
+updated: 2026-09-27
 author: changkun
 ---
 
@@ -44,18 +44,28 @@ the two listeners is wrapped in `latere.ai/x/pkg/otel.Handler`
 (`cmd/arcad/instrument.go`), outside the verifier, with the probes and the
 scrape skipped. Every other request is one SERVER span and one measurement
 of `http.server.request.duration`, both carrying the route as `http.route`,
-and `bucket.<op>` is a child of that span. `trace_id` on the request line
-now names a trace. `TestEveryRequestIsOneServerSpanAndOneMeasurementNamedByItsRoute`
-and `TestABucketCallIsAChildOfItsRequestSpan` prove it.
+and `bucket.<op>` is a child of that span. The handler decides the route
+once the listener's mux has returned and keeps the template over the `/v1/`
+subtree the mux matched, so the mux is handed the request as it arrives.
+`trace_id` on the request line now names a trace.
+`TestEveryRequestIsOneServerSpanAndOneMeasurementNamedByItsRoute` and
+`TestABucketCallIsAChildOfItsRequestSpan` prove it.
 
-It departs from the Design in where the name comes from. The Design reads
-it from the observation the request line reads; the span reads it from the
-router's table instead (`api.API.Route`). The span is named when it starts,
-before the observation is filled, and a request the verifier refuses never
-reaches the middleware that fills it, so the observation would name every
-401 `unmatched`. The request line and `arca_requests_total` still read the
-observation, so for a request refused before it is routed the two name it
-differently.
+It departs from the Design in where the name comes from. The Design names
+the span from the observation the request line reads; instead the router's
+table (`api.API.Route`) names the span, the request metrics of both
+registries, and the request line. The span is named when it starts, before
+any handler runs, and a request the verifier or a rate limit refuses never
+reaches the handler of its row, so a name that handler filled in would call
+every 401 and 429 `unmatched`. Read from the table, one request carries one
+route on every signal: a 401, a 429 of either limit, and a redirect the
+guarded router answers are named by the row they asked for
+(`TestARequestIsCountedByTheRowItAskedForWhereverItWasAnswered`). A request
+no row serves carries no `http.route` and a span named by its method alone,
+and `otel.UnmatchedRoute` (`unmatched`) on `arca_requests_total`,
+`arca_request_duration_seconds` and the line. `http.route` is the path of
+the row's pattern; the Prometheus label and the line keep the method in
+front, as spec 018's label always has.
 
 It adds one thing the Design did not name: the span records `url.path`, and
 a link route carries its token there, so the path a span records has the
