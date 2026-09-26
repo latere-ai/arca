@@ -194,7 +194,7 @@ func (a *API) mount(mux *http.ServeMux, rows []route) {
 	const document = "GET /openapi.json"
 	subtree := a.basePath + "/"
 	named := newRoutes(subtree)
-	mux.Handle(document, a.requestID(a.observe(naming(document, http.HandlerFunc(a.openapi)))))
+	mux.Handle(document, a.requestID(a.observe(http.HandlerFunc(a.openapi))))
 	named.front(document)
 	guarded := http.NewServeMux()
 	guarded.Handle("/", http.HandlerFunc(a.notFound))
@@ -203,11 +203,11 @@ func (a *API) mount(mux *http.ServeMux, rows []route) {
 		answer := r.handler
 		handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) { answer(a, w, req) })
 		if r.public {
-			mux.Handle(pattern, a.requestID(a.observe(naming(pattern, a.limitAddress(handler)))))
+			mux.Handle(pattern, a.requestID(a.observe(a.limitAddress(handler))))
 			named.front(pattern)
 			continue
 		}
-		guarded.Handle(pattern, naming(pattern, handler))
+		guarded.Handle(pattern, handler)
 		named.behind(pattern)
 	}
 	named.guarded = guarded
@@ -218,10 +218,11 @@ func (a *API) mount(mux *http.ServeMux, rows []route) {
 	// error rate computed without them is the wrong number, and inside the
 	// request id because the line it writes carries that id.
 	//
-	// What it cannot see from there reaches it from inside: the route
-	// through the wrapper each registration carries, the code through the
-	// one place a refusal is written, and the subject through the limit that
-	// runs the moment the verifier settles one.
+	// The route it reads from the table filled above, by the row a request
+	// asks for, so a request refused before it reaches that row is named by
+	// it too. What it cannot see from there reaches it from inside: the code
+	// through the one place a refusal is written, and the subject through
+	// the limit that runs the moment the verifier settles one.
 	mux.Handle(subtree, a.requestID(a.observe(
 		a.verifier.Middleware(a.refuseVerification)(
 			a.limitSubject(guarded)))))

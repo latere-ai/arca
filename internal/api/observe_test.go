@@ -15,7 +15,9 @@ import (
 	"testing"
 	"time"
 
+	"latere.ai/x/pkg/authkit/issuertest"
 	"latere.ai/x/pkg/authz/stub"
+	"latere.ai/x/pkg/otel"
 )
 
 // The two rules every test of the request path sets on the stub endpoint.
@@ -129,7 +131,7 @@ func TestAPathNoRouteRegistersIsCountedUnderOneBoundedLabel(t *testing.T) {
 
 	h.do(t, http.MethodGet, "/v1/nothing/here", h.bearer())
 	got := c.last(t)
-	if got.route != Unmatched {
+	if got.route != otel.UnmatchedRoute {
 		t.Errorf("an unregistered path was counted under the route %q", got.route)
 	}
 	if got.statusClass != "4xx" || got.code != CodeNotFound {
@@ -153,6 +155,53 @@ func TestARefusedBearerIsStillCounted(t *testing.T) {
 	}
 	if len(c.reasons) != 1 || c.reasons[0] == "" {
 		t.Errorf("the refusal reached the token counter as %v", c.reasons)
+	}
+}
+
+// TestARequestIsCountedByTheRowItAskedForWhereverItWasAnswered: the metric
+// and the line name a request by the row of the route table that serves it,
+// read from the table as the request span's name is, so one request carries
+// one route on every signal. A request the verifier refused, one either
+// rate limit refused, and one the router redirects to a row never reach that
+// row's handler and are still counted under it. A request no row serves is
+// counted under the one label every service gives it.
+func TestARequestIsCountedByTheRowItAskedForWhereverItWasAnswered(t *testing.T) {
+	const row = "GET /v1/files/{owner}/{path...}"
+	var lines bytes.Buffer
+	c := &counting{}
+	h := newHarness(t, func(o *Options) {
+		o.Metrics = c
+		o.Logger = slog.New(slog.NewJSONHandler(&lines, nil))
+		o.RequestsPerMinute, o.UnauthenticatedRequestsPerMinute = 1, 1
+	})
+	h.endpoint.Allow(allowEverything)
+	alice := h.issuer.Mint(issuertest.Claims{Sub: "alice"})
+	for _, r := range []struct {
+		name, path, token string
+		status            int
+		route             string
+	}{
+		{"a request with no bearer", "/v1/files/9ab3/notes.md", "", http.StatusUnauthorized, row},
+		{"the address's next request with no bearer", "/v1/files/9ab3/notes.md", "", http.StatusTooManyRequests, row},
+		{"the caller's one request of the minute", "/v1/files/9ab3/notes.md", alice, http.StatusOK, row},
+		{"the caller's next request", "/v1/files/9ab3/notes.md", alice, http.StatusTooManyRequests, row},
+		{"a request the router redirects", "/v1/files/9ab3", h.issuer.Mint(issuertest.Claims{Sub: "bob"}), http.StatusTemporaryRedirect, row},
+		{"a path no row registers", "/v1/nothing/here", h.issuer.Mint(issuertest.Claims{Sub: "carol"}), http.StatusNotFound, otel.UnmatchedRoute},
+	} {
+		lines.Reset()
+		if w := h.do(t, http.MethodGet, r.path, r.token); w.Code != r.status {
+			t.Fatalf("%s answered %d, want %d: %s", r.name, w.Code, r.status, w.Body)
+		}
+		if got := c.last(t).route; got != r.route {
+			t.Errorf("%s was counted under the route %q, want %q", r.name, got, r.route)
+		}
+		records := decodeLines(t, &lines)
+		if len(records) != 1 {
+			t.Fatalf("%s wrote %d lines", r.name, len(records))
+		}
+		if got := records[0]["route"]; got != r.route {
+			t.Errorf("the line of %s names the route %v, want %q", r.name, got, r.route)
+		}
 	}
 }
 
@@ -293,15 +342,14 @@ func TestTheRecordingWriterKeepsTheWriterBeneathIt(t *testing.T) {
 }
 
 // TestTheObservationIsAbsentOutsideARequest: the two writers into it are
-// called from the frame and from a handler, and neither may panic where no
-// middleware put one on the context.
+// called from the frame, and neither may panic where no middleware put one
+// on the context.
 func TestTheObservationIsAbsentOutsideARequest(t *testing.T) {
 	if observationFrom(t.Context()) != nil {
 		t.Error("an observation exists outside a request")
 	}
 	noting(t.Context(), CodeInternal)
-	naming("GET /v1/files/{owner}/{path...}", http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})).
-		ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/v1/files/9ab3/notes.md", nil))
+	knowing(t.Context(), "9ab3")
 }
 
 // TestTheDefaultLoggerIsTheOneTheNodeBootstrapped: a surface built with no

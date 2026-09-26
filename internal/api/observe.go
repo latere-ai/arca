@@ -4,6 +4,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"log/slog"
 	"net/http"
@@ -17,17 +18,25 @@ import (
 //
 // The middleware is the outermost of the frame, outside the verifier and
 // outside both rate limits, because a 401 and a 429 are requests this replica
-// served and an error rate computed without them is the wrong number. What
-// the outermost wrapper cannot know at that point is the route and the error
-// code: the route is settled by the mux below it, and the code is settled by
-// whichever refusal writes the envelope. Both are written into an
-// [observation] whose pointer rides on the context, so the parts of the frame
-// that know a fact write it where this wrapper reads it once the answer is
-// out.
+// served and an error rate computed without them is the wrong number.
 //
-// The route is the mux pattern of the row that matched, never the path: a
-// path carries what a person called their file, and a series per path is a
-// series per file.
+// The route is read from the route table before the request is served, by
+// [API.Route], which is also what the request span is named by. A request
+// the verifier or a rate limit refuses never reaches the handler of the row
+// it asked for, and reading the table rather than the handler it reached
+// names it by that row all the same, so one request carries one route on the
+// span, the request metrics and the line. A request no row serves is counted
+// under [otel.UnmatchedRoute].
+//
+// What the outermost wrapper cannot know at that point is the error code and
+// the subject: the code is settled by whichever refusal writes the envelope
+// and the subject by the verifier. Both are written into an [observation]
+// whose pointer rides on the context, so the parts of the frame that know a
+// fact write it where this wrapper reads it once the answer is out.
+//
+// The route is the pattern of the row that serves the request, never the
+// path: a path carries what a person called their file, and a series per
+// path is a series per file.
 
 // Metrics is where the request path's counters go. Spec 018 owns the
 // registry and the names; this is the seam it binds, so this package
@@ -35,19 +44,14 @@ import (
 type Metrics interface {
 	// RequestStarted reports that one request has begun.
 	RequestStarted()
-	// RequestFinished reports one answered request: the mux pattern it
-	// matched, the class of its status, the error code it carried or ok, and
-	// how long it took.
+	// RequestFinished reports one answered request: the pattern of the row
+	// that serves it or otel.UnmatchedRoute, the class of its status, the
+	// error code it carried or ok, and how long it took.
 	RequestFinished(route, statusClass, code string, took time.Duration)
 	// TokenRejected reports one bearer the verifier refused, by the row of
 	// spec 006's reason table.
 	TokenRejected(reason string)
 }
-
-// Unmatched is the route label of a request no row of the table registers.
-// It is one bounded value rather than the path, which is the whole reason a
-// route label exists.
-const Unmatched = "unmatched"
 
 // OK is the code label of a response that refused nothing.
 const OK = "ok"
@@ -59,14 +63,13 @@ type observationKey struct{}
 // a context derived from this one, and a derived context carries the same
 // pointer, so a write from inside is a read from outside.
 type observation struct {
-	route   string
 	code    string
 	subject string
 }
 
 // observed puts a fresh observation on the context.
 func observed(ctx context.Context) (context.Context, *observation) {
-	o := &observation{route: Unmatched, code: OK}
+	o := &observation{code: OK}
 	return context.WithValue(ctx, observationKey{}, o), o
 }
 
@@ -75,19 +78,6 @@ func observed(ctx context.Context) (context.Context, *observation) {
 func observationFrom(ctx context.Context) *observation {
 	o, _ := ctx.Value(observationKey{}).(*observation)
 	return o
-}
-
-// Naming records the route one handler answers, for the metric and the log
-// line of spec 018. It is what a package contributing rows through
-// [Options.Routes] gets for free: the frame wraps every registration, so a
-// row cannot be registered without its pattern reaching the series.
-func naming(pattern string, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if o := observationFrom(r.Context()); o != nil {
-			o.route = pattern
-		}
-		next.ServeHTTP(w, r)
-	})
 }
 
 // knowing records the subject the verifier settled, which is what the line
@@ -109,8 +99,14 @@ func noting(ctx context.Context, code string) {
 
 // observe is the outermost middleware: it counts the request, times it,
 // holds the in-flight gauge, and writes the one line spec 018 asks for.
+//
+// The route comes from the table the mount fills with every row it
+// registers, including the rows a package contributes through
+// [Options.Routes], so a row cannot be registered without its pattern
+// reaching the series.
 func (a *API) observe(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		route := cmp.Or(a.Route(r), otel.UnmatchedRoute)
 		ctx, o := observed(r.Context())
 		r = r.WithContext(ctx)
 		recorder := &recording{ResponseWriter: w, status: http.StatusOK}
@@ -119,9 +115,9 @@ func (a *API) observe(next http.Handler) http.Handler {
 		a.metrics.RequestStarted()
 		next.ServeHTTP(recorder, r)
 		took := a.now().Sub(started)
-		a.metrics.RequestFinished(o.route, class(recorder.status), o.code, took)
+		a.metrics.RequestFinished(route, class(recorder.status), o.code, took)
 
-		a.log(r, o, recorder.status, took)
+		a.log(r, route, o, recorder.status, took)
 	})
 }
 
@@ -132,11 +128,11 @@ func (a *API) observe(next http.Handler) http.Handler {
 // No attribute carries a token, a credential, or a presigned URL, and none
 // carries the path: the route is the pattern and the subject is the rendered
 // subject the authorizer was already told.
-func (a *API) log(r *http.Request, o *observation, status int, took time.Duration) {
+func (a *API) log(r *http.Request, route string, o *observation, status int, took time.Duration) {
 	ctx := r.Context()
 	traceID, _ := otel.TraceIDs(ctx)
 	a.logger().InfoContext(ctx, "request",
-		"route", o.route,
+		"route", route,
 		"method", r.Method,
 		"status", status,
 		"code", o.code,
