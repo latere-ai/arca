@@ -52,12 +52,11 @@ type listener struct {
 // SpanPath is written over it before the mux runs, whatever the mux then
 // does with the request.
 //
-// A ServeMux writes the pattern it matched onto the request it is handed,
-// and otelhttp labels the request metrics with that pattern in place of the
-// route template. On the public listener the match for every route behind
-// the verifier is the subtree the surface is mounted at, so the mux is
-// handed a copy of the request and the route template is the one route the
-// metrics carry.
+// On the public listener the mux matches every route behind the verifier by
+// the subtree the surface is mounted at, and it writes that pattern onto the
+// request. The wrapper names the span and the request metrics by the route
+// template whatever pattern a mux inside it matched, so the subtree never
+// replaces the row a request is named by.
 func instrument(l listener) http.Handler {
 	served := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if l.surface != nil {
@@ -65,7 +64,7 @@ func instrument(l listener) http.Handler {
 				otel.SetAttributes(r.Context(), attribute.String("url.path", p))
 			}
 		}
-		l.mux.ServeHTTP(w, r.WithContext(r.Context()))
+		l.mux.ServeHTTP(w, r)
 	})
 	return otel.Handler(served, ServiceName,
 		otel.WithRouteTemplate(l.route),
