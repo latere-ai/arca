@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.3.0 - 2026-09-27
+
 - **A stopping `arcad` pod keeps its listener open for 5 more seconds.** The
   base Deployment gives the container a `preStop` sleep, so requests an
   ingress controller still sends to a deleted pod's address are served
