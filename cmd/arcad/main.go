@@ -705,24 +705,6 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		BuildTime: version.Date,
 	})
 
-	// The internal listener of spec 002: the four probes, and GET /metrics
-	// beside them. The router prefers the more specific pattern, so the
-	// probes keep answering under the catch-all while the scrape endpoint
-	// answers its own path. It is on this listener and on no other.
-	internal := http.NewServeMux()
-	internal.Handle("/", probes)
-	internal.Handle("GET /metrics", recorder.Handler())
-
-	public := http.NewServeMux()
-	for _, p := range []string{"/livez", "/readyz", "/version"} {
-		public.Handle("GET "+p, probes)
-	}
-	public.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_, _ = fmt.Fprintln(w, version.String())
-	})
-	surface.Mount(public)
-
 	var lc net.ListenConfig
 	publicLn, err := lc.Listen(ctx, "tcp", cfg.PublicAddr)
 	if err != nil {
@@ -753,8 +735,8 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	}
 
 	servers := []*http.Server{
-		{Handler: public, ReadHeaderTimeout: 10 * time.Second},
-		{Handler: internal, ReadHeaderTimeout: 10 * time.Second},
+		{Handler: publicHandler(probes, surface), ReadHeaderTimeout: 10 * time.Second},
+		{Handler: internalHandler(probes, recorder.Handler()), ReadHeaderTimeout: 10 * time.Second},
 	}
 	errc := make(chan error, len(servers))
 	for i, ln := range []net.Listener{publicLn, internalLn} {
@@ -781,6 +763,36 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		_ = s.Shutdown(shutdownCtx)
 	}
 	return 0
+}
+
+// publicHandler is the public listener of spec 002: three of the probes, for
+// a smoke that reaches the installation through an ingress, GET / with the
+// build identity, and the surface of spec 013.
+func publicHandler(probes http.Handler, surface *api.API) http.Handler {
+	public := http.NewServeMux()
+	for _, p := range []string{"/livez", "/readyz", "/version"} {
+		public.Handle("GET "+p, probes)
+	}
+	public.HandleFunc("GET /{$}", identify)
+	surface.Mount(public)
+	return public
+}
+
+// internalHandler is the internal listener of spec 002: the four probes, and
+// GET /metrics beside them. The router prefers the more specific pattern, so
+// the probes keep answering under the catch-all while the scrape endpoint
+// answers its own path. It is on this listener and on no other.
+func internalHandler(probes, scrape http.Handler) http.Handler {
+	internal := http.NewServeMux()
+	internal.Handle("/", probes)
+	internal.Handle("GET /metrics", scrape)
+	return internal
+}
+
+// identify answers GET / with the build identity, one line of plain text.
+func identify(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = fmt.Fprintln(w, version.String())
 }
 
 // startReaper starts the in-process reconciliation loop, or says on the
