@@ -6,6 +6,18 @@ refused before it is pushed.
 
 ## Unreleased
 
+- **Every request is traced and measured.** `arcad` records each request
+  either listener serves as one server span, named by its method and route
+  pattern such as `GET /v1/files/{owner}/{path...}`, and as one measurement
+  of `http.server.request.duration` with the same `http.route`, exported over
+  OTLP beside the traces. A request refused for want of a valid bearer is
+  recorded under the route it asked for, a path no route registers under
+  `unmatched`, and the probes and the `/metrics` scrape are not recorded.
+  Bucket calls are child spans of their request, the request line's
+  `trace_id` now names a trace, and responses carry `X-Trace-Id`. A public
+  link's token is replaced by `{token}` in the path a span records. An
+  installation that exports nothing sees no change.
+
 - **Under the owner policy, a token minted from a service account's key is
   narrowed by the grants it carries,** as a personal access token's already
   was. Such a token is refused, with reason `grant`, any action its grants do

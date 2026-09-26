@@ -12,7 +12,7 @@ depends_on:
 affects: [internal/api/, internal/auth/, internal/store/, internal/files/, internal/metrics/, internal/reaper/, cmd/arcad/, test/conformance/]
 effort: medium
 created: 2026-09-20
-updated: 2026-09-20
+updated: 2026-09-26
 author: changkun
 ---
 
@@ -36,6 +36,34 @@ request, so `trace_id` is on every request line as an empty string: the
 key is there, the value is not. A log line and a trace cannot find each
 other in either direction, which is the whole reason spec 018 puts both
 ids on the line.
+
+## Current state
+
+The parent of the first section is in the tree as of 2026-09-26. Each of
+the two listeners is wrapped in `latere.ai/x/pkg/otel.Handler`
+(`cmd/arcad/instrument.go`), outside the verifier, with the probes and the
+scrape skipped. Every other request is one SERVER span and one measurement
+of `http.server.request.duration`, both carrying the route as `http.route`,
+and `bucket.<op>` is a child of that span. `trace_id` on the request line
+now names a trace. `TestEveryRequestIsOneServerSpanAndOneMeasurementNamedByItsRoute`
+and `TestABucketCallIsAChildOfItsRequestSpan` prove it.
+
+It departs from the Design in where the name comes from. The Design reads
+it from the observation the request line reads; the span reads it from the
+router's table instead (`api.API.Route`). The span is named when it starts,
+before the observation is filled, and a request the verifier refuses never
+reaches the middleware that fills it, so the observation would name every
+401 `unmatched`. The request line and `arca_requests_total` still read the
+observation, so for a request refused before it is routed the two name it
+differently.
+
+It adds one thing the Design did not name: the span records `url.path`, and
+a link route carries its token there, so the path a span records has the
+token replaced by `{token}` (`api.API.SpanPath`), whether or not a row
+serves the request.
+
+`auth.verify`, `auth.ask`, `db.<op>` and the order assertions of criterion 3
+remain, as do the other sections below.
 
 ## Design
 

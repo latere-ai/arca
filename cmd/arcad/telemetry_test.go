@@ -38,8 +38,8 @@ func TestMetricsListenerOnly(t *testing.T) {
 	if code, _ := get(t, publicURL+"/metrics"); code != 404 {
 		t.Errorf("GET /metrics on the public listener = %d, and the series are not a client's to read", code)
 	}
-	// The probes keep answering on the same listener: the scrape endpoint is
-	// a more specific pattern under the catch-all the probes are mounted on.
+	// The probes keep answering on the same listener, each registered on its
+	// own path beside the scrape endpoint.
 	if code, body := get(t, internalURL+"/livez"); code != 200 || body != "ok\n" {
 		t.Errorf("GET /livez on the internal listener = %d %q", code, body)
 	}

@@ -91,12 +91,13 @@ behind, and expires what has a deadline. See
 
 ## Telemetry
 
-Metrics are always served on the internal listener at `/metrics`. Traces and
-log records leave the process only when an endpoint is set.
+Metrics are always served on the internal listener at `/metrics`. Traces,
+log records and the OpenTelemetry request metrics leave the process only when
+an endpoint is set.
 
 | Variable | Required | Default | What it is |
 |---|---|---|---|
-| `ARCA_OTEL_EXPORTER_OTLP_ENDPOINT` | no | unset | The OpenTelemetry collector traces and log records are exported to over OTLP. A value that is not an absolute `http` or `https` URL is a start-up failure. |
+| `ARCA_OTEL_EXPORTER_OTLP_ENDPOINT` | no | unset | The OpenTelemetry collector traces, log records and the request metrics are exported to over OTLP. A value that is not an absolute `http` or `https` URL is a start-up failure. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | no | unset | The standard variable, read when `ARCA_OTEL_EXPORTER_OTLP_ENDPOINT` is unset, so a platform that injects it into every workload needs nothing set for Arca. Its shape is left to the exporter. |
 
 ## Testing only

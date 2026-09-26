@@ -112,6 +112,9 @@ refusal never reveals that something is there.
 - Every response carries `X-Request-Id`. Send your own, up to 128 printable
   ASCII characters, and it is kept; otherwise Arca mints one. It is in every
   error body and in the server's log line for the request.
+- An installation that exports traces also answers `X-Trace-Id`, the trace
+  the request was recorded under. Quote it beside `X-Request-Id` when you
+  report a problem.
 
 ### Lists
 

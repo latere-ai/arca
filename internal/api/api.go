@@ -125,6 +125,9 @@ type API struct {
 	// and the line each request ends on. Neither is ever nil.
 	metrics Metrics
 	logs    *slog.Logger
+	// routes is what [API.Route] names a request against. The mount fills
+	// it, so it holds exactly the patterns the listener was given.
+	routes *routes
 }
 
 // New builds the surface. It refuses to build without the two of spec 006,
@@ -189,7 +192,10 @@ func (a *API) Mount(mux *http.ServeMux) {
 
 func (a *API) mount(mux *http.ServeMux, rows []route) {
 	const document = "GET /openapi.json"
+	subtree := a.basePath + "/"
+	named := newRoutes(subtree)
 	mux.Handle(document, a.requestID(a.observe(naming(document, http.HandlerFunc(a.openapi)))))
+	named.front(document)
 	guarded := http.NewServeMux()
 	guarded.Handle("/", http.HandlerFunc(a.notFound))
 	for _, r := range rows {
@@ -198,10 +204,14 @@ func (a *API) mount(mux *http.ServeMux, rows []route) {
 		handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) { answer(a, w, req) })
 		if r.public {
 			mux.Handle(pattern, a.requestID(a.observe(naming(pattern, a.limitAddress(handler)))))
+			named.front(pattern)
 			continue
 		}
 		guarded.Handle(pattern, naming(pattern, handler))
+		named.behind(pattern)
 	}
+	named.guarded = guarded
+	a.routes = named
 	// The observation of spec 018 sits directly inside the request id and
 	// outside everything else: outside the verifier and outside the rate
 	// limit, because a 401 and a 429 are requests this replica served and an
@@ -212,7 +222,7 @@ func (a *API) mount(mux *http.ServeMux, rows []route) {
 	// through the wrapper each registration carries, the code through the
 	// one place a refusal is written, and the subject through the limit that
 	// runs the moment the verifier settles one.
-	mux.Handle(a.basePath+"/", a.requestID(a.observe(
+	mux.Handle(subtree, a.requestID(a.observe(
 		a.verifier.Middleware(a.refuseVerification)(
 			a.limitSubject(guarded)))))
 }

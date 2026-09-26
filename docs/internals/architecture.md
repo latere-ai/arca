@@ -267,8 +267,15 @@ changes nothing. Each finding is counted on
 
 `internal/metrics` declares every metric name, and every one is on
 `/metrics` from the first scrape. No label carries a subject, an owner, or a
-path; those go on spans. Traces and log records leave through
-`latere.ai/x/pkg/otel` over OTLP when an endpoint is configured. Each request
-writes one JSON log line with the route pattern (never the raw path), the
-status, the error code, the duration, the subject, the request id, and the
-trace id.
+path; those go on spans. Traces, log records and the request metrics leave
+through `latere.ai/x/pkg/otel` over OTLP when an endpoint is configured. Each
+listener's handler is wrapped in that package's `Handler`, outside the
+verifier, so every request but the probes and the scrape is one SERVER span
+and one measurement of `http.server.request.duration`. Both are named by the
+row of the route table the request matches, read from the router before the
+request is served (`api.API.Route`), and a bucket call is a child of the
+request's span because the handler passes the request's context down. The
+span's `url.path` is the path as sent, with a link's token replaced by
+`{token}` (`api.API.SpanPath`). Each request writes one JSON log line with
+the route pattern (never the raw path), the status, the error code, the
+duration, the subject, the request id, and the trace id.

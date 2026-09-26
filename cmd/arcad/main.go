@@ -765,28 +765,41 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	return 0
 }
 
-// publicHandler is the public listener of spec 002: three of the probes, for
-// a smoke that reaches the installation through an ingress, GET / with the
-// build identity, and the surface of spec 013.
+// probePatterns are the three probes of spec 002, which both listeners
+// register path by path.
+var probePatterns = []string{"GET /livez", "GET /readyz", "GET /version"}
+
+// publicHandler is the public listener of spec 002: the probes, for a smoke
+// that reaches the installation through an ingress, GET / with the build
+// identity, and the surface of spec 013, inside the request span.
 func publicHandler(probes http.Handler, surface *api.API) http.Handler {
 	public := http.NewServeMux()
-	for _, p := range []string{"/livez", "/readyz", "/version"} {
-		public.Handle("GET "+p, probes)
+	for _, p := range probePatterns {
+		public.Handle(p, probes)
 	}
-	public.HandleFunc("GET /{$}", identify)
+	const root = "GET /{$}"
+	public.HandleFunc(root, identify)
 	surface.Mount(public)
-	return public
+	return instrument(listener{
+		mux: public, own: append(slices.Clone(probePatterns), root),
+		surface: surface, skip: polled,
+	})
 }
 
-// internalHandler is the internal listener of spec 002: the four probes, and
-// GET /metrics beside them. The router prefers the more specific pattern, so
-// the probes keep answering under the catch-all while the scrape endpoint
-// answers its own path. It is on this listener and on no other.
+// internalHandler is the internal listener of spec 002: the probes, and
+// GET /metrics beside them, inside the request span. The scrape endpoint is
+// on this listener and on no other.
 func internalHandler(probes, scrape http.Handler) http.Handler {
 	internal := http.NewServeMux()
-	internal.Handle("/", probes)
-	internal.Handle("GET /metrics", scrape)
-	return internal
+	for _, p := range probePatterns {
+		internal.Handle(p, probes)
+	}
+	const scrapePattern = "GET " + scraped
+	internal.Handle(scrapePattern, scrape)
+	return instrument(listener{
+		mux: internal, own: append(slices.Clone(probePatterns), scrapePattern),
+		skip: append(slices.Clone(polled), scraped),
+	})
 }
 
 // identify answers GET / with the build identity, one line of plain text.
