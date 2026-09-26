@@ -4,8 +4,8 @@ From a Kubernetes cluster to a serving installation. Every step says what
 fails when you skip it, so a mistake is found by the step that follows it
 rather than by a user.
 
-You need a Kubernetes cluster, `kubectl`, a bucket, a Postgres database,
-and an OIDC issuer. Arca keeps nothing on local disk, so there is no volume
+You need a Kubernetes cluster at 1.30 or newer, `kubectl`, a bucket, a
+Postgres database, and an OIDC issuer. Arca keeps nothing on local disk, so there is no volume
 to size and no pod to back up: everything an installation holds is in the
 bucket and the database.
 

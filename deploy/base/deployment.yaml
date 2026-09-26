@@ -35,9 +35,11 @@ spec:
     spec:
       serviceAccountName: arcad
       automountServiceAccountToken: false
-      # The 3 second drain delay plus the 60 second grace period of the
-      # server's shutdown (spec 002), plus a margin: a read in flight
-      # finishes before the pod is killed.
+      # The 5 second preStop sleep below, the 3 second drain delay and the
+      # 60 second grace period of the server's shutdown (spec 002), plus a
+      # margin: a read in flight finishes before the pod is killed. The
+      # period counts from the moment the pod is deleted, so the sleep is
+      # inside it.
       terminationGracePeriodSeconds: 90
       # Replicas prefer to spread across nodes: a node that goes away takes
       # one replica with it, not all of them.
@@ -132,6 +134,19 @@ spec:
               memory: 128Mi
             limits:
               memory: 512Mi
+          # A deleted pod leaves the Service's endpoints at once, but an
+          # ingress controller learns that on its own schedule and keeps
+          # sending requests to the address meanwhile. The kubelet's sleep
+          # holds the stop signal back for 5 seconds, so the listener is
+          # still open for those requests rather than closed after the
+          # server's 3 second drain. It is the kubelet's own action and not
+          # a command, because the distroless image carries no shell, and it
+          # needs Kubernetes 1.30 or newer. The reconciler of reaper.yaml
+          # serves no traffic and has none.
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 5
           # Both probes go to the internal listener, which serves them for
           # the cluster; the public listener answers them too, for a smoke
           # that reaches the installation through an ingress (spec 002).

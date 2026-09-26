@@ -19,6 +19,7 @@ import (
 	"regexp"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -236,6 +237,63 @@ func TestTheBaseServesBothListeners(t *testing.T) {
 	}
 	if got := api.at("readinessProbe", "httpGet").text("path"); got != "/readyz" {
 		t.Errorf("readinessProbe path = %q, want /readyz", got)
+	}
+}
+
+// TestTheAPIKeepsServingWhileItsAddressIsWithdrawn: a deleted arcad pod
+// leaves the Service's endpoints at once and an ingress controller catches
+// up on its own schedule, so the container sleeps before the stop signal
+// and its listener is still open for what the controller sends meanwhile.
+// The sleep is the kubelet's own action, because the image has no shell to
+// run a command in, and the sleep, the server's drain delay and its grace
+// period together fit in the termination grace period, which counts from
+// the deletion. The reconciler serves no traffic and takes no sleep.
+func TestTheAPIKeepsServingWhileItsAddressIsWithdrawn(t *testing.T) {
+	// cmd/arcad's drainDelay and gracePeriod, in seconds: the shutdown
+	// timing of spec 002 that the grace period must also hold.
+	const drainDelay, gracePeriod = 3, 60
+	seen := 0
+	for _, d := range read(t, "deploy/base") {
+		if d.kind() != "Deployment" {
+			continue
+		}
+		pod := d.at("spec", "template", "spec")
+		for _, c := range d.containers() {
+			hook := c.at("lifecycle", "preStop")
+			if d.named() != "arcad" {
+				if hook != nil {
+					t.Errorf("%s/%s/%s: a preStop hook on a workload that serves no traffic", d.rel, d.named(), c.text("name"))
+				}
+				continue
+			}
+			seen++
+			if hook == nil {
+				t.Errorf("%s/%s/%s: no preStop hook, so the listener closes while the ingress still sends to it",
+					d.rel, d.named(), c.text("name"))
+				continue
+			}
+			if hook.at("exec") != nil || hook.at("httpGet") != nil {
+				t.Errorf("%s/%s/%s: the preStop hook runs a command or a request; the image has no shell and the sleep is the kubelet's",
+					d.rel, d.named(), c.text("name"))
+			}
+			sleep, err := strconv.Atoi(hook.text("sleep", "seconds"))
+			if err != nil || sleep != 5 {
+				t.Errorf("%s/%s/%s: preStop.sleep.seconds = %q, want 5", d.rel, d.named(), c.text("name"), hook.text("sleep", "seconds"))
+				continue
+			}
+			grace, err := strconv.Atoi(pod.text("terminationGracePeriodSeconds"))
+			if err != nil {
+				t.Errorf("%s/%s: terminationGracePeriodSeconds = %q: %v", d.rel, d.named(), pod.text("terminationGracePeriodSeconds"), err)
+				continue
+			}
+			if need := sleep + drainDelay + gracePeriod; need > grace {
+				t.Errorf("%s/%s: the sleep, the drain delay and the grace period take %ds and the pod is given %ds",
+					d.rel, d.named(), need, grace)
+			}
+		}
+	}
+	if seen != 1 {
+		t.Errorf("the base holds %d arcad containers, want the one API container", seen)
 	}
 }
 

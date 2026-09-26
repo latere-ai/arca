@@ -6,6 +6,14 @@ refused before it is pushed.
 
 ## Unreleased
 
+- **A stopping `arcad` pod keeps its listener open for 5 more seconds.** The
+  base Deployment gives the container a `preStop` sleep, so requests an
+  ingress controller still sends to a deleted pod's address are served
+  rather than refused. The sleep, the drain delay and the shutdown grace
+  period fit in the existing 90 second termination grace period. The sleep
+  is the kubelet's own action, so the base now needs Kubernetes 1.30 or
+  newer.
+
 - **Every request is traced and measured.** `arcad` records each request
   either listener serves as one server span, named by its method and route
   pattern such as `GET /v1/files/{owner}/{path...}`, and as one measurement
