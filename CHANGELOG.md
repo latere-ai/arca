@@ -6,6 +6,14 @@ refused before it is pushed.
 
 ## Unreleased
 
+- **Under the owner policy, a token minted from a service account's key is
+  narrowed by the grants it carries,** as a personal access token's already
+  was. Such a token is refused, with reason `grant`, any action its grants do
+  not name, and one carrying no grant at all is refused everything. This
+  comes with `latere.ai/x/pkg` v0.86.0. An installation that sets
+  `ARCA_AUTHORIZER_URL` is decided by its endpoint, which applies the same
+  rule when it is built on `latere.ai/x/pkg/authz/server`.
+
 - **The local stack and the kind example run MinIO
   `RELEASE.2026-09-25T12-30-31Z`,** which adds the maintained fork's
   security fixes. The conditional writes Arca relies on behave as before.

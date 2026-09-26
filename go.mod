@@ -15,7 +15,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.9.2
 	go.opentelemetry.io/otel v1.44.0
-	latere.ai/x/pkg v0.76.0
+	latere.ai/x/pkg v0.86.0
 )
 
 require (

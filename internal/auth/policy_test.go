@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"latere.ai/x/pkg/authkit"
 	"latere.ai/x/pkg/authz"
 
 	"latere.ai/x/arca/authorizer"
@@ -391,6 +392,65 @@ func TestDecideIsAuthorize(t *testing.T) {
 	}
 	if a.Allow != b.Allow || a.Reason != b.Reason {
 		t.Errorf("Authorize answered %+v and Decide answered %+v", a, b)
+	}
+}
+
+// TestTheOwnerPolicyNarrowsAServiceAccountKeysToken: a token minted from a
+// service account's key carries the grants its key was created with, as a
+// personal key's token does, and the owner policy intersects its answer with
+// them the same way. The owner of the space is asking about its own file, so
+// every refusal below is the grant's and none is the policy's.
+func TestTheOwnerPolicyNarrowsAServiceAccountKeysToken(t *testing.T) {
+	file := authorizer.File{ID: "01J8R4", Owner: alice, Path: "files/x", Plane: "files"}.Resource()
+	readOnly := []any{map[string]any{
+		"type":      authkit.GrantType,
+		"actions":   []any{authorizer.Core + ":" + authorizer.ActionFileRead},
+		"datatypes": []any{file.Kind},
+	}}
+	cases := []struct {
+		name   string
+		action string
+		claims map[string]any
+		allow  bool
+	}{
+		{
+			name: "the action its grant names", action: authorizer.ActionFileRead,
+			claims: map[string]any{"token_use": authkit.TokenUseServiceAccountKey, "authorization_details": readOnly},
+			allow:  true,
+		},
+		{
+			name: "an action its grant does not name", action: authorizer.ActionFileWrite,
+			claims: map[string]any{"token_use": authkit.TokenUseServiceAccountKey, "authorization_details": readOnly},
+		},
+		{
+			// An absent claim is not full access: a live key always carries
+			// a grant list, so a key-minted token with none is one nobody
+			// wrote a grant for.
+			name: "a key-minted token with no grant at all", action: authorizer.ActionFileRead,
+			claims: map[string]any{"token_use": authkit.TokenUseServiceAccountKey},
+		},
+		{
+			// A session token carries no grants and is decided by the
+			// policy alone, which is what keeps the rows above the grant's.
+			name: "a session token", action: authorizer.ActionFileWrite,
+			claims: map[string]any{}, allow: true,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			d, err := policy(auth.PermissionNone, "").Authorize(t.Context(), authz.Request{
+				Subject: alice, Action: c.action, Resource: file, Claims: c.claims,
+			})
+			if err != nil {
+				t.Fatalf("the policy produced no decision: %v", err)
+			}
+			if d.Allow != c.allow {
+				t.Fatalf("allow = %v (reason %q), want %v", d.Allow, d.Reason, c.allow)
+			}
+			if !c.allow && d.Reason != authz.ReasonGrant {
+				t.Errorf("the refusal's reason is %q, want %q", d.Reason, authz.ReasonGrant)
+			}
+		})
 	}
 }
 
