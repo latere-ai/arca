@@ -104,8 +104,15 @@ func (s *Service) page(w http.ResponseWriter, r *http.Request, read lister) {
 	// filter when one comes back. There is no row to hide, so a deny is the
 	// caller's own refusal.
 	res := authorizer.Workspace{Owner: owner}.Resource()
-	if _, err := s.authorizer.Decide(ctx, authorizer.ActionWorkspaceList, res); err != nil {
+	d, err := s.authorizer.Decide(ctx, authorizer.ActionWorkspaceList, res)
+	if err != nil {
 		api.WriteError(w, r, api.FromAuth(err))
+		return
+	}
+	// The filter narrows the page rather than refusing it, so a space
+	// outside the filter answers an empty page and never a 403 (spec 013).
+	if !d.Admits(owner) {
+		api.WritePage(w, []Workspace{}, "")
 		return
 	}
 	// One row more than the page is read, so the presence of a further page

@@ -299,3 +299,22 @@ type allowEverything struct{}
 func (allowEverything) Authorize(context.Context, authz.Request) (authz.Decision, error) {
 	return authz.Decision{Allow: true}, nil
 }
+
+// TestAFilterAdmitsTheSpacesItNamesAndAnAnswerWithNoneNarrowsNothing: a
+// list action's answer narrows a page to the owners its filter names, and an
+// answer that carries no owner leaves the page as the handler read it.
+func TestAFilterAdmitsTheSpacesItNamesAndAnAnswerWithNoneNarrowsNothing(t *testing.T) {
+	for name, c := range map[string]struct {
+		filter *authz.Filter
+		want   bool
+	}{
+		"no filter":          {filter: nil, want: true},
+		"a filter of labels": {filter: &authz.Filter{Labels: map[string]string{"team": "a"}}, want: true},
+		"inside the filter":  {filter: &authz.Filter{Owners: []string{bob, alice}}, want: true},
+		"outside the filter": {filter: &authz.Filter{Owners: []string{bob}}, want: false},
+	} {
+		if got := (auth.Decision{Filter: c.filter}).Admits(alice); got != c.want {
+			t.Errorf("%s: Admits = %t, want %t", name, got, c.want)
+		}
+	}
+}

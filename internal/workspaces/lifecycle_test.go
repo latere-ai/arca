@@ -7,15 +7,18 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"latere.ai/x/pkg/authz"
 	"latere.ai/x/pkg/authz/stub"
 
 	"latere.ai/x/arca/internal/auth"
 	"latere.ai/x/arca/internal/blob"
+	"latere.ai/x/arca/internal/store"
 )
 
 func TestAWorkspaceIsCreatedUnderTheCallersOwnSpaceWithADerivedRoot(t *testing.T) {
@@ -325,6 +328,48 @@ func TestAListingIsScopedToTheSpaceItNames(t *testing.T) {
 	h.do(t, http.MethodGet, "/v1/workspaces?owner=https%3A%2F%2Felsewhere.example%7C7", nil).decode(t, &theirs)
 	if len(theirs.Entries) != 0 {
 		t.Fatalf("another space's listing holds %+v", theirs.Entries)
+	}
+}
+
+// TestAListingOutsideTheAnswersFilterIsAnEmptyPage: the workspace.list
+// answer narrows the page to the spaces its filter names, so a listing that
+// names another space answers an empty page whatever that space holds, live
+// or deleted, and never a 403 (spec 013).
+func TestAListingOutsideTheAnswersFilterIsAnEmptyPage(t *testing.T) {
+	h := newHarness(t)
+	h.create(t, "mine")
+	stranger := "https://elsewhere.example|7"
+	for _, slug := range []string{"plans", "drafts"} {
+		ws, err := h.store.Create(t.Context(), nil, store.Workspace{Owner: stranger, Slug: slug, CreatedBy: stranger})
+		if err != nil {
+			t.Fatalf("seeding the stranger's workspace: %v", err)
+		}
+		if slug == "drafts" {
+			if _, err := h.store.SoftDelete(t.Context(), nil, ws.ID, time.Now()); err != nil {
+				t.Fatalf("deleting the stranger's workspace: %v", err)
+			}
+		}
+	}
+	h.endpoint.Allow(stub.Rule{
+		Subject: "*", Action: "workspace.list", Resource: "*", Allow: true,
+		Filter: &authz.Filter{Owners: []string{h.subject}},
+	})
+
+	var mine page
+	h.do(t, http.MethodGet, "/v1/workspaces?owner=me", nil).decode(t, &mine)
+	if len(mine.Entries) != 1 || mine.Entries[0].Slug != "mine" {
+		t.Fatalf("a listing inside the filter holds %+v", mine.Entries)
+	}
+	for _, route := range []string{"/v1/workspaces", "/v1/workspaces/deleted"} {
+		got := h.do(t, http.MethodGet, route+"?owner="+url.QueryEscape(stranger), nil)
+		if got.code != http.StatusOK {
+			t.Fatalf("%s outside the filter = %d: %s", route, got.code, got.body)
+		}
+		var theirs page
+		got.decode(t, &theirs)
+		if len(theirs.Entries) != 0 || theirs.NextCursor != "" {
+			t.Errorf("%s outside the filter holds %+v", route, theirs)
+		}
 	}
 }
 

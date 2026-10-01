@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"time"
 
 	"latere.ai/x/pkg/authz"
@@ -62,6 +63,16 @@ type Decision struct {
 	// authorizer named. The handler applies it to its own query, so a
 	// selector outside the filter yields an empty page and never a 403.
 	Filter *authz.Filter
+}
+
+// Admits reports whether the answer's filter covers one space. An answer
+// with no filter, or a filter naming no owner, narrows nothing. Labels are
+// not read: Arca writes no label on a space, so no row could match one.
+func (d Decision) Admits(owner string) bool {
+	if d.Filter == nil || len(d.Filter.Owners) == 0 {
+		return true
+	}
+	return slices.Contains(d.Filter.Owners, owner)
 }
 
 // Authorizer asks one question per request. It is the seam: an operator's

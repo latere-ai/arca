@@ -20,6 +20,14 @@ refused before it is pushed.
   `unmatched` before. This follows the OpenTelemetry HTTP conventions and
   comes with `latere.ai/x/pkg` v0.87.0.
 
+### Fixed
+
+- **The workspace listings apply the authorizer's filter.**
+  `GET /v1/workspaces` and `GET /v1/workspaces/deleted` answer an empty page
+  for a space the `workspace.list` answer's filter does not name, as the file
+  listing already did. They listed the named space's workspaces whatever the
+  filter said.
+
 ## v0.3.0 - 2026-09-27
 
 - **A stopping `arcad` pod keeps its listener open for 5 more seconds.** The
