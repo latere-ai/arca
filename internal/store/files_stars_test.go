@@ -4,6 +4,7 @@
 package store
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -69,7 +70,7 @@ func TestTheStarListingJoinsLiveRowsAndResumesOnTheSpaceAndThePath(t *testing.T)
 		rows.scans = append(rows.scans, starScan(s))
 	}
 	listed := &fakeQuerier{rows: rows}
-	page, err := NewStars().List(t.Context(), listed, "sub", StarCursor{}, 10)
+	page, err := NewStars().List(t.Context(), listed, "sub", nil, StarCursor{}, 10)
 	if err != nil || len(page) != 2 {
 		t.Fatalf("List = %d rows, %v", len(page), err)
 	}
@@ -83,20 +84,37 @@ func TestTheStarListingJoinsLiveRowsAndResumesOnTheSpaceAndThePath(t *testing.T)
 	if !strings.Contains(statement, "(s.owner, s.path) > ($2, $3)") {
 		t.Fatalf("the listing does not resume on the pair it orders by:\n%s", statement)
 	}
-	if _, err := NewStars().List(t.Context(), listed, "sub", StarCursor{}, 0); err == nil {
+	if _, err := NewStars().List(t.Context(), listed, "sub", nil, StarCursor{}, 0); err == nil {
 		t.Fatal("a page of no rows was accepted")
 	}
 	broken := &fakeQuerier{queryErr: errFault}
-	if _, err := NewStars().List(t.Context(), broken, "sub", StarCursor{}, 10); err == nil {
+	if _, err := NewStars().List(t.Context(), broken, "sub", nil, StarCursor{}, 10); err == nil {
 		t.Fatal("a failed listing reported success")
 	}
 	torn := &fakeQuerier{rows: &fakeRows{scans: []func(...any) error{failing(errFault).scan}}}
-	if _, err := NewStars().List(t.Context(), torn, "sub", StarCursor{}, 10); err == nil {
+	if _, err := NewStars().List(t.Context(), torn, "sub", nil, StarCursor{}, 10); err == nil {
 		t.Fatal("a row that would not scan reported success")
 	}
 	cut := &fakeQuerier{rows: &fakeRows{err: errFault}}
-	if _, err := NewStars().List(t.Context(), cut, "sub", StarCursor{}, 10); err == nil {
+	if _, err := NewStars().List(t.Context(), cut, "sub", nil, StarCursor{}, 10); err == nil {
 		t.Fatal("a listing cut short reported success")
+	}
+}
+
+// TestTheStarListingIsNarrowedToTheOwnersInTheStatement: the owners a list
+// answer's filter named are bound into the query, so the page the database
+// returns is already narrowed and the limit counts only stars it admits.
+func TestTheStarListingIsNarrowedToTheOwnersInTheStatement(t *testing.T) {
+	listed := &fakeQuerier{rows: &fakeRows{}}
+	owners := []string{"space-a", "space-b"}
+	if _, err := NewStars().List(t.Context(), listed, "sub", owners, StarCursor{}, 10); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if !strings.Contains(listed.statements[0], "s.owner = ANY($5::text[])") {
+		t.Fatalf("the listing is not narrowed to the owners:\n%s", listed.statements[0])
+	}
+	if got, ok := listed.args[0][4].([]string); !ok || !slices.Equal(got, owners) {
+		t.Fatalf("the owners bound are %#v", listed.args[0][4])
 	}
 }
 

@@ -14,6 +14,8 @@ import (
 	"latere.ai/x/pkg/authz/stub"
 
 	"latere.ai/x/arca/internal/api"
+	"latere.ai/x/arca/internal/store"
+	"latere.ai/x/arca/object"
 )
 
 // listing reads one page of a subtree.
@@ -197,6 +199,70 @@ func TestMaterializeAnswersOnePresignedURLPerObjectRelativeToTheRoot(t *testing.
 	// where it sits beside a wildcard (spec 013).
 	if got := h.call(t, http.MethodGet, "/v1/files/materialize?prefix=../etc", nil); got.Code != http.StatusBadRequest {
 		t.Errorf("a prefix that leaves the plane answered %d", got.Code)
+	}
+}
+
+// TestTheStarListingIsNarrowedToTheSpacesTheAnswersFilterNames: the stars
+// cross spaces, so the file.list answer's filter decides which spaces the
+// listing reaches. A star on a file of a space outside the filter is not
+// listed, and the narrowing is the query's: a page is never short, or empty
+// with a cursor, because a star outside the filter sorted into it.
+func TestTheStarListingIsNarrowedToTheSpacesTheAnswersFilterNames(t *testing.T) {
+	// The stranger's space sorts before the caller's, so a page of one read
+	// before the filter applied would hold the stranger's star.
+	stranger := "http://0.example|stranger"
+	// starred is a harness whose caller starred one file of its own space
+	// and one of the stranger's, with the filter the file.list answer
+	// carries for that caller, nil for an answer with none.
+	starred := func(t *testing.T, filter func(caller string) *authz.Filter) *harness {
+		t.Helper()
+		h := newHarness(t)
+		h.seed(t, "files/mine.md", "mine")
+		if err := h.store.Upsert(t.Context(), nil, store.File{
+			Owner: stranger, Path: "files/theirs.md", ObjectID: object.NewID(),
+			CreatedBy: stranger, ContentType: "text/markdown", SizeBytes: 6,
+			Checksum: digest("theirs"), ChecksumKind: object.ChecksumSHA256,
+		}); err != nil {
+			t.Fatalf("seeding the stranger's row: %v", err)
+		}
+		for _, target := range []struct{ owner, path string }{
+			{h.owner, "files/mine.md"}, {stranger, "files/theirs.md"},
+		} {
+			if err := h.store.Add(t.Context(), nil, h.owner, target.owner, target.path); err != nil {
+				t.Fatalf("seeding a star: %v", err)
+			}
+		}
+		if filter != nil {
+			h.endpoint.Allow(stub.Rule{
+				Subject: "*", Action: "file.list", Resource: "*", Allow: true, Filter: filter(h.owner),
+			})
+		}
+		return h
+	}
+	var page struct {
+		Entries    []Starred `json:"entries"`
+		NextCursor string    `json:"next_cursor"`
+	}
+
+	own := starred(t, func(caller string) *authz.Filter { return &authz.Filter{Owners: []string{caller}} })
+	decode(t, own.call(t, http.MethodGet, "/v1/stars?limit=1", nil), &page)
+	if len(page.Entries) != 1 || page.Entries[0].Owner != own.owner || page.NextCursor != "" {
+		t.Fatalf("the stars inside a filter of the caller's own space are %+v", page)
+	}
+
+	elsewhere := starred(t, func(string) *authz.Filter {
+		return &authz.Filter{Owners: []string{"http://elsewhere.example|org"}}
+	})
+	decode(t, elsewhere.call(t, http.MethodGet, "/v1/stars", nil), &page)
+	if len(page.Entries) != 0 || page.NextCursor != "" {
+		t.Fatalf("the stars outside the filter are %+v", page)
+	}
+
+	// An answer with no filter narrows nothing.
+	open := starred(t, nil)
+	decode(t, open.call(t, http.MethodGet, "/v1/stars", nil), &page)
+	if len(page.Entries) != 2 || page.Entries[0].Owner != stranger {
+		t.Fatalf("the stars with no filter are %+v", page.Entries)
 	}
 }
 

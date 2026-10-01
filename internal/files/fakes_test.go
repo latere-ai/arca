@@ -495,8 +495,9 @@ func (m *memory) Remove(_ context.Context, _ store.Querier, subject, owner, path
 	return nil
 }
 
-// ListStars answers a subject's stars joined with live rows.
-func (m *memory) ListStars(_ context.Context, _ store.Querier, subject string, cursor store.StarCursor, limit int) ([]store.Star, error) {
+// ListStars answers a subject's stars joined with live rows, narrowed to
+// the owners when it names any.
+func (m *memory) ListStars(_ context.Context, _ store.Querier, subject string, owners []string, cursor store.StarCursor, limit int) ([]store.Star, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.fault(); err != nil {
@@ -504,7 +505,7 @@ func (m *memory) ListStars(_ context.Context, _ store.Querier, subject string, c
 	}
 	var out []store.Star
 	for _, s := range m.stars {
-		if s.Subject != subject {
+		if s.Subject != subject || (len(owners) > 0 && !slices.Contains(owners, s.Owner)) {
 			continue
 		}
 		if s.Owner < cursor.Owner || (s.Owner == cursor.Owner && s.Path <= cursor.Path) {
@@ -603,8 +604,8 @@ func (v versionsOf) Move(ctx context.Context, q store.Querier, owner, from, to s
 	return v.MoveVersions(ctx, q, owner, from, to)
 }
 
-func (s starsOf) List(ctx context.Context, q store.Querier, subject string, cursor store.StarCursor, limit int) ([]store.Star, error) {
-	return s.ListStars(ctx, q, subject, cursor, limit)
+func (s starsOf) List(ctx context.Context, q store.Querier, subject string, owners []string, cursor store.StarCursor, limit int) ([]store.Star, error) {
+	return s.ListStars(ctx, q, subject, owners, cursor, limit)
 }
 
 func (s starsOf) Move(ctx context.Context, q store.Querier, owner, from, to string) (int64, error) {

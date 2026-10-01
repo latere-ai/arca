@@ -242,7 +242,7 @@ func (m *memory) Add(context.Context, store.Querier, string, string, string) err
 
 func (m *memory) Remove(context.Context, store.Querier, string, string, string) error { return nil }
 
-func (m *memory) ListStars(context.Context, store.Querier, string, store.StarCursor, int) ([]store.Star, error) {
+func (m *memory) ListStars(context.Context, store.Querier, string, []string, store.StarCursor, int) ([]store.Star, error) {
 	return nil, nil
 }
 
@@ -369,8 +369,8 @@ func (v versionsOf) Move(ctx context.Context, q store.Querier, owner, from, to s
 	return v.MoveVersions(ctx, q, owner, from, to)
 }
 
-func (s starsOf) List(ctx context.Context, q store.Querier, subject string, cursor store.StarCursor, limit int) ([]store.Star, error) {
-	return s.ListStars(ctx, q, subject, cursor, limit)
+func (s starsOf) List(ctx context.Context, q store.Querier, subject string, owners []string, cursor store.StarCursor, limit int) ([]store.Star, error) {
+	return s.ListStars(ctx, q, subject, owners, cursor, limit)
 }
 
 func (s starsOf) Move(ctx context.Context, q store.Querier, owner, from, to string) (int64, error) {

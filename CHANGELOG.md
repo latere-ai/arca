@@ -28,6 +28,12 @@ refused before it is pushed.
   listing already did. They listed the named space's workspaces whatever the
   filter said.
 
+- **The star listing applies the authorizer's filter.** `GET /v1/stars`
+  lists only stars on files of the spaces the `file.list` answer's filter
+  names, where it listed the caller's stars in every space. An answer with
+  no filter, which is what the built-in owner policy gives, still lists
+  them all.
+
 ## v0.3.0 - 2026-09-27
 
 - **A stopping `arcad` pod keeps its listener open for 5 more seconds.** The

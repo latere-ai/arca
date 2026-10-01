@@ -419,7 +419,7 @@ func TestStoreAMoveMakesNoBucketCallAndCarriesWhatKeysOnThePath(t *testing.T) {
 	if err != nil || len(versions) != 1 {
 		t.Fatalf("the history after a move is %d rows, %v", len(versions), err)
 	}
-	stars, err := store.NewStars().List(t.Context(), stores.db.Querier(), h.owner, store.StarCursor{}, 10)
+	stars, err := store.NewStars().List(t.Context(), stores.db.Querier(), h.owner, nil, store.StarCursor{}, 10)
 	if err != nil || len(stars) != 1 || stars[0].Path != "files/archive/plan.md" {
 		t.Fatalf("the bookmarks after a move are %v, %v", stars, err)
 	}

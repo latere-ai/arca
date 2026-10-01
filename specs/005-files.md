@@ -395,7 +395,10 @@ starring in the vocabulary. That is stricter than the predecessor, where
 a reader could star a file shared with them, and it is a decision to
 review rather than a detail. `GET /v1/stars` joins the caller's stars
 with live rows and asks `file.list`, so a star whose target was deleted
-or trashed drops out of the listing and is pruned later.
+or trashed drops out of the listing and is pruned later. The listing
+crosses spaces, and the answer's `filter` names which: a star on a space
+outside it is not listed, and the narrowing is in the query, so a page is
+never short for it.
 
 ### Provenance zones do not arrive
 

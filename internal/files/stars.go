@@ -81,9 +81,10 @@ func (s *Service) unstar(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// listStars answers the caller's stars across every space, joined with live
-// rows, so a star whose target was trashed or removed drops out of the
-// listing at once and its row is pruned later by the reaper.
+// listStars answers the caller's stars on the spaces the authorizer's
+// filter names, joined with live rows, so a star whose target was trashed
+// or removed drops out of the listing at once and its row is pruned later
+// by the reaper.
 func (s *Service) listStars(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	caller := Caller(ctx)
@@ -99,13 +100,19 @@ func (s *Service) listStars(w http.ResponseWriter, r *http.Request) {
 	}
 	// The stars are the caller's own rows, so the question is about the
 	// caller's own space and names no path: the listing crosses spaces and
-	// no one prefix describes it.
-	if _, err := s.Ask(ctx, caller, authorizer.ActionFileList,
-		authorizer.File{Owner: caller}.Resource()); err != nil {
+	// no one prefix describes it. Which spaces it crosses is the answer's
+	// filter, applied in the query so a page is never short for a star
+	// outside it (spec 013). An answer with no filter narrows nothing.
+	d, err := s.Ask(ctx, caller, authorizer.ActionFileList, authorizer.File{Owner: caller}.Resource())
+	if err != nil {
 		api.WriteError(w, r, api.FromAuth(err))
 		return
 	}
-	rows, err := s.stars.List(ctx, s.db.Querier(), caller, cursor, limit+1)
+	var owners []string
+	if d.Filter != nil {
+		owners = d.Filter.Owners
+	}
+	rows, err := s.stars.List(ctx, s.db.Querier(), caller, owners, cursor, limit+1)
 	if err != nil {
 		api.WriteError(w, r, fault(ctx, "list the bookmarks", err))
 		return
