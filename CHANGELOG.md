@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.4.0 - 2026-10-01
+
 - **A request carries one route on its span, its metrics and its log line.**
   `arca_requests_total`, `arca_request_duration_seconds` and the request line
   now name a request refused with a 401 or a 429, and one the router
