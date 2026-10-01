@@ -34,6 +34,13 @@ refused before it is pushed.
   no filter, which is what the built-in owner policy gives, still lists
   them all.
 
+- **A trash restore asks before it reads the path.** `POST /v1/trash/restore`
+  asks `file.restore` first, so a caller the space refuses gets the same
+  `404` whether the path holds a live object, a trashed one, or nothing. It
+  answered `409 path_taken` for a live object before asking. The question
+  no longer carries the object's `id` or `size`, because no row has been
+  read when it is asked.
+
 ## v0.3.0 - 2026-09-27
 
 - **A stopping `arcad` pod keeps its listener open for 5 more seconds.** The

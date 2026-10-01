@@ -203,6 +203,49 @@ func TestEveryLookupDenyIsTheAnswerAnAbsenceGives(t *testing.T) {
 	}
 }
 
+// TestARestoreDeniedOnAnotherSpaceIsOneAnswerWhateverThePathHolds: a restore
+// names a space and a path, and in a space the caller may not see the answer
+// is the same whether a live row holds the path, a trashed one does, or
+// nothing does. A conflict for the live row would tell the caller that
+// somebody holds the path, so the question comes before the row is read.
+func TestARestoreDeniedOnAnotherSpaceIsOneAnswerWhateverThePathHolds(t *testing.T) {
+	stranger := "https://issuer.example|someone-else"
+	body := `{"owner":"` + stranger + `","path":"files/plan.md"}`
+	restore := func(t *testing.T, held string) *httptest.ResponseRecorder {
+		t.Helper()
+		h := newHarness(t)
+		h.endpoint.SetRules(stub.Rule{Subject: "*", Action: "*", Resource: "*", Allow: false, Reason: "no rule allows it"})
+		if held != "" {
+			if err := h.store.Upsert(t.Context(), nil, store.File{
+				Owner: stranger, Path: "files/plan.md", ObjectID: object.NewID(),
+				CreatedBy: stranger, ContentType: "text/markdown", SizeBytes: 4,
+				Checksum: digest("seed"), ChecksumKind: object.ChecksumSHA256,
+			}); err != nil {
+				t.Fatalf("seeding the stranger's row: %v", err)
+			}
+		}
+		if held == "trashed" {
+			if _, err := h.store.SoftDelete(t.Context(), nil, stranger, "files/plan.md"); err != nil {
+				t.Fatalf("trashing the stranger's row: %v", err)
+			}
+		}
+		return h.call(t, http.MethodPost, "/v1/trash/restore", strings.NewReader(body),
+			api.HeaderContentType, api.JSONMediaType)
+	}
+
+	absent := restore(t, "")
+	if absent.Code != http.StatusNotFound {
+		t.Fatalf("a restore of nothing in another space answered %d: %s", absent.Code, absent.Body)
+	}
+	for _, held := range []string{"live", "trashed"} {
+		w := restore(t, held)
+		if w.Code != absent.Code || strip(w.Body.String()) != strip(absent.Body.String()) {
+			t.Errorf("a denied restore onto a %s row answers %d\n %s\nand one onto nothing %d\n %s",
+				held, w.Code, w.Body, absent.Code, absent.Body)
+		}
+	}
+}
+
 // strip renders a refusal without the one field two of them are allowed to
 // differ in: the request id. Everything else is compared, the developer
 // detail included, because a field a caller can read is a field a caller can

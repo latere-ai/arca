@@ -68,9 +68,15 @@ type restoreRequest struct {
 }
 
 // restoreTrash returns one object to its path. A path a live row has taken
-// back is a conflict and not a missing object: the caller can see that
-// something is there, and what it needs is to move it or to name another
-// path.
+// back is a conflict and not a missing object: the caller was admitted to
+// the space, so it may see that something is there, and what it needs is to
+// move it or to name another path.
+//
+// The question is asked before the row is read and carries no id and no
+// size. Whether the path is live, trashed, or empty is what the row says, so
+// a caller the space refuses must be answered before it is read: a deny on
+// another space is the not-found an empty path gives, and a conflict
+// answered first would tell that caller somebody holds the path.
 func (s *Service) restoreTrash(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	in, err := api.DecodeBody[restoreRequest](r)
@@ -83,6 +89,12 @@ func (s *Service) restoreTrash(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, r, err)
 		return
 	}
+	if _, err := s.Ask(ctx, t.Owner, authorizer.ActionFileRestore, authorizer.File{
+		Owner: t.Owner, Path: t.Path, Plane: string(t.Plane),
+	}.Resource()); err != nil {
+		api.WriteError(w, r, s.Refused(err, "%q is not in the trash", t.Path))
+		return
+	}
 	row, err := s.files.Get(ctx, s.db.Querier(), t.Owner, t.Path)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
@@ -93,13 +105,6 @@ func (s *Service) restoreTrash(w http.ResponseWriter, r *http.Request) {
 		return
 	case row.DeletedAt == nil:
 		api.WriteError(w, r, api.Refuse(api.CodePathTaken, "a live object holds %q", t.Path))
-		return
-	}
-	if _, err := s.Ask(ctx, t.Owner, authorizer.ActionFileRestore, authorizer.File{
-		ID: row.ID, Owner: t.Owner, Path: t.Path, Plane: string(t.Plane),
-		Size: authorizer.Bytes(row.SizeBytes),
-	}.Resource()); err != nil {
-		api.WriteError(w, r, s.Refused(err, "%q is not in the trash", t.Path))
 		return
 	}
 	restored, err := s.files.Restore(ctx, s.db.Querier(), t.Owner, t.Path, s.window())
