@@ -6,6 +6,13 @@ refused before it is pushed.
 
 ## Unreleased
 
+- **OpenTelemetry Go v1.46.0 and `latere.ai/x/pkg` v0.90.2, past
+  GO-2026-6615 and GO-2026-6505.** The OpenTelemetry set is at v1.46.0, with
+  the log modules at v0.22.0, the slog bridge at v0.20.1 and otelhttp at
+  v0.71.0. `latere.ai/x/pkg` v0.90.2 names the service resource with semantic
+  conventions v1.43.0, the schema of this SDK; with an older schema the two
+  conflict when merged and `arcad` disables telemetry export at start.
+
 ## v0.4.0 - 2026-10-01
 
 - **A request carries one route on its span, its metrics and its log line.**
