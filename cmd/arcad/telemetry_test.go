@@ -7,6 +7,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -216,5 +219,44 @@ func TestAReplicaWithNoDatabaseStillServesBothStoreGauges(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("the exposition does not carry %q", want)
 		}
+	}
+}
+
+// TestTheExporterStartsAgainstACollector boots telemetry through observe, the
+// way every role of the binary starts, with a collector at the endpoint. The
+// shared package names the service resource with one semantic-conventions
+// schema and the OpenTelemetry SDK merges it with its own; when the two
+// differ the merge fails with "conflicting Schema URL", export is disabled at
+// start, and the process serves while sending nothing.
+func TestTheExporterStartsAgainstACollector(t *testing.T) {
+	collector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(collector.Close)
+	t.Setenv("OTEL_SDK_DISABLED", "")
+
+	// The handover writes the test's environment, restored when it ends.
+	endpoint := setenv
+	t.Cleanup(func() { setenv = endpoint })
+	setenv = func(k, v string) error { t.Setenv(k, v); return nil }
+	// The bootstrap replaces the slog default; the providers it installs are
+	// flushed below and stay inert for the rest of the package's tests.
+	logger := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(logger) })
+
+	var stderr syncBuffer
+	_, flush := observe(t.Context(), config.Config{OTelEndpoint: collector.URL}, &stderr)
+	if err := flush(context.WithoutCancel(t.Context())); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+
+	lines := stderr.String()
+	for _, refused := range []string{"export disabled", "the log bridge did not start"} {
+		if strings.Contains(lines, refused) {
+			t.Fatalf("telemetry did not start:\n%s", lines)
+		}
+	}
+	if !strings.Contains(lines, "telemetry: exporting") {
+		t.Fatalf("telemetry did not report exporting:\n%s", lines)
 	}
 }
