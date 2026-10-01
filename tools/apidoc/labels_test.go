@@ -48,7 +48,7 @@ func TestOperationNavigationLabels(t *testing.T) {
 		{"DELETE", "/v1/trash", "Empty trash", "Empty the trash, or one path with ?path=."},
 		{"PUT", "/v1/stars", "Star file", "Star an object; idempotent."},
 		{"DELETE", "/v1/stars", "Unstar file", "Unstar an object; idempotent."},
-		{"GET", "/v1/stars", "List starred files", "The caller's stars across every space."},
+		{"GET", "/v1/stars", "List starred files", "The caller's stars on the spaces the authorizer's list filter admits."},
 		{"GET", "/v1/events", "List events", "One page of a space's log, oldest first."},
 		{"GET", "/v1/shares/links/{token}/meta", "Get link metadata", "What a link token names, before anything is fetched."},
 		{"GET", "/v1/shares/links/{token}", "List linked files", "A listing of the subtree a link token names."},

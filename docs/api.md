@@ -263,7 +263,7 @@ is and needs no lease.
 | DELETE | `/v1/trash` | `file.delete` | empty the trash, or one path with `?path=`; `?owner=` |
 | PUT | `/v1/stars` | `file.write` | `{"owner", "path"}` stars an object; repeating it is harmless |
 | DELETE | `/v1/stars` | `file.write` | `?owner=` and `?path=` unstar an object; repeating it is harmless |
-| GET | `/v1/stars` | `file.list` | the caller's stars across every space |
+| GET | `/v1/stars` | `file.list` | the caller's stars, on the spaces the `file.list` answer's filter names |
 
 ## Uploads
 

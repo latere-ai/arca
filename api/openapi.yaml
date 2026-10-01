@@ -678,7 +678,7 @@ paths:
     get:
       operationId: getV1Stars
       summary: List starred files
-      description: The caller's stars across every space. Asks the authorizer for file.list before it acts.
+      description: The caller's stars on the spaces the authorizer's list filter admits. Asks the authorizer for file.list before it acts.
       security:
       - bearer: []
       responses:

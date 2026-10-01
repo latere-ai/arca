@@ -91,7 +91,7 @@ func Table() []api.Route {
 			Method: http.MethodGet, Path: "/v1/stars",
 			Action: authorizer.ActionFileList, Status: http.StatusOK,
 			Summary:     "List starred files",
-			Description: "The caller's stars across every space.",
+			Description: "The caller's stars on the spaces the authorizer's list filter admits.",
 		},
 	}
 }
