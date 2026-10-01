@@ -8,8 +8,6 @@ import (
 	"slices"
 	"strings"
 
-	"latere.ai/x/pkg/authz"
-
 	"latere.ai/x/arca/authorizer"
 	"latere.ai/x/arca/internal/api"
 	"latere.ai/x/arca/internal/blob"
@@ -48,7 +46,7 @@ func (s *Service) list(w http.ResponseWriter, r *http.Request) {
 	// The authorizer's filter narrows the page rather than refusing it, so
 	// a space outside the filter answers an empty page and never a 403
 	// (spec 006).
-	if !within(d.Filter, t.Owner) {
+	if !d.Admits(t.Owner) {
 		write(w, http.StatusOK, Listing{Entries: []Object{}, Prefixes: []string{}})
 		return
 	}
@@ -107,7 +105,7 @@ func (s *Service) materialize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	manifest := Manifest{Root: object.PlaneFiles.Prefix(), Files: []ManifestFile{}}
-	if !within(d.Filter, t.Owner) {
+	if !d.Admits(t.Owner) {
 		write(w, http.StatusOK, manifest)
 		return
 	}
@@ -171,14 +169,4 @@ func prefixesOf(page []store.File, prefix string) []string {
 		}
 	}
 	return out
-}
-
-// within reports whether a space is inside the filter an answer carried. An
-// answer with no filter narrows nothing, which is every answer that did not
-// ask for a narrower page.
-func within(filter *authz.Filter, owner string) bool {
-	if filter == nil || len(filter.Owners) == 0 {
-		return true
-	}
-	return slices.Contains(filter.Owners, owner)
 }

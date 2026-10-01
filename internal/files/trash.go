@@ -44,7 +44,7 @@ func (s *Service) listTrash(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, r, api.FromAuth(err))
 		return
 	}
-	if !within(d.Filter, owner) {
+	if !d.Admits(owner) {
 		api.WritePage(w, []Trashed{}, "")
 		return
 	}

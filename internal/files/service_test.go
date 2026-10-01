@@ -17,7 +17,6 @@ import (
 	"strings"
 	"testing"
 
-	"latere.ai/x/pkg/authz"
 	"latere.ai/x/pkg/authz/stub"
 
 	"latere.ai/x/arca/internal/api"
@@ -374,24 +373,6 @@ func TestTheAnswersLimitIsReadOffTheAnswerAndNowhereElse(t *testing.T) {
 	over := &OverLimit{Owner: "space", Used: 10, Limit: 12, Delta: 5}
 	if !strings.Contains(over.Error(), "10") || !strings.Contains(over.Error(), "12") {
 		t.Errorf("the refusal does not name the two figures: %s", over.Error())
-	}
-}
-
-// TestAFilterNarrowsAPageAndAnAnswerWithNoneNarrowsNothing.
-func TestAFilterNarrowsAPageAndAnAnswerWithNoneNarrowsNothing(t *testing.T) {
-	for name, c := range map[string]struct {
-		filter *authz.Filter
-		owner  string
-		want   bool
-	}{
-		"no filter":            {filter: nil, owner: "a", want: true},
-		"a filter naming none": {filter: &authz.Filter{}, owner: "a", want: true},
-		"inside the filter":    {filter: &authz.Filter{Owners: []string{"a"}}, owner: "a", want: true},
-		"outside it":           {filter: &authz.Filter{Owners: []string{"b"}}, owner: "a", want: false},
-	} {
-		if got := within(c.filter, c.owner); got != c.want {
-			t.Errorf("%s = %t", name, got)
-		}
 	}
 }
 

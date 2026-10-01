@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"slices"
 	"time"
 
 	"latere.ai/x/pkg/authz"
@@ -188,7 +187,7 @@ func (s *Service) ListGrants(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, r, api.FromAuth(err))
 		return
 	}
-	if !admits(decision.Filter, owner) {
+	if !decision.Admits(owner) {
 		// A selector outside the filter yields an empty page and never a
 		// 403 (spec 013).
 		api.WritePage(w, []Grant{}, "")
@@ -233,7 +232,7 @@ func (s *Service) GrantsWithMe(w http.ResponseWriter, r *http.Request) {
 	// what a filter over a list of other people's spaces can narrow.
 	out := make([]Grant, 0, len(trimmed))
 	for _, g := range trimmed {
-		if admits(decision.Filter, g.Owner) {
+		if decision.Admits(g.Owner) {
 			out = append(out, view(g))
 		}
 	}
@@ -395,10 +394,4 @@ func (s *Service) expiry(raw string) (*time.Time, error) {
 			"expires_at is %q, which is already past", raw).About("expires_at")
 	}
 	return &at, nil
-}
-
-// admits reports whether the filter an authorizer answered a list action
-// with covers one space. A filter that names no owner narrows nothing.
-func admits(f *authz.Filter, owner string) bool {
-	return f == nil || len(f.Owners) == 0 || slices.Contains(f.Owners, owner)
 }
