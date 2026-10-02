@@ -120,6 +120,10 @@ An authorization endpoint is optional.
   so a consumer tails the log rather than receiving webhooks.
 - **Administration.** Usage per space across the installation, and a
   restore of any space's deleted file or workspace.
+- **Telemetry.** Prometheus metrics and alert rules, and, with an OTLP
+  collector, one span and one duration measurement per request, the
+  bucket calls as its child spans, the trace id on the response in
+  `X-Trace-Id`, and the log records beside them.
 - **An OpenAPI document** generated from the route table and served by
   every installation at `/openapi.json`.
 - **A conformance suite** you run against your own installation, or
