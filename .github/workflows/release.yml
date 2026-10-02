@@ -484,9 +484,16 @@ jobs:
           if [ "$IMAGE_NAMESPACE" != "ghcr.io/latere-ai" ]; then
             sed -i "s|ghcr.io/latere-ai/arcad|${ARCAD_IMAGE}|g" deploy/prod/kustomization.yaml deploy/base/deployment.yaml deploy/base/reaper.yaml
           fi
+          # deploy/prod names the image's tag as committed, which is not this
+          # release's; the apply takes this release's tag, so neither arcad
+          # nor the reaper, which runs the same image, is rolled to the
+          # committed tag on the way.
+          sed -i "s|^\(  *newTag: \).*|\1${TAG}|" deploy/prod/kustomization.yaml
+          grep -q "newTag: ${TAG}\$" deploy/prod/kustomization.yaml
           kubectl apply -k deploy/prod/
           kubectl -n "$NS" set image deployment/arcad "arcad=${ARCAD_IMAGE}:${TAG}"
           kubectl -n "$NS" rollout status deployment/arcad --timeout=600s
+          kubectl -n "$NS" rollout status deployment/arcad-reaper --timeout=600s
 
       # The smoke reads the origin GitHub records as the deployment, not a
       # forwarded port: the rollout returns as soon as the new replicas are

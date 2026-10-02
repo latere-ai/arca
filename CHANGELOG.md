@@ -6,6 +6,10 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Fixed
+
+- A release deploys arcad and the reaper at its own tag. The apply took the tag `deploy/prod` names as committed, which rolled arcad to it for a moment before the release's tag replaced it, and left the reaper, which runs the same image, on the committed tag. `deploy/prod` now names v0.4.1, the running release.
+
 ## v0.4.1 - 2026-10-02
 
 - **OpenTelemetry Go v1.46.0 and `latere.ai/x/pkg` v0.90.2, past
