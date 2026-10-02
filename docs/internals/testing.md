@@ -147,7 +147,7 @@ go test -tags=tiers -count=1 -run '^TestContract$' ./test/conformance -args \
 | `-url` | `ARCA_TEST_URL` | the installation's origin, without `/v1` |
 | `-token`, `-token-bob` | `ARCA_TEST_TOKEN`, `ARCA_TEST_TOKEN_BOB` | bearers for two different subjects |
 | `-issuer` | `ARCA_TEST_ISSUER_URL` | a stub issuer to mint every subject at, instead of the two tokens |
-| `-admin` | `ARCA_TEST_ADMIN` | a subject the installation treats as an administrator; empty skips the administration cases |
+| `-admin` | `ARCA_TEST_ADMIN` | a subject the installation treats as an administrator; empty skips the administration cases. Without `-issuer`, that subject's bearer is read from `ARCA_TEST_ADMIN_TOKEN` |
 | `-authorizer` | `ARCA_TEST_AUTHORIZER_URL` | a stub authorizer's control URL; empty skips the deny, outage, and limit cases |
 | `-anonymous` | `ARCA_TEST_ANONYMOUS` | the installation serves public links to callers without a token |
 | `-s3-endpoint` | `ARCA_TEST_S3_ENDPOINT` | the address the bucket is reached at from here, when presigned URLs name a host this machine cannot resolve |
