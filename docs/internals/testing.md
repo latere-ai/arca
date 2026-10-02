@@ -61,7 +61,9 @@ make test-store
 ```
 
 `make up` starts `compose.yaml`: Postgres 18 and MinIO, with a one-shot
-container that creates the bucket. The project name and every port derive
+container that creates the bucket. MinIO and its client run from the
+maintained fork's images, pinned by tag and digest, since MinIO's own
+community images no longer answer anonymous pulls. The project name and every port derive
 from the checkout's directory name, so two clones run side by side, and
 everything listens on loopback. Docker is used when it is on `PATH`,
 Podman otherwise; `DEV_ENGINE` overrides it.
