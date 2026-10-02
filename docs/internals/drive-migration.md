@@ -1,12 +1,14 @@
 # Migrating from Drive
 
-The one-time procedure that moved Latere's predecessor storage service,
-Drive, onto Arca. It ran in September 2026 and is kept as the record of
-how `tools/migrate-drive` and `tools/move-objects` are used; the design
-and its outcome are in [`specs/019-migration-from-drive.md`](../../specs/019-migration-from-drive.md).
+The one-time procedure that moved the predecessor storage service, Drive,
+onto Arca. It is finished: the rows were copied and the objects moved and
+verified on 2026-09-19, and the old keys were deleted on 2026-09-20. The
+page is kept as the record of how `tools/migrate-drive` and
+`tools/move-objects` are used; the design and its outcome are in
+[`specs/019-migration-from-drive.md`](../../specs/019-migration-from-drive.md).
 
-Arca replaces a service called Drive. If you run that service, two commands
-move it during the cutover, in this order: `migrate-drive` copies its metadata
+Arca replaced a service called Drive. Two commands move such a service
+during its cutover, in this order: `migrate-drive` copies its metadata
 into an Arca database, and `move-objects` copies its objects to the keys the
 copied rows name. The first reads the old database and writes the new one; the
 second copies inside your bucket. Neither changes anything in the old
