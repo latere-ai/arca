@@ -9,7 +9,7 @@ depends_on:
 affects: [test/conformance/, internal/auth/, internal/config/, .github/workflows/verify.yml, .github/workflows/release.yml, docs/]
 effort: large
 created: 2026-09-18
-updated: 2026-09-19
+updated: 2026-10-02
 author: changkun
 ---
 
@@ -53,7 +53,7 @@ installation this build makes serves the whole contract and not part of
 it. That is a measured run and not a local one: the `conformance` job of
 `.github/workflows/release.yml` drove those cases against the image the
 tag's `build` job had just pushed, on a kind cluster, and logged `53
-passed, 0 failed, 0 skipped, 48 objects created and deleted` twice — in
+passed, 0 failed, 0 skipped, 48 objects created and deleted` twice: in
 run 35467474612 for `v0.1.7`, which published, and in run 35464362441 for
 `v0.1.6`, whose conformance job was green and whose deploy step then
 failed.
@@ -524,7 +524,7 @@ compose stack, and the `conformance` job of
 `.github/workflows/release.yml` runs them against the image a tag just
 pushed, on a kind cluster. That job logged `53 passed, 0 failed, 0
 skipped` in run 35464362441 for `v0.1.6` and in run 35467474612 for
-`v0.1.7`, and `v0.1.7` is the release that serves `api.latere.ai`. A
+`v0.1.7`, and `v0.1.7` is the release production first ran. A
 release does not publish on a failed case, the pending group included, so
 the suite is the gate [[016-release-and-installation]] reads and not a
 report.
@@ -559,8 +559,8 @@ them a change to code:
 
 One criterion was split rather than built.
 [[024-conformance-against-a-published-release]] carries criterion 9's
-first form verbatim. Its blocker is gone — a release exists and carries a
-`test/conformance` — but closing it is a temporary module requiring
+first form verbatim. Its blocker is gone (a release exists and carries a
+`test/conformance`), but closing it is a temporary module requiring
 `latere.ai/x/arca` at the previous tag, because that tag's driver imports
 this repository's stub packages, and a step that runs only inside a
 release's `conformance` job against a candidate image. It cannot be

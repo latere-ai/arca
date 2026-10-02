@@ -41,7 +41,7 @@ from the flag and the configuration file has no key for them. So the two
 tier jobs upload their profiles as artifacts and nothing downloads them.
 
 That makes the fix a pull request against `latere-ai/ci`, reviewed and
-released there before this repository can call it — another repository's
+released there before this repository can call it: another repository's
 change, outside the tree this deck governs, and not an hour's work inside
 it. Until it lands the floor is the unit tier's, which every package
 clears, and each tier's profile is kept as an artifact so the number can

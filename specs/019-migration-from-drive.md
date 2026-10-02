@@ -8,7 +8,7 @@ depends_on:
 affects: [internal/, cmd/arcad/, deploy/prod/, tools/migrate-drive/, tools/move-objects/, docs/, specs/]
 effort: xlarge
 created: 2026-09-18
-updated: 2026-09-20
+updated: 2026-10-02
 author: changkun
 ---
 
@@ -48,8 +48,7 @@ phase 10, is held to the following day by design so Drive can be brought
 back by recreating its ingress and scaling up if the first hours find
 anything.
 
-The window, from the runbook in the family's specs repository
-(`infrastructure/arca-cutover.md`):
+The window, from the operator's runbook:
 
 | time | step | result |
 |---|---|---|
@@ -74,7 +73,7 @@ is evaluated on the pod port after translation (v0.1.6, whose deploy also
 met Drive's ingress still standing). v0.1.7 carries the manifests that match
 the cluster and publishes the first release.
 
-The consumers: platform v0.12.0 carries the decider and v0.13.0 the console
+The consumers: the platform's decider and then its console
 onto Arca, both cut from the last green commit of a main that failed
 another feature's e2e all evening; auth's avatar upload rides v0.38.0; the
 CLI, the agents plane and the sandbox plane carry deletions only and ride
@@ -82,7 +81,7 @@ their next releases.
 
 Open until the sunset: delete the source keys the manifest names, drop
 Drive's database and `drive-pool`, delete Drive's deployment, service and
-host ingress, archive `latere-ai/drive`, and write this spec's Outcome.
+host ingress, archive Drive's repository, and write this spec's Outcome.
 
 ## Design
 
@@ -282,8 +281,8 @@ The same day, once the smoke of step 5 holds:
 
    ```sh
    go run ./tools/move-objects -manifest <manifest> \
-     -bucket latere-storage -endpoint https://fra1.digitaloceanspaces.com \
-     -region fra1 -prefix drive/ -delete-sources
+     -bucket example-storage -endpoint https://s3.example.com \
+     -region example-1 -prefix drive/ -delete-sources
    ```
 
    Without the flag the move deletes nothing, so every
@@ -471,18 +470,17 @@ limit variables join the configuration table
 ## Outcome
 
 Complete on 2026-09-20. The cutover ran on the night of 2026-09-19 (the
-table under Current state) and the sunset on 2026-09-20; the family's
-runbook, `infrastructure/arca-cutover.md` in the specs repository, holds
-the minute-by-minute record and the post-mortem of every lost tag and
-every console fault.
+table under Current state) and the sunset on 2026-09-20; the operator's
+runbook holds the minute-by-minute record and the post-mortem of every
+lost tag and every console fault.
 
 | # | Result |
 |---|---|
 | 4b | Holds in production: 3 keys moved at 22:26:02 on 2026-09-19 and verified on bytes; the source keys deleted at 03:26:51 on 2026-09-20 by `tools/move-objects -delete-sources` after each destination read back to its digest; `drive/u-` and `drive/o-` list nothing |
-| 6 | Holds: `api.latere.ai` is Arca's alone (one Ingress claims the host); `/v1/admin` joined the routed prefixes in v0.1.8 with a test deriving every `/v1/<segment>` from the OpenAPI document, after the console's Admin screen met nginx's 404 |
-| 7 | platform: the console repoint, the Agent zone removal and the Drive sweep are on main (`af07595`), released as v0.13.0 from `console-on-green` and awaiting v0.13.1 from main; auth: v0.38.0 (avatar upload onto Arca, `platform-web` mints for `arca`); latere-ui v1.29.0 and latere-ai v0.2.147 drop Drive from the public site and add `/open-source`. latere-cli, sandbox and agents carry deletions on their `arca-cutover` branches, to ride their next releases |
+| 6 | Holds: the origin host is Arca's alone (one Ingress claims the host); `/v1/admin` joined the routed prefixes in v0.1.8 with a test deriving every `/v1/<segment>` from the OpenAPI document, after the console's Admin screen met nginx's 404 |
+| 7 | The consumers moved: the hosting platform's console points at Arca and dropped Drive's screens, its identity service uploads avatars onto Arca and mints tokens addressed to `arca`, and its public site dropped Drive; the remaining clients carried their Drive deletions into their next releases |
 | 8 | The maintainer used the console the same night and found the faults the runbook lists (storage origin, actor audience, bucket CORS, Agent zone, Admin route), each fixed live and carried into a manifest; the three-step smoke as written was not recorded as such |
-| 9 | Diverged on the host: rather than a redirect and a 410, `drive.latere.ai` left DNS (the record destroyed through terraform at 12:07 on 2026-09-20; the authoritative server answers NXDOMAIN). Deployment, Service, Ingress and Secrets deleted 01:26:39; `latere-ai/drive` archived after a final README commit; the database and `drive-pool` destroyed 12:07, `arca-pool` taking the budget line |
+| 9 | Diverged on the host: rather than a redirect and a 410, Drive's host left DNS (the record destroyed at 12:07 on 2026-09-20; the authoritative server answers NXDOMAIN). Deployment, Service, Ingress and Secrets deleted 01:26:39; `latere-ai/drive` archived after a final README commit; the database and `drive-pool` destroyed 12:07, `arca-pool` taking the budget line |
 
 What the migration taught, in one sentence each, with the fix each carries:
 a value held in two places with no tier across them cost seven tags and

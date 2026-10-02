@@ -40,7 +40,7 @@ imports `latere.ai/x/arca/test/stubs/issuer` and
 `test/conformance` alone into a temporary module does not build: the
 temporary module needs either the previous tag's stub packages beside it
 or a driver written for this purpose. Choosing between those two is a
-design decision about what "the previous release's suite" means — the
+design decision about what "the previous release's suite" means: the
 cases alone, or the cases with the driver they shipped with.
 
 Whichever is chosen, the only place it runs is the `conformance` job of a

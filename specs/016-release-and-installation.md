@@ -10,7 +10,7 @@ depends_on:
 affects: [.github/workflows/release.yml, .github/workflows/verify.yml, Dockerfile, Dockerfile.ci, Dockerfile.stubs, deploy/, test/deploy/, tools/smoke/, docs/install.md, docs/operations.md, SECURITY.md, CHANGELOG.md, .lateregate.yaml]
 effort: medium
 created: 2026-09-18
-updated: 2026-09-20
+updated: 2026-10-02
 author: changkun
 ---
 
@@ -44,7 +44,7 @@ are in the tree and the gate is green at every commit. `v0.1.7` is the
 release: run `35467474612` on 2026-09-19 built and pushed both multi-arch
 images, signed and attested them, proved them on the kind stack under
 [[017-conformance-suite]], paused at `deploy` for the maintainer's
-approval, rolled production at `https://api.latere.ai`, and published the
+approval, rolled the production installation, and published the
 release at 20:44. `deploy/prod` and `SECURITY.md` carry that version,
 which is what the two release stamps of `.lateregate.yaml` are for. What
 is still not in the tree is [[026-installation-verification-jobs]].
@@ -457,7 +457,7 @@ that another spec owns.
 | the kustomize base: two workloads, the Service, two network policies, the budget, the autoscaler, the account with no token mounted, and the alert rules beside the kustomization | `deploy/base/` | `TestBaseIsConfined`, `TestTheBaseServesBothListeners`, `TestTheBaseLeavesThePrometheusRuleOut` |
 | the bootstrap: the namespace, the three Secrets by example, the migration Job, and the README that orders them | `deploy/bootstrap/` | `docs/install.md` steps 5 and 6 |
 | the kind stack, and the AWS and DigitalOcean overlays | `deploy/examples/` | `TestOverlaysResolve`, `TestEveryOverlaySetsThePublicURL`, `TestTheKindStackPublishesWhatATestReaches`, `TestEveryOverlayAdmitsTheEgressItsEndpointsNeed`, and the render step of `release.yml` |
-| Latere's overlay, and both gate declarations | `deploy/prod/`, `.lateregate.yaml` | `TestProdPinsAReleasedImage`, `TestProdIsDeclaredToTheGate`, `TestProdNamesOnlyAddressesTheFamilyAlreadyUses` |
+| The production overlay, and both gate declarations | `deploy/prod/`, `.lateregate.yaml` | `TestProdPinsAReleasedImage`, `TestProdIsDeclaredToTheGate`, `TestProdNamesOnlyAddressesTheFamilyAlreadyUses` |
 | the four-job pipeline: build, conformance, deploy, publish | `.github/workflows/release.yml` | `actionlint`, `TestReleasePublishesUnderTheOwnersNamespace`, `TestTheDeployJobIsGatedAndNamesTheEnvironment`, `TestEveryThirdPartyActionIsPinned`, and run `35467474612`, where all four jobs passed in order |
 | the release image, sharing the developer image's runtime stage byte for byte | `Dockerfile.ci`, `Dockerfile` | `TestRuntimeStagesMatch`, which is criterion 3 |
 | the release smoke and its test | `tools/smoke/` | criterion 7, over six cases, one of them a served version that is not the tag |
@@ -480,7 +480,7 @@ Every run id below is `35467474612`, the `v0.1.7` release.
 | 8 | **Met.** `TestTheServerRefusesToStartAgainstADatabaseBehindIt` for the refusal and `TestPendingReadsTheAppliedVersion` for the direction a rollback needs. The criterion was written against a guard the tree does not have and the tree was right; both now say the same thing |
 | 9 | **Half met, half another spec's.** The `conformance` job runs the suite against the published image. The previous release's suite against this release's binary is [[024-conformance-against-a-published-release]], which [[017-conformance-suite]] split it into on the same day: `v0.1.7` is the first release shipping a `test/conformance` for a next release to check out, so the precondition that held it open is gone and the run itself is owed |
 | 10 | **Met.** The pre-push hook and job `105964417741`, whose "Read the release note for this tag" step made the release body |
-| 11 | **Met.** Deployment `6545490737` went `waiting` at 20:41:44, was approved by `changkun` with the comment "cutover, arca spec 019; manifests carry the two policy ports", `queued` at 20:41:52, and `success` at 20:43:13 with `environment_url` `https://api.latere.ai`. The pause is in the record and not only in the maintainer's memory |
+| 11 | **Met.** Deployment `6545490737` went `waiting` at 20:41:44, was approved by `changkun` with the comment "cutover, arca spec 019; manifests carry the two policy ports", `queued` at 20:41:52, and `success` at 20:43:13 with the production `environment_url`. The pause is in the record and not only in the maintainer's memory |
 
 ### Why four jobs and one artifact were split out
 

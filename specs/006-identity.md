@@ -8,7 +8,7 @@ depends_on:
 affects: [authorizer/, internal/auth/, internal/api/, cmd/arcad/, .lateregate.yaml, docs/]
 effort: medium
 created: 2026-09-18
-updated: 2026-09-20
+updated: 2026-10-02
 author: changkun
 ---
 
@@ -118,8 +118,8 @@ workload credentials back and no other core's.
 a token is verified when its `aud` names any of them. The first entry is the
 primary: the name this core answers to, what `Verifier.Audience()` reports,
 what the start-up line prints, and what an installation tells its issuer to
-mint for. The hosted installation sets
-`arca,api.latere.ai`, because a platform key and a personal access token are
+mint for. An installation behind a shared origin sets
+`arca,api.example.com`, because a platform key and a personal access token are
 addressed to the origin in front of the cores rather than to a core
 (`open-cores.md`, amended 2026-09-20). The sentence above stands as it is:
 the second entry is an origin and not another core, so each core still

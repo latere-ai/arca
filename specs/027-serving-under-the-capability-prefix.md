@@ -11,7 +11,7 @@ depends_on:
 affects: [internal/api/, internal/config/, internal/auth/, internal/shares/, internal/check/, api/openapi.yaml, deploy/base/, deploy/prod/, test/deploy/, test/conformance/, tools/smoke/, docs/, specs/006-identity.md, specs/012-administration.md, specs/013-api.md]
 effort: large
 created: 2026-09-20
-updated: 2026-09-20
+updated: 2026-10-02
 author: changkun
 ---
 
@@ -24,15 +24,14 @@ author: changkun
 How `arcad` serves under `/v1/storage` at the platform origin while a
 self-hosted installation keeps the root, where the second audience is
 configured, and the one batch that moves Arca's two callers. It ends when
-`api.latere.ai/v1/storage/...` answers every route the document declares, the
-root of `/v1` answers none, and an `api.latere.ai` token reaches the surface.
+`api.example.com/v1/storage/...` answers every route the document declares, the
+root of `/v1` answers none, and an `api.example.com` token reaches the surface.
 
 ### Problem
 
-The family decided on 2026-09-20 that `api.latere.ai/v1` is partitioned by
-capability, one prefix per core
-(`decisions/2026-09-20-origin-capability-prefixes.md` in the family's specs
-repository). Arca's prefix is `storage`. Today `deploy/prod/ingress.yaml`
+The hosting platform decided on 2026-09-20 that its origin's `/v1`, here
+`api.example.com/v1`, is partitioned by capability, one prefix per core.
+Arca's prefix is `storage`. Today `deploy/prod/ingress.yaml`
 claims eight `/v1` prefixes flat and `arcad` serves them at the paths
 [[013-api]] writes. Both halves move: the Ingress claims one prefix, and the
 routes answer under it.
@@ -46,7 +45,7 @@ is derived: the Ingress prefixes come from the committed document
 Beside the routing, the origin closes a second door. `arcad` verifies one
 audience, `arca` (`internal/config/config.go:210`,
 `internal/auth/verifier.go:146`), while a personal access token and a platform
-key are minted for `api.latere.ai`, so the key path into Arca is shut and the
+key are minted for `api.example.com`, so the key path into Arca is shut and the
 console's is open (`ps-01-one-origin.md`, the audience gap).
 
 ## Design
@@ -56,9 +55,9 @@ console's is open (`ps-01-one-origin.md`, the audience gap).
 ```mermaid
 flowchart LR
   B[browser] -->|/api/storage/files/...| P[platformd console proxy]
-  P -->|/v1/storage/files/...| N[ingress-nginx at api.latere.ai]
+  P -->|/v1/storage/files/...| N[ingress-nginx at api.example.com]
   A[auth avatar handler, ARCA_URL] -->|/v1/storage/files/...| N
-  K[a script holding a platform key] -->|/v1/storage/files/..., aud=api.latere.ai| N
+  K[a script holding a platform key] -->|/v1/storage/files/..., aud=api.example.com| N
   N -->|Prefix /v1/storage, no rewrite| D[arcad, ARCA_BASE_PATH=/v1/storage]
   D -->|302 Location: the bucket, or ARCA_PUBLIC_CDN_URL| B
 ```
@@ -145,7 +144,7 @@ the variable's shape.
 
 | Option | For | Against |
 |---|---|---|
-| a comma list in `ARCA_OIDC_AUDIENCE` | `ci-gate`'s identity rule reads exactly `ARCA_OIDC_AUDIENCE` for the core role and refuses only a value carrying an address (`ci-gate/internal/identity/deploy.go:42,68-71`), so `arca,api.latere.ai` passes as written. Cella already reads this shape, first entry primary (`cella/internal/config/identity.go:100-111`) | one variable means two things, a name and a set |
+| a comma list in `ARCA_OIDC_AUDIENCE` | `ci-gate`'s identity rule reads exactly `ARCA_OIDC_AUDIENCE` for the core role and refuses only a value carrying an address (`ci-gate/internal/identity/deploy.go:42,68-71`), so `arca,api.example.com` passes as written. Cella already reads this shape, first entry primary (`cella/internal/config/identity.go:100-111`) | one variable means two things, a name and a set |
 | a second variable, `ARCA_OIDC_AUDIENCES` | each variable means one thing | the gate reads no second name for a core and would report the base deployment as setting no audience at all. Fixing that is a change to another repository's rule for a shape nothing else in the family uses |
 
 **Recommendation: the comma list.** The gate's rule is the discriminating
@@ -166,7 +165,7 @@ platform origin in front of the core, not another core's name.
 
 Dated 2026-09-20, under Verification. The `aud` row becomes: contains one of
 `ARCA_OIDC_AUDIENCE`, a comma list, default `arca`, which the hosted
-installation sets to `arca,api.latere.ai` because a platform key and a
+installation sets to `arca,api.example.com` because a platform key and a
 personal access token are addressed to the origin (`open-cores.md`, amended
 2026-09-20). The sentence under it, that each core accepts its own workload
 credentials and no other core's, stays as it is, and the amendment says so.
@@ -181,7 +180,7 @@ their own, so the suite stays audience-agnostic on purpose.
 | Case | Asserts |
 |---|---|
 | `TestVerifierAcceptsEveryConfiguredAudience/own` | a token for `arca` reaches the handler |
-| `TestVerifierAcceptsEveryConfiguredAudience/platform` | a token for `api.latere.ai` reaches the handler |
+| `TestVerifierAcceptsEveryConfiguredAudience/platform` | a token for `api.example.com` reaches the handler |
 | `TestVerifierAcceptsEveryConfiguredAudience/third` | a token for a third name is a 401 with the package's reason |
 | `TestServiceConformance` (`internal/auth/conformance_test.go:34`) | runs `authkitconformance.Run` once per configured audience as a subtest. `AdmitsOwnAudience` holds for each and `RefusesOtherAudience` holds for both, which needs no change in `pkg` and answers ps-01 criterion 8 |
 
@@ -237,9 +236,9 @@ move ([[019-migration-from-drive]], the window table).
 | 2 | The served document's `paths` are the patterns the mux registered, under the base path, and its `servers` names `ARCA_PUBLIC_URL` unchanged | a test over `GET /openapi.json` from a build with a base path set, compared against the route table |
 | 3 | The production Ingress claims exactly one `/v1` Prefix rule, and it equals the overlay's `ARCA_BASE_PATH`; the probe paths keep their own rule types at the root, and a smoked path under a claimed Prefix rule is not required to be Exact | `test/deploy/prod_test.go`, deriving the base from the overlay and holding every document path to `/v1/`; `TestProdRoutesWhatTheSmokeReads`, amended |
 | 4 | A self-hosted installation at the root passes the conformance suite with no option set, and the previous release's suite runs against this release's binary unchanged | `test/conformance` with `BasePath` unset; the N-1 job of [[024-conformance-against-a-published-release]] |
-| 5 | A token addressed to `arca` and a token addressed to `api.latere.ai` both reach a handler, and a token addressed to a third name is a 401 | `TestVerifierAcceptsEveryConfiguredAudience/own`, `/platform`, `/third` |
+| 5 | A token addressed to `arca` and a token addressed to `api.example.com` both reach a handler, and a token addressed to a third name is a 401 | `TestVerifierAcceptsEveryConfiguredAudience/own`, `/platform`, `/third` |
 | 6 | The family's audience suite passes for each configured audience | `TestServiceConformance`, one subtest per audience |
-| 7 | `ARCA_OIDC_AUDIENCE` carrying `arca,api.latere.ai` passes the gate's identity rule | `lateregate` on the tree, which reads that one variable for the core role |
+| 7 | `ARCA_OIDC_AUDIENCE` carrying `arca,api.example.com` passes the gate's identity rule | `lateregate` on the tree, which reads that one variable for the core role |
 | 8 | The link URL a mint answers carries the base path, and the two redirects answer a `Location` at the bucket or at `ARCA_PUBLIC_CDN_URL`, unchanged | a unit test over `internal/shares` with a base path set, and the e2e redirect tests |
 | 9 | A path under `/v1` outside the base path is a 404 with no envelope, and a path under the base path that no row registers is a 401 before it is a 404 | two cases in `internal/api` |
 | 10 | `arcad check` reports the base path it serves under, and the release smoke proves the origin answers there | the `public-url` line of `internal/check`; the added `check_status` of `tools/smoke/release.sh` |
@@ -278,7 +277,7 @@ origin by the release and the two consumer releases of the same window.
 | `internal/check` | the `public-url` line names the base path beside the origin, and dials neither |
 | `cmd/arcad` | one base path to the surface and to the shares service, and `base=` with `audience=`, the primary, on the start-up line beside the deciding mode |
 | `test/conformance` | `Options.BasePath`, applied at the one chokepoint of `client.go` and where `surface.go` reads the served document. Unset drives a root installation |
-| `deploy/prod` | `ingress.yaml` claims one `/v1/storage` Prefix rule beside the four probe rules, eight flat prefixes gone; `base-path.yaml` sets `ARCA_BASE_PATH`, `audience.yaml` sets `arca,api.latere.ai`, both on `arcad` alone |
+| `deploy/prod` | `ingress.yaml` claims one `/v1/storage` Prefix rule beside the four probe rules, eight flat prefixes gone; `base-path.yaml` sets `ARCA_BASE_PATH`, `audience.yaml` sets `arca,api.example.com`, both on `arcad` alone |
 | `tools/smoke/release.sh` | one `check_status` for `/v1/storage/files/me/` expecting 401, and the line about it in the evidence |
 | docs | `ARCA_BASE_PATH` and the audience list in `docs/install.md`, the `check` line in `docs/operations.md`. `README.md` names no path and needed none |
 
@@ -319,11 +318,11 @@ Released as v0.2.0 on 2026-09-20; the deploy and smoke job passed at
 
 | # | Criterion | Proof |
 |---|---|---|
-| 1 | every path answers under `/v1/storage/` and none at the root | `GET https://api.latere.ai/v1/storage/files/me/` 401 (the verifier's), `GET /v1/files/me/` 404 from ingress-nginx with no envelope, `GET /v1/storage/admin/overview` 401 |
+| 1 | every path answers under `/v1/storage/` and none at the root | `GET https://api.example.com/v1/storage/files/me/` 401 (the verifier's), `GET /v1/files/me/` 404 from ingress-nginx with no envelope, `GET /v1/storage/admin/overview` 401 |
 | 3 | the Ingress claims one `/v1` prefix | live rules: `/v1/storage`, `/livez`, `/readyz`, `/openapi.json`, `/version` |
-| 5, 7 | two audiences | both `arcad` and `arcad-reaper` run with `ARCA_OIDC_AUDIENCE=arca,api.latere.ai`; the key-path request with a PAT-minted `api.latere.ai` token is the maintainer's, recorded in the specs repo's window runbook |
+| 5, 7 | two audiences | both `arcad` and `arcad-reaper` run with `ARCA_OIDC_AUDIENCE=arca,api.example.com`; the key-path request with a token minted from a personal access token for the origin was made and recorded by the maintainer |
 | 10 | smoke | the release smoke printed the surface line; `GET /version` answers `v0.2.0` |
-| 11 | the two callers moved in the window | platform v0.14.0 (18:25 UTC) proxies `/api/storage/...` to `/v1/storage/...`: a tokenless `GET /api/storage/shares/links/{token}/meta` through the console answers Arca's own `not_found` envelope; auth v0.39.0 (18:27 UTC) runs with `ARCA_URL=https://api.latere.ai/v1/storage` |
+| 11 | the two callers moved in the window | the platform's console (18:25 UTC) proxies `/api/storage/...` to `/v1/storage/...`: a tokenless `GET /api/storage/shares/links/{token}/meta` through the console answers Arca's own `not_found` envelope; the identity service (18:27 UTC) runs with `ARCA_URL` set to the origin's `/v1/storage` |
 
 Between 17:27 and 18:25 UTC the console's storage screens answered 404
 and between 17:27 and 18:27 UTC avatar uploads failed, the accepted

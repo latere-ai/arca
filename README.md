@@ -7,9 +7,8 @@ bucket and a Postgres database. Identity comes from any OpenID Connect
 issuer. Permission comes from an endpoint you write, or from a built-in
 owner policy when you write none.
 
-Latere runs Arca in production as the storage behind its platform. This
-repository is that service, and anyone with a bucket, a Postgres database,
-and an issuer can run their own.
+This repository is the whole service: anyone with a bucket, a Postgres
+database, and an issuer can run it.
 
 [![CI](https://github.com/latere-ai/arca/actions/workflows/verify.yml/badge.svg)](https://github.com/latere-ai/arca/actions/workflows/verify.yml)
 [![Release](https://img.shields.io/github/v/release/latere-ai/arca)](https://github.com/latere-ai/arca/releases)
