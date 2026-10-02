@@ -39,9 +39,11 @@ Two groups of unit tests guard files rather than code:
 - `test/deploy` reads the Kubernetes manifests, the Dockerfiles, and the
   release workflow: every overlay resolves and sets `ARCA_PUBLIC_URL`, the
   base Deployment is confined (non-root, read-only root file system, no
-  capabilities) and keeps credentials in Secrets, every third-party action
-  is pinned by commit, and `deploy/prod` routes every `/v1` prefix the
-  OpenAPI document serves.
+  capabilities) and keeps credentials in Secrets, its `preStop` sleep, the
+  server's drain and its shutdown grace fit in the termination grace
+  period, no network policy names the collector's host port in place of
+  its container port, every third-party action is pinned by commit, and
+  `deploy/prod` routes every `/v1` prefix the OpenAPI document serves.
 - `test/threatmodel` holds `SECURITY.md` to the threat model: every
   commitment in `SECURITY.md` is a control in
   `specs/015-security-and-threat-model.md`, and every control names a test
