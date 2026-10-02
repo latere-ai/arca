@@ -128,6 +128,14 @@ writes both shapes, so a replica of release N and a replica of release N+1
 serve the same database while the rollout is half done. That is what makes
 a rolling update safe rather than a maintenance window.
 
+A replica the rollout stops keeps serving for 5 seconds after its pod is
+deleted, while an ingress controller learns the address is gone and stops
+sending it requests. On the stop signal that follows, it fails readiness,
+serves 3 seconds more, then closes its listeners and gives the requests
+in flight up to 60 seconds to finish. The base's 90 second
+`terminationGracePeriodSeconds` covers all three; an overlay that lowers
+it below 68 seconds cuts a long request short.
+
 Reading `/version` through your hostname catches a rollout that reported
 done while replicas of the previous release were still behind the
 Service.
