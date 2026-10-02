@@ -63,11 +63,14 @@ images just published and runs the conformance suite against it. A release
 that does not serve the API does not publish.
 
 **deploy** runs only when the repository variable `ARCA_RELEASE_DEPLOY` is
-set, so a fork deploys nothing. It applies `deploy/prod` with the
-kubeconfig in the `ARCA_KUBECONFIG` secret, waits for the rollout, and runs
-`tools/smoke/release.sh` against the live origin, which checks the probes,
-the OpenAPI document, the served version against the tag, and that the
-origin routes the API prefix to the new build.
+set, so a fork deploys nothing. It sets the image tag `deploy/prod` names
+to the release's own tag and applies the overlay with the kubeconfig in
+the `ARCA_KUBECONFIG` secret, so `arcad` and the reaper, which runs the
+same image, roll to this release and to no older tag on the way. It waits
+for both rollouts and runs `tools/smoke/release.sh` against the live
+origin, which checks the probes, the OpenAPI document, the served version
+against the tag, and that the origin routes the API prefix to the new
+build.
 
 **publish** creates the GitHub release with the changelog section as its
 body, the archives, checksums, signatures, and SBOMs as assets, and the
