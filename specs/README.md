@@ -39,9 +39,10 @@ stateDiagram-v2
 `testing` moves to `complete` when every acceptance criterion has a
 passing test in the tree and the Outcome records every divergence.
 
-The dispatch gate is on the dependencies' state, not on `complete`: a
-validated spec is dispatched when every spec in its `depends_on` is at
-`testing` or later.
+A spec's status records its own acceptance criteria. Review, not the
+gate, holds the order `depends_on` states: it dispatches a validated
+spec once every spec in its `depends_on` is at `testing` or later, not
+`complete`.
 
 ## Index
 
