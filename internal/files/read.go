@@ -359,8 +359,8 @@ func flag(r *http.Request, name string) (bool, error) {
 
 // lastSegment is the name a browser saves a download under.
 func lastSegment(path string) string {
-	if i := strings.LastIndex(path, "/"); i >= 0 {
-		return path[i+1:]
+	if _, name, ok := strings.CutLast(path, "/"); ok {
+		return name
 	}
 	return path
 }
