@@ -10,6 +10,10 @@ refused before it is pushed.
 
 - A release deploys arcad and the reaper at its own tag. The apply took the tag `deploy/prod` names as committed, which rolled arcad to it for a moment before the release's tag replaced it, and left the reaper, which runs the same image, on the committed tag. `deploy/prod` now names v0.4.1, the running release.
 
+### Security
+
+- Built with Go 1.27.2 and golang.org/x/net v0.60.0, which fix GO-2026-6611, GO-2026-6612, GO-2026-6613 and GO-2026-6617.
+
 ## v0.4.1 - 2026-10-02
 
 - **OpenTelemetry Go v1.46.0 and `latere.ai/x/pkg` v0.90.2, past
