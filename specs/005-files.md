@@ -9,7 +9,7 @@ depends_on:
 affects: [internal/files/, internal/api/, internal/store/, internal/config/, cmd/arcad/, test/e2e/]
 effort: large
 created: 2026-09-18
-updated: 2026-09-19
+updated: 2026-10-12
 author: changkun
 ---
 
@@ -153,14 +153,22 @@ A request names a space and a path inside it. The owner is the subject
 [[013-api]] fixes; the path is plane rooted and validated before
 anything else runs:
 
-- the first segment is a plane of [[001-architecture]]: `files` or
-  `workspaces`;
-- no empty segment, no `..`, no leading or trailing `/`;
-- under `workspaces/` a path has at least three segments, because bytes
-  live inside a workspace, not beside one.
+- the first segment is the plane of [[001-architecture]], `files`, and
+  something follows it;
+- no empty segment, no `..`, no leading or trailing `/`.
 
-A path that fails is `400`. A path under a workspace that does not exist
-or is soft deleted is `404`, whoever asks ([[009-workspaces]]).
+A path that fails is `400`: `unknown_plane` for a first segment that is
+not `files`, `invalid_path` for the rest.
+
+**Amended 2026-10-12 ([[028-one-tree]]).** A space is one tree, so no
+handler reads a row before it reads a path and no rule here depends on a
+prefix. The second plane, its liveness lookup and the rules it hard-coded
+are gone: a delete is soft and an overwrite keeps a version unless the
+request or the answer's limits say otherwise, and every path moves. A
+folder is a prefix, deleted with `?recursive=1` and copied with
+`copy_to` and `recursive`; [[028-one-tree]] holds the rules of both and
+of the three answer limits, `limits.versions`, `limits.trash` and
+`limits.omit`.
 
 Every handler below authorizes per [[006-identity]] before it acts and
 names the action it asks with. A refusal on a space the caller cannot
@@ -285,8 +293,8 @@ render a tree Arca does not store.
 Trashed rows are absent. A cursor is a path, so a listing is stable
 under concurrent inserts and a caller can resume it tomorrow.
 
-A listing of a plane root, `GET /v1/files/{owner}/files?list=1` or the
-same for `workspaces`, carries `space` beside `entries`:
+A listing of the plane root, `GET /v1/files/{owner}/files?list=1`,
+carries `space` beside `entries`:
 
 ```json
 { "entries": [ … ], "prefixes": [ … ],
@@ -301,8 +309,9 @@ administrator's action: the question is the `file.list` the listing
 already asks, the answer is about the space that question named, there
 is no new route and no new action. A listing deeper in the tree carries
 no `space`, because the ledger counts a space and not a subtree; a plane
-root is the one prefix that names a space rather than a subtree of one,
-which is why both plane roots answer the same pair. A counter that
+root is the one prefix that names a space rather than a subtree of one.
+The pair is the whole space's under an answer whose `limits.omit` leaves
+part of the page out ([[028-one-tree]]). A counter that
 cannot be read is `storage_unavailable` and never a page reporting
 nothing, which a caller would read as an empty space.
 
@@ -315,25 +324,21 @@ authorizer sees both ends of the move in one question: a move out of a
 subtree the caller may write into one it may not is a copy with extra
 steps.
 
-Constraints: the same space, the same plane, and a destination that no
-live row holds (`409`). Version rows, stars, and a share whose prefix is
-exactly this path follow the file in the same transaction; a share on a
-parent prefix covers a subtree and stays where it is.
-
-Moves are limited to `files/`. A path under `workspaces/` belongs to the
-sync protocol of [[009-workspaces]], which would see a move as a delete
-and a create.
+Constraints: the same space and a destination that no live row holds
+(`409`). Version rows, stars, and a share whose prefix is exactly this
+path follow the file in the same transaction; a share on a parent prefix
+covers a subtree and stays where it is. The `grant` the question carries
+is the lower of the caller's rungs on the two paths ([[006-identity]]).
 
 A test asserts this operation makes zero calls against `blob.Counting`
 ([[003-object-store]]), which is criterion 7 of [[001-architecture]].
 
 ### Delete, trash, restore
 
-`DELETE` asks `file.delete`. Under `files/` it is soft: it sets
-`deleted_at`, the row leaves every listing, read, share, and link, and
-the bytes stay. Under `workspaces/` it is hard, because sync owns those
-trees and a soft row would reappear as a phantom file at the next
-materialize. `?permanent=1` is hard anywhere.
+`DELETE` asks `file.delete`. It is soft: it sets `deleted_at`, the row
+leaves every listing, read, share, and link, and the bytes stay.
+`?permanent=1`, or an answer carrying `limits.trash: false`
+([[028-one-tree]]), makes it hard.
 
 A hard delete is row first and bytes second (invariant 1), taking the
 path's version rows with it; the bytes of any version no longer
@@ -383,7 +388,8 @@ days, whichever trims first, applied by
 they bound a cost the operator did not ask for, and an installation that
 wants a different bound is asking for a feature, not a variable.
 Versions count towards the space's usage ([[010-events-and-reaper]]).
-`workspaces/` keeps no versions, and a restore there is `400`.
+A write whose answer carries `limits.versions: false` keeps no version of
+what it replaces ([[028-one-tree]]).
 
 ### Stars
 
@@ -474,16 +480,23 @@ wire details of every route here ([[013-api]]).
 | 7 | A read at or below the inline size streams, one above it redirects, and `?inline=1` does not override the redirect | handler tests at both sides of the boundary |
 | 8 | A move makes zero bucket calls and carries versions, stars, and an exact-path share with it | `blob.Counting` plus a store tier assertion on each table |
 | 9 | A move onto an occupied path is `409` and changes nothing | handler test |
-| 10 | A delete under `files/` is soft and the path vanishes from listing, read, and share; a delete under `workspaces/` is hard | handler tests over the two planes |
+| 10 | A delete is soft and the path vanishes from listing, read, and share; `?permanent=1` is hard. Amended 2026-10-12: the second plane's hard delete is gone with the plane | handler tests |
 | 11 | Restore after a trash returns the bytes, and restore onto a reoccupied path is `409` | the e2e tier |
 | 12 | Two overwrites leave two versions, a restore round-trips the bytes, and the restored version leaves the list | the e2e tier |
 | 13 | A listing pages stably under concurrent inserts and synthesises directory prefixes | the store tier |
 | 14 | A row whose bytes are missing answers `500`, not `404` | handler test with `blob.Memory` emptied behind the row |
 | 15 | Every handler asks exactly one authorization question, with the action this spec names | the conformance rows of [[017-conformance-suite]] |
-| 16 | A listing of a plane root carries `space` with the ledger's bytes and the live paths, a listing below one carries none, and a counter that cannot be read is `storage_unavailable` | handler test over both planes; `test/conformance` `case005RootUsage` |
+| 16 | A listing of the plane root carries `space` with the ledger's bytes and the live paths, a listing below one carries none, and a counter that cannot be read is `storage_unavailable` | handler test; `test/conformance` `case005RootUsage` |
 
 
 ## Outcome
+
+**Amended 2026-10-12 by [[028-one-tree]].** `files.Workspaces`, the
+liveness lookup and every rule keyed on the second plane are gone; the
+folder delete is `folder.go`'s `removeFolder`, the copy its
+`copyObject` and `copyFolder`, and `LimitsOf` reads an answer's limits
+whole. Criterion 10's test is now `TestADeleteIsSoftAndKeepsTheBytes`.
+The text below this paragraph is the record of 2026-09-19.
 
 Complete on 2026-09-19. The object plane is `internal/files`: twelve
 handlers, the one write this spec and [[007-uploads]] both commit through,

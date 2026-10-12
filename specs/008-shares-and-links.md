@@ -9,7 +9,7 @@ depends_on:
 affects: [space/, authorizer/, internal/shares/, internal/api/, internal/store/, docs/]
 effort: large
 created: 2026-09-18
-updated: 2026-09-19
+updated: 2026-10-12
 author: changkun
 ---
 
@@ -200,8 +200,9 @@ What the implementation decided, where this spec was silent:
 [[004-metadata-store]] owns the table and its indexes. The columns above
 are the ones behavior in this spec depends on.
 
-A grant covers a subtree, so a grant on a workspace root is a share of
-that workspace and [[009-workspaces]] needs no grant table of its own.
+A grant covers a subtree. **Amended 2026-10-12 ([[028-one-tree]]):** a
+space is one tree, so a grant's `path_prefix` is a path under `files/`,
+the plane itself included, and a prefix in no plane is `unknown_plane`.
 `path_prefix` is matched by path segment: `files/reports` covers
 `files/reports` and `files/reports/q3.pdf` and does not cover
 `files/reports-archive`.
@@ -218,10 +219,13 @@ read  <  write  <  manage
 | `write` | read, plus put, move, and delete inside the subtree |
 | `manage` | write, plus create and revoke grants on the subtree |
 
-Each grade holds every grade below it. The ladder is one ordering used by
-every plane, so a `write` grant on `workspaces/build/` is what lets a
-sandbox attach read-write ([[009-workspaces]]) and a `read` grant is what
-lets it attach read-only.
+Each grade holds every grade below it. A question about two paths, a
+move or a copy, is decided on the lower of the rungs the caller holds on
+them ([[006-identity]]). A permanent folder delete removes the grants and
+links on the folder and under it ([[028-one-tree]]), for the reason a
+move carries an exact-path grant. The pages of this spec, the grants of
+a space, what is shared with a caller, the links of a space and a link's
+own listing, leave out what an answer's `limits.omit` names.
 
 `manage` exists so a space owner can delegate sharing without delegating
 ownership. Whether a given `manage` holder may mint a given grant is not
@@ -473,6 +477,12 @@ grantee ([[010-events-and-reaper]]).
 | 11 | No handler in `internal/shares` reads `org_id`, `roles`, or `email` | the `identity` gate's rule, plus a grep test in `internal/shares` |
 
 ## Outcome
+
+**Amended 2026-10-12 by [[028-one-tree]].** A grant's prefix is a path
+under `files/`; the workspace reading of a grant and its attach rungs are
+gone with the plane. The listing queries take an answer's omitted
+prefixes, and `store.Shares.DeleteUnder` is the permanent folder
+delete's. The text below this paragraph is the record of 2026-09-19.
 
 Complete on 2026-09-19. The grant is one table and one query set:
 migration `0003_shares.up.sql`, `internal/store/shares.go` and

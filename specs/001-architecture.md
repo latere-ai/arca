@@ -6,7 +6,7 @@ depends_on: []
 affects: [object/, authorizer/, internal/, cmd/arcad/, api/, test/, tools/, deploy/, docs/]
 effort: medium
 created: 2026-09-18
-updated: 2026-09-19
+updated: 2026-10-12
 author: changkun
 ---
 
@@ -126,16 +126,19 @@ whose subject the authorizer names. Arca holds no table of principals
 beyond the ones that have touched it and no notion of membership; who
 may act in whose space is the authorizer's answer.
 
-Inside a space, two planes are two path prefixes with their own rules
-and one storage model:
+**Amended 2026-10-12 ([[028-one-tree]]).** A space is one tree. Every
+path of a space begins with the one plane, `files/`, and a folder is a
+prefix of it: Arca stores no directory, and a folder with nothing in it
+does not exist. The second plane, `workspaces/<slug>/`, and its writer
+lease are removed, and what it held is in ordinary folders under
+`files/workspaces/`.
 
 | Plane | Prefix | What it holds | Rules of its own |
 |---|---|---|---|
-| files | `files/` | objects a person, an application, or an agent stores | versions, trash, stars, conditional writes by ETag ([[005-files]]) |
-| workspaces | `workspaces/<slug>/` | a durable subtree a sandbox attaches to | one writer lease, materialize, sync ([[009-workspaces]]) |
+| files | `files/` | objects a person, an application, or an agent stores | versions, trash, stars, conditional writes by ETag, a folder deleted or copied in one call ([[005-files]], [[028-one-tree]]) |
 
 A repository's history lives on a git host, and a checked-out tree a
-sandbox needs is a workspace or the sandbox's own disk, so there is no
+sandbox needs is a folder or the sandbox's own disk, so there is no
 plane for it.
 
 A request names the space and the path as two values, not as one
@@ -170,10 +173,9 @@ internal/api/            the frame: the route table, the registration seam, the 
 internal/files/          put, get, list, move, delete; versions, trash, stars (005)
 internal/uploads/        upload sessions and the multipart completion (007)
 internal/shares/         grants, the permission ladder, public links, shared-with-me (008)
-internal/workspaces/     attach, renew, release, materialize, sync (009)
 internal/admin/          the overview across spaces and the restore across them (012)
-internal/reaper/         the reconciliation of the two stores and the expiry of leases,
-                         sessions, and trash (010)
+internal/reaper/         the reconciliation of the two stores and the expiry of sessions
+                         and trash (010)
 internal/metrics/        the one registry and the table of 018
 internal/check/          the check role of arcad (012)
 test/e2e/                arcad as a process against MinIO and Postgres (014)
@@ -221,7 +223,6 @@ flowchart TB
     FI[internal/files]
     UP[internal/uploads]
     SH[internal/shares]
-    WS[internal/workspaces]
     AD[internal/admin]
   end
   subgraph L5["off the request path"]
@@ -274,11 +275,11 @@ OpenAPI document is rendered from it, so a route cannot exist in one
 and not the other.
 
 ```
-surface  = frame ∪ ⋃ contributed(p)      p over the five route owners
+surface  = frame ∪ ⋃ contributed(p)      p over the four route owners
 
 |frame|        = 4      1 event tail + 3 public link routes
-|contributed|  = 37     12 workspaces, 12 files, 8 shares, 3 uploads, 2 admin
-|surface|      = 41
+|contributed|  = 25     12 files, 8 shares, 3 uploads, 2 admin
+|surface|      = 29
 ```
 
 A package that owns behavior declares `api.Route` values and the node
@@ -361,8 +362,8 @@ does; the intersection is the shared library's.
 
 Arca is not a git host: a repository's history lives on one, and Arca
 holds at most a working tree of it. Arca is not a sandbox's volume: a
-volume is where a sandbox's own disk lives, and a workspace is what a
-sandbox mounts from Arca and syncs back. Arca is not an identity
+volume is where a sandbox's own disk lives, and a folder of a space is
+what a sandbox's client may copy in from Arca and write back. Arca is not an identity
 provider and holds no session, no password, no membership.
 
 ## Invariants
@@ -389,8 +390,8 @@ moved.
    of the authorization, and the frame's route table is the one place
    that exception can be written.
 6. **A refused object answers as a missing one.**
-7. **One writer per workspace.** A workspace has at most one live
-   lease, and a lease expires.
+7. Retired 2026-10-12 by [[028-one-tree]] with the plane it held to.
+   It read: one writer per workspace. The number is not reused.
 8. **The key is not the path.** A bucket key derives from the object id
    under the configured prefix; a move touches no bytes.
 9. **No cloud SDK beyond the S3 API, no Kubernetes client.** The build
@@ -417,7 +418,7 @@ tree at `updated`.
 | 3 | No file outside `specs/` and the declared overlay names an installation's address as a value | the `identity` gate's `no-latere-value` rule, configured `role: core` with `overlays: [deploy/prod]`; the rule exempts the module namespace, the API group, and a contact address, and skips tests and `specs/` | met |
 | 4 | Every route behind the verifier asks exactly one action of the vocabulary, and the exceptions are three and counted | `TestEveryRouteAsksExactlyOneAction`, `TestEveryActionIsOneOfTheVocabulary`, `TestARouteThatIsDeniedDoesNotAct`, `TestTheThreeVerifierExceptionsAndNoMore` in `internal/api` | met, run |
 | 5 | A route can be contributed by the package that owns it, and a set that could not be a surface is refused at start | `TestAContributedRouteIsRegisteredBehindTheVerifierAndDescribed`, `TestASetOfRowsThatCouldNotBeASurfaceIsRefusedAtStart`, `TestTheDocumentReadsTheDeclarationAndNotTheHandler` in `internal/api` | met, run |
-| 6 | The mux and the document are one list: 41 routes, described and registered alike | `TestEveryRegisteredRouteIsInSpec013sTable` and `TestTheDocumentDescribesEveryRegisteredRouteAndNoOther` in `internal/api`; `api/openapi.yaml` holds 41 operations; `test/conformance/surface.go` declares the same 41 independently | met, run |
+| 6 | The mux and the document are one list: 29 routes, described and registered alike | `TestEveryRegisteredRouteIsInSpec013sTable` and `TestTheDocumentDescribesEveryRegisteredRouteAndNoOther` in `internal/api`; `api/openapi.yaml` holds 29 operations; `test/conformance/surface.go` declares the same 29 independently | met, run; 41 before [[028-one-tree]] |
 | 7 | A put that fails after the bucket write leaves no row, and bytes nothing can remove are left for the reaper | `TestEveryWriteThatCannotBeRecordedIsRefused` and `TestBytesNothingCanRemoveAreLeftForTheReaper` in `internal/files`; `TestStoreAWriteRefusedAfterTheBucketLeavesNoRowAndNoBytes` against both stores in the store tier | met, unit tier run; the store tier runs under `make test-store` |
 | 8 | A delete that fails after the row is gone leaves a reaper finding and no visible object | the order is `internal/files.purge`, which removes the row and its history in one transaction and drops the keys after, and the store tier asserts it end to end in `TestStoreADeleteThatFailsAfterTheRowLeavesTheBytesForTheReaper`. What collects the result is pass 1, held by `TestPassOneKeepsWhatARowStillNames` and `TestPassOneLeavesAKeyItCannotReadAlone` in `internal/reaper` | met, the reaper passes run and the order read from the code; the store tier runs under `make test-store` |
 | 9 | A row whose bytes the bucket does not hold is a finding and never a quiet delete | `TestPassTwoReportsARowWithoutItsBytesAndDeletesNothing` in `internal/reaper` | met, run |
@@ -428,9 +429,15 @@ tree at `updated`.
 | 14 | With no authorizer configured the owner policy decides, and it is the same seam | `TestStartSelectsTheOwnerPolicyWithNoEndpoint`, `TestOwnerPolicyConformance`, `TestTheOwnerPolicyTable` in `internal/auth` | met, run |
 | 15 | A replica keeps nothing on local disk | `TestBaseIsConfined` in `test/deploy` holds every arcad container to `readOnlyRootFilesystem: true` and every pod to `automountServiceAccountToken: false`. [[017-conformance-suite]] carries the multi-replica reading as a case and records it in `Report.Unverified` against a single-replica target | met, run |
 | 16 | A read above the inline size is a redirect and not a stream | `TestAReadAtOrBelowTheInlineSizeStreamsAndOneAboveItRedirects` in `internal/files`; `acceptsLength` refuses a write above `ARCA_INLINE_BYTES` and names the session route | met, run |
-| 17 | Two attaches to one workspace yield one lease | `TestTwoWritersOnOneWorkspaceLeaveOneLease` in `internal/workspaces` | met, run |
+| 17 | Retired 2026-10-12 by [[028-one-tree]] with invariant 7. It read: two attaches to one workspace yield one lease | none | retired |
 
 ## Outcome
+
+**Amended 2026-10-12 by [[028-one-tree]].** One plane: the second,
+`internal/workspaces` and its two tables are gone, invariant 7 and
+criterion 17 are retired with their numbers kept, and the surface is
+twenty-nine routes over four route owners. The text below this paragraph
+is the record of 2026-09-19.
 
 The architecture this spec fixes is the architecture in the tree. All
 seventeen criteria are met; every test named above was run in this

@@ -14,7 +14,7 @@ depends_on:
 affects: [internal/admin/, internal/check/, internal/api/, internal/auth/, internal/events/, internal/store/, cmd/arcad/, docs/]
 effort: medium
 created: 2026-09-18
-updated: 2026-09-20
+updated: 2026-10-12
 author: changkun
 ---
 
@@ -209,13 +209,13 @@ subject, URL-encoded, or `me`.
 | Method | Path | Does | `resource.owner` |
 |---|---|---|---|
 | GET | `/v1/admin/overview` | one row per space that holds anything, with its usage and its counts | absent |
-| POST | `/v1/admin/spaces/{owner}/restore` | restore one deleted object or workspace | the named space |
+| POST | `/v1/admin/spaces/{owner}/restore` | restore one trashed object | the named space |
 
 Everything else an administrator does is an ordinary route of another
 spec, answered on a space the caller does not own. Reading someone's
 objects is `GET /v1/files/{owner}/{path...}?list=1`, their grants is
 `GET /v1/shares?owner=`, what they can still recover is `GET
-/v1/trash?owner=` and `GET /v1/workspaces/deleted?owner=`, and what
+/v1/trash?owner=`, and what
 happened to their space is `GET /v1/events?owner=`. Each asks the action
 it always asks, and what makes the call administrative is that the
 authorizer allowed a caller who neither owns the space nor holds a grant
@@ -232,8 +232,8 @@ skips the space.
 
 The service Arca replaces served deleted objects at `/v1/admin/deleted`
 across every space and moderation at `/v1/admin/files/{id}`. The listing
-has no successor: it is `GET /v1/trash?owner=` and `GET
-/v1/workspaces/deleted?owner=` with a different subject asking. The
+has no successor: it is `GET /v1/trash?owner=` with a different subject
+asking. The
 moderation delete folds into `DELETE /v1/files/{owner}/{path...}`, which
 is the same route the owner uses and the reason there is one delete
 implementation instead of two.
@@ -249,21 +249,21 @@ GET /v1/admin/overview?cursor=&limit=
 {
   "entries": [
     {"owner": "https://issuer.example|9ab3...", "files": 214, "bytes": 88213004,
-     "trashed_bytes": 402118, "workspaces": 2, "leases": 1, "links": 3,
+     "trashed_bytes": 402118, "links": 3,
      "last_write_at": "2026-09-17T08:41:02Z"}
   ],
   "next_cursor": "https%3A%2F%2Fissuer.example%7C9ab3..."
 }
 ```
 
-Seven counters per space, in one statement, keyed by subject. `bytes` is
+**Amended 2026-10-12 ([[028-one-tree]]).** Five counters per space, in
+one statement, keyed by subject; `workspaces` and `leases` are gone with
+the plane they counted. `bytes` is
 the space's usage as [[010-events-and-reaper]]'s ledger holds it, which
 is the number a platform bills and compares against whatever limit its
 authorizer hands out; Arca stores no limit, so no column here names one.
 `trashed_bytes` is the part of that usage trash still holds, because the
-difference is what a reaper run would recover. `leases` counts live
-workspace leases, which is the number of sandboxes holding a writer
-lease right now ([[009-workspaces]]). The service Arca replaces also
+difference is what a reaper run would recover. The service Arca replaces also
 counted pending share approvals; the approval queue is not Arca's
 ([[008-shares-and-links]]), so that counter is gone.
 
@@ -280,20 +280,20 @@ names resolves the subject against its own identity provider.
 
 ### Restore across owners
 
-`POST /v1/admin/spaces/{owner}/restore` takes `{"id": "<object or
-workspace id>"}` and answers `200 {"id": ..., "kind": ..., "status":
-"restored"}`. It restores across owners, which is the whole reason it
-exists beside [[005-files]]'s own restore, and it takes an id rather
-than a path so that one route returns either a trashed object or a
-soft-deleted workspace; `kind` in the answer says which it was. An id
+`POST /v1/admin/spaces/{owner}/restore` takes `{"id": "<object id>"}`
+and answers `200 {"id": ..., "kind": "file", "status": "restored"}`. It
+restores across owners, which is the whole reason it exists beside
+[[005-files]]'s own restore, and it takes an id rather than a path.
+`kind` is `file`; it named which of two kinds came back until
+[[028-one-tree]] removed the second. An id
 already purged is a 404 whose developer detail says the retention window
 has passed, so the administrator is not left guessing between a typo and
 an expiry. The restore touches the database only, per invariant 1 of
 [[001-architecture]].
 
-An administrator finds the id in the owner's own listings, `GET
-/v1/trash?owner=` and `GET /v1/workspaces/deleted?owner=`, both of which
-carry `purges_at` derived from `ARCA_TRASH_RETENTION`.
+An administrator finds the id in the owner's own listing, `GET
+/v1/trash?owner=`, which carries `purges_at` derived from
+`ARCA_TRASH_RETENTION`.
 
 ### The record of what an administrator did
 
@@ -448,9 +448,9 @@ does not emit ([[018-observability]]).
 | 2 | A caller the authorizer denies gets 403 `forbidden`; a space's own owner with no `space.admin` gets 403 on its own space | the same test |
 | 3 | With no authorizer and an empty `ARCA_ADMIN_SUBJECTS`, both admin routes answer 403 to every caller including the space owner | `internal/admin` policy test |
 | 4 | A non-human caller the authorizer allows may moderate; no handler reads `principal_type` | `TestAdminReadsNoClaims`, plus the `identity` gate's `claims` rule |
-| 5 | The overview's seven counters per space equal a direct count of the fixtures, `bytes` equals the ledger, and no counter reads the approvals table, which does not exist | e2e against Postgres |
+| 5 | The overview's five counters per space equal a direct count of the fixtures, `bytes` equals the ledger, and no counter reads the approvals table, which does not exist | e2e against Postgres |
 | 6 | The overview pages by `cursor` across more spaces than one page holds, and lists no space that holds nothing | e2e |
-| 7 | A restore across owners returns the object to its path and a soft-deleted workspace to its slug; an id past the retention window is 404 with the window named in the developer detail | e2e, with the two arms and the order the node tries them in held by `TestTheRestoreAcrossOwnersTriesTheTrashThenTheTombstones` |
+| 7 | A restore across owners returns the object to its path; an id past the retention window is 404 with the window named in the developer detail | e2e, with the binding held by `TestTheRestoreAcrossOwnersReachesTheTrash` |
 | 8 | The record is the event log and no table of its own, and an administrative mutation's event is appended by the same request that made it. Appending it inside the mutation's transaction, so that either both commit or neither does, is [[021-transactional-audit-events]] | criterion 9's tests for the append; the Design above says what is not yet one commit |
 | 9 | An allow on a space the caller neither owns nor holds a covering grant on marks its event `admin` wherever it happened; a mutation in the caller's own space and one a grant covers mark none | `TestAnAllowNeitherOwnershipNorAGrantExplainsIsAdministrative` over six cases at the decision, `TestAnAdministrativeAllowMarksTheEventTheMutationAppends` at the append, and `TestE2ETheAdministrativeRecordIsTheEventLog` through the binary |
 | 10 | `GET /v1/events` serves that record to an administrator for any space and to an owner for its own, and no route in this spec deletes from the log | `TestE2ETheAdministrativeRecordIsTheEventLog` for the two readers and `TestE2ENoRouteDeletesFromTheLog` over the served document |
@@ -460,6 +460,13 @@ does not emit ([[018-observability]]).
 | 14 | `check` deletes the object it wrote, and a bucket listing after a run holds nothing under `_check/` | `internal/check` over the in-process store, and the e2e tier of [[014-test-stubs-and-tiers]] against MinIO |
 
 ## Outcome
+
+**Amended 2026-10-12 by [[028-one-tree]].** The overview's row is five
+counters, `workspaces` and `leases` gone, and the restore across spaces
+restores a trashed object only. The binding of criterion 7 is
+`TestTheRestoreAcrossOwnersReachesTheTrash` and
+`TestTheRestoreAcrossOwnersCarriesAFailureOfTheTrash` in `cmd/arcad`. The
+text below this paragraph is the record of 2026-09-19.
 
 Complete on 2026-09-20. The two routes under `/v1/admin`, `arcad check`,
 the restore across owners and the overview across spaces are in the tree

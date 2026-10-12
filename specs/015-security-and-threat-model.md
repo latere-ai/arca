@@ -12,6 +12,7 @@ depends_on:
   - specs/007-uploads.md
   - specs/008-shares-and-links.md
   - specs/009-workspaces.md
+  - specs/028-one-tree.md
   - specs/010-events-and-reaper.md
   - specs/012-administration.md
   - specs/013-api.md
@@ -19,10 +20,10 @@ depends_on:
   - specs/016-release-and-installation.md
   - specs/017-conformance-suite.md
   - specs/018-observability.md
-affects: [internal/auth/, internal/api/, internal/blob/, internal/files/, internal/shares/, internal/admin/, internal/uploads/, internal/workspaces/, internal/events/, internal/reaper/, internal/config/, object/, deploy/base/, deploy/prod/, test/e2e/, test/deploy/, SECURITY.md]
+affects: [internal/auth/, internal/api/, internal/blob/, internal/files/, internal/shares/, internal/admin/, internal/uploads/, internal/events/, internal/reaper/, internal/config/, object/, deploy/base/, deploy/prod/, test/e2e/, test/deploy/, SECURITY.md]
 effort: medium
 created: 2026-09-18
-updated: 2026-09-19
+updated: 2026-10-12
 author: changkun
 ---
 
@@ -87,7 +88,6 @@ flowchart LR
   subgraph untrusted[untrusted]
     C[a caller with a token]
     L[a link holder with no token]
-    S[a sandbox holding a lease]
   end
   subgraph core[the installation]
     A[arcad]
@@ -100,7 +100,6 @@ flowchart LR
   end
   C -->|bearer| A
   L -->|token in the URL| A
-  S -->|bearer, lease| A
   A --> P
   A --> B
   C -.->|presigned URL, one object, five minutes| B
@@ -134,7 +133,7 @@ and the request-forgery surface behind it.
 | an authenticated caller | a valid bearer from a listed issuer | another subject's space, more room than its platform allows it, an administrator's surface, a grant it was not given |
 | a link holder | one token | the rest of the space, a write, another space's link |
 | an anonymous prober | the network | a token by guessing, an object by path, the shape of what exists |
-| a sandbox holding a lease | a token for the audience `arca`, one lease | another workspace, a lease it should have lost, bytes outside its subtree |
+| a reader of a space several subjects read | a valid bearer and an answer that leaves part of the space out of what it enumerates | the names, counts and sizes of what it was left out of |
 | a revoked collaborator | an id it was shown before the revoke | to learn whether what it once saw is still there |
 | a network position | the wire | a bearer, a link token, a presigned URL |
 | a compromised authorizer | the decision | to allow every action for every subject, including actions it does not recognize |
@@ -305,9 +304,8 @@ The eight sites of the row above are the paths a caller names. Four more
 lookup sites rendered the authorizer's reason into `details.detail`
 where an absence rendered the handler's own sentence: `share.read` and
 `share.revoke` (`internal/shares/grants.go`), `link.revoke`
-(`internal/shares/links.go`), and every workspace route that reads a row
-before it asks (`internal/workspaces/lifecycle.go`, `ask`). They now
-answer through the collapse too.
+(`internal/shares/links.go`), and the routes of the second plane, which
+[[028-one-tree]] removed. They now answer through the collapse too.
 
 Nothing about the exposure forced it. The status line, the error code
 and the user sentence were identical in all four cases, which is what
@@ -331,9 +329,9 @@ The collapse itself is `api.Refused`, one function: it answers a deny
 whose code is `not_found` with the refusal the handler writes for an
 absence, and keeps the authorizer's reason on every other deny.
 `files.Service.Refused` is that function with the object's sentence
-formatted for it, `shares` passes `noGrant` and `noLink`, and
-`workspaces` passes its own `notFound`. One implementation per package
-is how four routes were left out of the rule to begin with.
+formatted for it, and `shares` passes `noGrant` and `noLink`. One
+implementation per package is how four routes were left out of the rule
+to begin with.
 
 ### Controls
 
@@ -342,7 +340,9 @@ it. Names are as they appear in the tree.
 
 | Threat | Control | Spec | Test |
 |---|---|---|---|
-| a caller reaching another subject's space | every handler reads, asks, then acts; a deny on the caller's own action is 403, a deny while resolving a reference is the answer an absence gives, on every route that reads a row before it asks | 006, 013 | `TestEveryHandlerAsksExactlyOneActionBeforeItActs`, `TestEveryLookupDenyIsTheAnswerAnAbsenceGives`, `TestEveryShareLookupDenyIsTheAnswerAnAbsenceGives`, `TestEveryWorkspaceLookupDenyIsTheAnswerAnAbsenceGives`, `TestADenyOnAnotherSpaceIsAMissingObject` |
+| a caller reaching another subject's space | every handler reads, asks, then acts; a deny on the caller's own action is 403, a deny while resolving a reference is the answer an absence gives, on every route that reads a row before it asks | 006, 013 | `TestEveryHandlerAsksExactlyOneActionBeforeItActs`, `TestEveryLookupDenyIsTheAnswerAnAbsenceGives`, `TestEveryShareLookupDenyIsTheAnswerAnAbsenceGives`, `TestADenyOnAnotherSpaceIsAMissingObject` |
+| a question about two paths decided on the rung of one | a question that names a `from` carries the lower of the caller's rungs on the two paths, and the owner policy decides on that rung, so a grant that covers one end of a move or a copy confers nothing | 006, 028 | `TestAGrantMustCoverBothEnds`, `TestAQuestionWithASourceIsDecidedOnBothPaths`, `TestAMoveNeedsAGrantOnBothEnds`, `TestACopyNeedsAGrantOnBothEnds` |
+| a subtree an answer leaves out listed anyway | `limits.omit` is applied in the statement of every route that enumerates, so no page, count, manifest, event or recursive operation names a path under an omitted prefix, and an entry that is not a path of the space is no decision rather than ignored | 028 | `TestStoreAnOmittedSubtreeIsLeftOutOfEveryEnumeration`, `TestAListingLeavesOutWhatTheAnswerOmits`, `TestStoreTheTailLeavesOutWhatTheAnswerOmits`, `TestAnOmitEntryIsAPathOfTheSpace` |
 | a route that acts before it asks, or asks twice | every registered route declares one action and is held to it | 013 | `TestEveryRouteAsksExactlyOneAction`, `TestARouteThatIsDeniedDoesNotAct` |
 | a revoked permission still honored | an allow is cached per replica for the answer's `ttl`, a deny briefly, unavailability never; the key is subject, action and resource id. The window is the accepted staleness and the authorizer sets it per answer | 006 | `TestAnAllowIsCachedPerSubjectActionAndResource`, `TestAnExpiredAnswerIsAskedAgain` |
 | an allow that was never decided | the client fails closed on anything but a 200 carrying `allow` | 006 | `TestUnavailableIsNeverAnAllow`, `TestAnAuthorizerThatAnswersNothingIsNeverAnAllow` |
@@ -351,7 +351,7 @@ it. Names are as they appear in the tree.
 | a key set fetched over a channel that can be rewritten | an `http://` issuer off loopback is refused at start-up unless the variable admits it | 006 | `TestAnHTTPIssuerOffLoopbackNeedsTheVariable`, `TestTheVerifierRefusesToStartOnABadDeployment` |
 | a narrowed personal key used past its grants | `authz.Restrict` intersects the policy's allow with the token's grants; a claim that does not read as grants is a deny and not an error | 006 | `TestOwnerPolicyNarrowsByTheGrants` |
 | a grants table that cannot answer admitting a stranger | a failure to resolve the grant is `authorizer_unavailable` and never a deny and never an allow | 006, 008 | `TestAGrantsTableThatCannotAnswerIsNoDecision`, `TestAGrantsTableThatCannotAnswerStopsTheQuestion`, `TestATableThatCannotAnswerIsNoDecision` |
-| a grantee indistinguishable from a stranger to an operator's endpoint | every question about a file, an upload or a workspace carries `grant`, the highest live rung the caller holds on a prefix of the path, resolved in both modes. A question about the caller's own space carries none, because ownership is not a grant | 006, 008 | `TestBothModesResolveTheGrant`, `TestTheQuestionCarriesTheCallersGrant`, `TestTheGrantsModeAdmitsTheLaddersActionsOfTheRung` |
+| a grantee indistinguishable from a stranger to an operator's endpoint | every question about a file or an upload carries `grant`, the highest live rung the caller holds on a prefix of the path, resolved in both modes. A question about the caller's own space carries none, because ownership is not a grant | 006, 008 | `TestBothModesResolveTheGrant`, `TestTheQuestionCarriesTheCallersGrant`, `TestTheGrantsModeAdmitsTheLaddersActionsOfTheRung` |
 | a token grant read as a subject grant | the grant step matches subject grants only; a token grant is reached by `link.read` alone | 008, 006 | `TestTheLinkStepAnswersLinkReadAndNothingElse`, `TestWhatTheGrantStepDoesNotAdmit` |
 | a claim read for meaning, so an issuer's membership claim becomes authority | nothing but issuer, subject, audience and validity changes what Arca does; claims travel to the authorizer verbatim | 006, 001 | `TestNoHandlerReadsAClaimForMeaning`, `TestAdminReadsNoClaims`, `TestAnAnonymousQuestionCarriesEmptyClaims` |
 | a presigned URL leaking from a redirect, a log, or a history | one object, one method, one expiry of `blob.PresignTTL`; no log attribute carries a signed URL, a credential, or the path | 003, 018 | `TestStoreAPresignedReadIsOneKeyAndOneMethod`, `TestTheRequestLineCarriesTheIdsAndNothingSecret` |
@@ -369,10 +369,6 @@ it. Names are as they appear in the tree.
 | usage accounting bypass by holding many open sessions | an open session's declared bytes are charged from the moment it opens until it completes or is reaped | 007, 010 | `TestASessionThatCouldNotBeOpenedLeavesNoMultipartAndNoCharge`, `TestAnExpiredSessionIsSweptWithItsPartsAndItsCharge` |
 | a usage charge that fails open | the charge and the check are one statement inside the write's own transaction, so a failure refuses the write and records no charge | 010 | `TestUsageFailsClosed`, `TestStoreUsageFailsClosed`, `TestALedgerThatCannotBeWrittenTakesTheWriteDownWithIt`, `TestAWriteRefusedByTheLedgerLeavesNoRowAndNoBytes` |
 | a ledger that silently stops counting | the reaper recomputes every space from the rows that hold the bytes and reports each correction; a correction racing a live charge loses | 010, 018 | `TestLedgerReconciles`, `TestStoreLedgerReconciles`, `TestLedgerCorrectionLosesToALiveCharge` |
-| a workspace lease held by a sandbox that died | a lease expires, one hour by default and twenty-four at most, both constants of `internal/workspaces` that no configuration raises, and the reaper releases every lease past its expiry | 009, 010 | `TestTheLeaseIsBoundedByTheCeilingAndDefaultsToAnHour`, `TestTheReaperPassEndsWhatOutlivedItsDeadline`, `TestTheReaperPassFreesALeaseNoAttachmentHolds` |
-| two writers in one workspace | the lease is taken by one conditional `UPDATE` whose predicate is that no writer holds it, so a race yields one winner | 009, 001 | `TestTwoWritersOnOneWorkspaceLeaveOneLease`, `TestAHolderThatCannotBeReadStillRefusesTheSecondWriter` |
-| a released or reaped attachment still writing | a sync checks that the attachment is active and that the workspace's lease is that attachment's | 009, 013 | `TestASyncThatIsNotTheWritersIsRefused`, `TestAZombieWriterWhoseLeaseMovedOnRenewsNothing`, `TestARenewAgainstAnAttachmentThatEndedIsGone` |
-| a sandbox reaching outside its workspace | a manifest carries only the pinned paths under the workspace root, a path that leaves it is refused, and an attachment of another workspace is not found | 009 | `TestAManifestPathThatLeavesTheWorkspaceIsRefused`, `TestMaterializePinsToTheAttachmentAndSignsTheKeyTheRowNames`, `TestAnAttachmentOfAnotherWorkspaceIsNotFound` |
 | a bucket that ignores `If-None-Match: *` | every put and copy carries it; a store that refuses degrades once, is logged and named by readiness, and fails `arcad check`. The API's compare and swap is in SQL and does not depend on the bucket | 003, 012, 018 | `TestAStoreWithoutConditionalCreateRunsDegradedAndSaysSoOnce`, `TestStoreAConditionalCreateHoldsUnderARaceOfWriters`, `TestIfMatchIsACompareAndSwapAndIfNoneMatchIsCreateOnly`, `TestStoreTwoConditionalWritersOfOnePathLeaveOneWinner` |
 | an event log read by the wrong caller | the tail asks `event.read` like any other action, applies the answer's `filter` to its own query, and fails closed | 010, 006 | `TestTheTailAsksEventReadAboutTheSpaceTheCallerNamed`, `TestTheTailRefusesADeny`, `TestEventFilter`, `TestTheTailFailsClosedOnAnAuthorizerThatAnswersNothing` |
 | a flood, and the guessing that hides in one | a token bucket per subject after authentication and one per client address before it; the second bounds both a flood of bad tokens and a search for a link token | 013, this spec | `TestTheSubjectRateLimitIsPerSubject`, `TestTheAddressRateLimitBoundsWhatHasNoSubject`, `TestARefusedBearerIsStillCounted`, `TestARateOfZeroLimitsNothing` |
@@ -455,9 +451,6 @@ fails, and so does a row naming a control the table above does not have.
 | a decision the authorizer cannot give is a refusal, never an allow | a grants table that cannot answer admitting a stranger |
 | a presigned URL names one object, one method, and one expiry, and is never logged | a presigned URL leaking from a redirect, a log, or a history |
 | a public link resolves to the object its token names and to nothing beside it | a link read outside the subtree it names |
-| a workspace has one writer at a time and a lease that expires | two writers in one workspace |
-| a workspace has one writer at a time and a lease that expires | a workspace lease held by a sandbox that died |
-
 Two commitments the first draft of this section carried are not in the
 root file and are not in this table: that Arca reads no claim for
 meaning, and the list of the three ways a byte leaves. Both are true and
@@ -500,12 +493,12 @@ their own tier.
 | # | Criterion | Proved by |
 |---|---|---|
 | 1 | Every handler asks exactly one action of the vocabulary before it acts, and a denied route acts on nothing | `TestEveryHandlerAsksExactlyOneActionBeforeItActs`, `TestEveryRouteAsksExactlyOneAction`, `TestARouteThatIsDeniedDoesNotAct` |
-| 2 | A deny at lookup is the answer an absence gives, status, code, sentence and developer detail alike, on every route that reads a row before it asks, whether the caller chose the identifier or this service minted it | `TestEveryLookupDenyIsTheAnswerAnAbsenceGives`, `TestEveryShareLookupDenyIsTheAnswerAnAbsenceGives`, `TestEveryWorkspaceLookupDenyIsTheAnswerAnAbsenceGives`, `TestADenyOnAnotherSpaceIsAMissingObject` |
+| 2 | A deny at lookup is the answer an absence gives, status, code, sentence and developer detail alike, on every route that reads a row before it asks, whether the caller chose the identifier or this service minted it | `TestEveryLookupDenyIsTheAnswerAnAbsenceGives`, `TestEveryShareLookupDenyIsTheAnswerAnAbsenceGives`, `TestADenyOnAnotherSpaceIsAMissingObject` |
 | 3 | An authorizer that answers nothing, answers malformed, or answers without `allow` refuses every request and never allows one; so does a grants table that cannot answer | `TestUnavailableIsNeverAnAllow`, `TestAnAuthorizerThatAnswersNothingIsNeverAnAllow`, `TestAGrantsTableThatCannotAnswerIsNoDecision`, `TestAGrantsTableThatCannotAnswerStopsTheQuestion` |
 | 4 | An authorizer that allows the probe resource is reported and fails the check, and one that cannot be reached fails it too | `TestTheProbeIsDeniedAndAnEndpointThatAllowsItIsReported`, `TestAnUnavailableEndpointFailsTheCheck` |
 | 5 | A token for another audience, from an unlisted issuer, past its age bound, or with no subject is refused, and an `http://` issuer off loopback fails start-up | `TestServiceConformance`, `TestATokenWithNoSubjectIsRefused`, `TestTheAudienceDefaults`, `TestAnHTTPIssuerOffLoopbackNeedsTheVariable` |
 | 6 | A personal key narrowed by grants reaches only what its grants name, and the intersection never turns a deny into an allow | `TestOwnerPolicyNarrowsByTheGrants` |
-| 7 | Every question about a file, an upload or a workspace carries the caller's rung in both modes, and a question about the caller's own space carries none | `TestBothModesResolveTheGrant`, `TestTheQuestionCarriesTheCallersGrant`, `TestTheGrantsModeAdmitsTheLaddersActionsOfTheRung` |
+| 7 | Every question about a file or an upload carries the caller's rung in both modes, and a question about the caller's own space carries none | `TestBothModesResolveTheGrant`, `TestTheQuestionCarriesTheCallersGrant`, `TestTheGrantsModeAdmitsTheLaddersActionsOfTheRung` |
 | 8 | A token grant admits no authenticated caller through the grant step; only `link.read` reaches one | `TestTheLinkStepAnswersLinkReadAndNothingElse`, `TestWhatTheGrantStepDoesNotAdmit` |
 | 9 | No handler reads a claim for meaning, and an anonymous question carries empty claims | `TestNoHandlerReadsAClaimForMeaning`, `TestAdminReadsNoClaims`, `TestAnAnonymousQuestionCarriesEmptyClaims` |
 | 10 | A presigned read names one key and one method, and no log line carries a bearer, a signed URL, or a path | `TestStoreAPresignedReadIsOneKeyAndOneMethod`, `TestTheRequestLineCarriesTheIdsAndNothingSecret` |
@@ -515,17 +508,28 @@ their own tier.
 | 14 | A public grant marks only the object its prefix names, a bucket that will not stamp is an unavailable store rather than a silent partial grant, and publicity does not travel with copied bytes | `TestAPublicGrantMarksTheObjectItNames`, `TestAPublicGrantOverASubtreeMarksNoObject`, `TestABucketThatWillNotStampIsAnUnavailableStore`, `TestStoreACopyOfAPublicObjectIsStampedAndNotCarried` |
 | 15 | A completion past the answer's limit is refused and the object goes, and the charge is read against the assembled size the store reports | `TestACompletionPastTheAnswersLimitIsRefusedAndTheObjectGoes`, `TestTheCompletionReadsTheAssembledSizeBack` |
 | 16 | A ledger read or write that fails refuses the write rather than admitting it, and a ledger altered behind the server's back is corrected and reported, with a correction losing to a live charge | `TestUsageFailsClosed`, `TestStoreUsageFailsClosed`, `TestAWriteRefusedByTheLedgerLeavesNoRowAndNoBytes`, `TestLedgerReconciles`, `TestLedgerCorrectionLosesToALiveCharge` |
-| 17 | A workspace whose writer stops calling is writable again after the lease expires and one reaper pass, two writers leave one lease, and a sync that is not the writer's is refused | `TestTheLeaseIsBoundedByTheCeilingAndDefaultsToAnHour`, `TestTheReaperPassFreesALeaseNoAttachmentHolds`, `TestTwoWritersOnOneWorkspaceLeaveOneLease`, `TestASyncThatIsNotTheWritersIsRefused` |
-| 18 | A manifest path that leaves the workspace is refused, and an attachment of another workspace is not found | `TestAManifestPathThatLeavesTheWorkspaceIsRefused`, `TestAnAttachmentOfAnotherWorkspaceIsNotFound` |
+| 17 | Retired 2026-10-12 by [[028-one-tree]] with the writer lease it held to | none |
+| 18 | Retired 2026-10-12 by [[028-one-tree]] with the attachment it held to | none |
 | 19 | A store that refuses a conditional create runs degraded, says so once, and is named by the check; two conditional writers of one path leave one winner | `TestAStoreWithoutConditionalCreateRunsDegradedAndSaysSoOnce`, `TestStoreAConditionalCreateHoldsUnderARaceOfWriters`, `TestStoreTwoConditionalWritersOfOnePathLeaveOneWinner` |
 | 20 | An `event.read` answer carrying a `filter` narrows the tail, a deny refuses it, and an authorizer that answers nothing never opens it | `TestEventFilter`, `TestTheTailRefusesADeny`, `TestTheTailFailsClosedOnAnAuthorizerThatAnswersNothing` |
 | 21 | The subject bucket limits per subject and the address bucket limits what has no subject, a refused bearer is still charged, and a rate of zero limits nothing | `TestTheSubjectRateLimitIsPerSubject`, `TestTheAddressRateLimitBoundsWhatHasNoSubject`, `TestARefusedBearerIsStillCounted`, `TestARateOfZeroLimitsNothing` |
 | 22 | The pod is non-root, read-only, capability-free and holds no service account token; every overlay admits the egress its own endpoints need and no more; every credential is mounted from a Secret | `TestBaseIsConfined`, `TestEveryOverlayAdmitsTheEgressItsEndpointsNeed`, `TestProdAdmitsTheDatabasePortsThisInstallationUses`, `TestTheBaseKeepsCredentialsInSecrets`, `TestProdKeepsCredentialsInSecrets` |
 | 23 | Every `Test` cell in the controls table names a function `go test -tags=tiers -list ./...` finds, and every row names something that proves it | `TestEveryControlNamesATestTheTreeHas` in `test/threatmodel`, which reads this file and runs that listing |
 | 24 | Every commitment in `SECURITY.md` is a row of this spec's commitment mapping and every row of that mapping is a control of the table, and every spec a control cites is in this file's `depends_on` | `TestEveryCommitmentOfTheRootFileIsAControl`, `TestEverySpecAControlNamesIsADependency` |
-| 25 | The four lookup sites addressed by a server-minted id answer a deny exactly as an absence, developer detail included, so [[013-api]]'s sentence holds with no route excepted | `TestEveryShareLookupDenyIsTheAnswerAnAbsenceGives`, `TestEveryWorkspaceLookupDenyIsTheAnswerAnAbsenceGives` |
+| 25 | The lookup sites addressed by a server-minted id answer a deny exactly as an absence, developer detail included, so [[013-api]]'s sentence holds with no route excepted | `TestEveryShareLookupDenyIsTheAnswerAnAbsenceGives` |
+| 26 | A question that names two paths carries the lower of the caller's rungs on them, and an enumeration leaves out every path an answer's `limits.omit` names, with an entry that is not a path of the space refused | `TestAGrantMustCoverBothEnds`, `TestAMoveNeedsAGrantOnBothEnds`, `TestACopyNeedsAGrantOnBothEnds`, `TestStoreAnOmittedSubtreeIsLeftOutOfEveryEnumeration`, `TestAnOmitEntryIsAPathOfTheSpace` |
 
 ## Outcome
+
+**Amended 2026-10-12 by [[028-one-tree]].** The second plane is gone, and
+with it the adversary that held a lease, the four controls about the lease
+and the attachment, criteria 17 and 18 (their numbers kept), the
+commitment `SECURITY.md` made about a workspace's writer, and the
+workspace half of the lookup collapse: what `TestEveryWorkspaceLookupDenyIsTheAnswerAnAbsenceGives`
+drove has no route left. Two controls joined, each with criterion 26:
+a question about two paths carries the lower of the caller's rungs on
+them, and an answer's `limits.omit` is applied in the statement of every
+enumeration. The text below this paragraph is the record of 2026-09-19.
 
 Complete on 2026-09-19. Criteria 1 to 22 were already proved by tests in
 the tree when this spec reached `testing`; the three that held it there
