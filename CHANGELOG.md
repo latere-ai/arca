@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.4.2 - 2026-10-12
+
 ### Fixed
 
 - A release deploys arcad and the reaper at its own tag. The apply took the tag `deploy/prod` names as committed, which rolled arcad to it for a moment before the release's tag replaced it, and left the reaper, which runs the same image, on the committed tag. `deploy/prod` now names v0.4.1, the running release.
