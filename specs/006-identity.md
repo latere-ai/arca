@@ -8,7 +8,7 @@ depends_on:
 affects: [authorizer/, internal/auth/, internal/api/, cmd/arcad/, .lateregate.yaml, docs/]
 effort: medium
 created: 2026-09-18
-updated: 2026-10-02
+updated: 2026-10-12
 author: changkun
 ---
 
@@ -207,6 +207,12 @@ answers as the owner policy does, and one with rules of its own may
 admit less. A `Share`, a `Link`, an `Event` and a `Space` carry no
 `grant`, because no grant reaches their actions.
 
+**Amended 2026-10-12.** On a question that names a `from`, `grant` is
+the lower of the rungs the caller holds on `path` and on `from`, in the
+order none, `read`, `write`, `manage`, and it is absent where the caller
+holds none on either. The owner policy's grant step decides on the same
+rung, so both modes read one answer about the two paths.
+
 The member is spelled `grant` on the wire and nowhere else, and that
 spelling is the whole of the pairing between this core and an endpoint:
 Arca renders it from `authorizer.File.Grant` and
@@ -351,6 +357,7 @@ and the owner policy is not consulted.
 | 12 | No Go file outside `internal/auth` names `org_id`, `roles`, or `principal_type` | the `identity` gate's `claims` rule |
 | 13 | Every question about a file or a workspace that names a path carries the caller's rung as `grant`, absent where they hold none and absent on the caller's own space, in both modes, and a grants table that cannot answer is `authorizer_unavailable` | `internal/auth` grant test |
 | 14 | Under an external authorizer that admits the ladder's actions of `resource.grant`, a grantee reads a shared object and a caller with no grant on it reads a missing one | `test/conformance` `case006Grantee` |
+| 15 | A question that names a `from` carries the lower of the caller's rungs on `path` and on `from`, and the owner policy decides on that rung | `internal/auth` `TestAGrantMustCoverBothEnds`; `internal/files` `TestAMoveNeedsAGrantOnBothEnds` |
 
 ## Not in this spec
 
@@ -400,6 +407,7 @@ What proves each criterion:
 | 12 | no Go file outside `internal/auth` names `org_id`, `roles` or `principal_type` |
 | 13 | `internal/auth`, `TestTheQuestionCarriesTheCallersGrant` (eleven rows over the kinds, the rungs, the anonymous caller and the space's own owner), `TestAGrantsTableThatCannotAnswerStopsTheQuestion`, `TestBothModesResolveTheGrant`, `TestNoGrantsTableIsNoGrant`, `TestTheResourceTheHandlerBuiltIsNotChanged` |
 | 14 | `test/conformance`, `case006Grantee`, against the grants mode of `test/stubs/authorizer` |
+| 15 | added 2026-10-12: `internal/auth`, `TestAGrantMustCoverBothEnds` and `TestATableThatCannotAnswerForTheSourceStopsTheQuestion`; `internal/shares`, `TestAQuestionWithASourceIsDecidedOnBothPaths`; `internal/files`, `TestAMoveNeedsAGrantOnBothEnds`, through the routes under the owner policy |
 
 Coverage of the owning packages: `authorizer` 100.0% of statements,
 `internal/auth` 90.6%.
