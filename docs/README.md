@@ -20,7 +20,7 @@ it prints.
 
 | Page | |
 |---|---|
-| [API](api.md) | spaces and planes, authentication, every route with the action it asks, lists, conditional requests, errors, uploads, shares and links, workspaces, events, administration, and the authorization endpoint you write |
+| [API](api.md) | spaces, paths and folders, authentication, every route with the action it asks, lists, conditional requests, errors, deleting and copying a folder, uploads, shares and links, events, administration, and the authorization endpoint you write, with the limits its answer may carry |
 | [OpenAPI](../api/openapi.yaml) | the same surface as an OpenAPI 3.1 document; every installation serves it at `GET /openapi.json` |
 | [Conformance](internals/testing.md#the-conformance-suite) | the suite that checks an installation, or another implementation, against the API |
 
@@ -28,7 +28,7 @@ it prints.
 
 | Page | |
 |---|---|
-| [Internals](internals/README.md) | how Arca is built: the packages, the two stores and the order they are written in, uploads, workspaces, the event log, and the reconciler |
+| [Internals](internals/README.md) | how Arca is built: the packages, the two stores and the order they are written in, uploads, folders, the event log, and the reconciler |
 | [Testing](internals/testing.md) | the test tiers, the stubs, and how to run each |
 | [Releasing](internals/releasing.md) | how a release is cut and what the pipeline publishes |
 | [`CONTRIBUTING.md`](../CONTRIBUTING.md) | how to build, test, and send a change |

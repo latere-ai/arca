@@ -19,7 +19,7 @@ kubectl -n arca exec deploy/arcad -- arcad check
 
 ```
 ok    bucket      arca-prod at https://s3.example, prefix arca/: wrote, read, deleted
-ok    database    PostgreSQL 18.0, schema at 0005_usage_events, clean
+ok    database    PostgreSQL 18.0, schema at 0006_one_tree, clean
 ok    issuer      https://issuer.example: discovery ok, 3 keys, RS256 ES256
 fail  authorizer  https://authz.example/decide: allowed the probe resource
 ok    public-url  https://arca.example, serving under /v1: answers the version endpoint
@@ -126,7 +126,10 @@ The migration runs before the rollout, and there is no window in which it
 must not. Each migration is additive, or is preceded by one release that
 writes both shapes, so a replica of release N and a replica of release N+1
 serve the same database while the rollout is half done. That is what makes
-a rolling update safe rather than a maintenance window.
+a rolling update safe rather than a maintenance window. One migration,
+`0006_one_tree`, is neither: it removes two tables, and
+[its section](#the-one-tree-migration) says what a replica of the previous
+release answers until the rollout replaces it.
 
 A replica the rollout stops keeps serving for 5 seconds after its pod is
 deleted, while an ingress controller learns the address is gone and stops
@@ -139,6 +142,56 @@ it below 68 seconds cuts a long request short.
 Reading `/version` through your hostname catches a rollout that reported
 done while replicas of the previous release were still behind the
 Service.
+
+### The one-tree migration
+
+The release that carries migration `0006_one_tree` removes workspaces. From
+then on a space is one tree, every path begins with `files/`, and what a
+workspace held is an ordinary folder. The migration moves it there. Its
+statements commit together or not at all, and it makes no call to the
+bucket: every object keeps its id, its key, and its size, and a space's
+usage is unchanged.
+
+| Before | After |
+|---|---|
+| the objects of a workspace, under `workspaces/<slug>/` | the same objects under the folder `files/workspaces/<slug>/`. Where the space already held something at that path, the folder is `files/workspaces/<slug>-2`, then `-3`, and so on, so nothing is overwritten |
+| a star, a grant, a link, or an open upload session on such a path | the same, on the new path |
+| a grant or a link on all of `workspaces` | the same on `files/workspaces`, unless the space already held something there; then it is revoked, so it covers nothing it did not cover before |
+| a deleted workspace that was still restorable | its objects are in the trash, trashed at the moment the workspace was deleted. They are restored one object at a time, and purged when the workspace would have been |
+| an object under `workspaces/` that no workspace named | moved the same way, and trashed at the time of the migration |
+| the space's event log | one `move` event per workspace, at the folder it moved to, with the detail `{"from": "workspaces/<slug>", "files": <n>, "trashed": <bool>}`. Earlier events stay as written |
+| the tables `workspaces` and `workspace_attachments` | dropped. An attachment open at that moment ends with them, and nothing it had synced is lost |
+
+What to do:
+
+1. Take the dump and run the migration as steps 2 and 3 above describe. It
+   needs nothing else from you.
+2. Move every client of `/v1/workspaces`, and every client that reads or
+   writes a `workspaces/...` path through the file routes, to
+   `files/workspaces/<slug>/...`. The first now answers `404 not_found`
+   and the second `400 unknown_plane`. Where a folder took a `-2` name,
+   the `move` event says so.
+3. Take the retired series out of your dashboards and alerts:
+   `arca_lease_expiries_total`, `arca_leases_held`, the `sync` kind of
+   `arca_bytes_in_total`, the `materialize` kind of `arca_bytes_out_total`,
+   the `workspaces` value of the `plane` label, and the kinds
+   `workspace_purged`, `file_purged`, and `lease_expired` of
+   `arca_reaper_findings_total`.
+
+An authorization endpoint needs no change: it is never asked a
+`workspace.*` action again, and `plane` is `files` on every question. A
+consumer of the event log no longer receives `attach`, `release`, or
+`sync`, and a row of the administrative overview no longer carries
+`workspaces` and `leases`.
+
+While the rollout is half done, a replica of the previous release answers
+`503 storage_unavailable` on its `/v1/workspaces` routes, and its
+reconciler reports the two passes over the dropped tables as failed, so
+`ArcaReaperFailing` can fire until the last such replica is replaced. Its
+routes under `files/` serve as before. The same holds for an image rolled
+back across this migration: the objects stay in `files/workspaces/`, where
+the previous release reads them as ordinary files, and the only way back
+to the earlier layout is the dump.
 
 ## Rolling back
 
@@ -154,7 +207,10 @@ An image rollback across a migration is not refused either: `arcad` starts
 against a database whose schema is ahead of its own. That is safe only
 because every migration is additive, or is preceded by a release that
 writes both shapes, so the older binary reads what the newer one wrote. A
-binary refuses to start only against a schema behind its own.
+binary refuses to start only against a schema behind its own. The one
+migration that is neither is `0006_one_tree`, and
+[its section](#the-one-tree-migration) says what the older binary can and
+cannot serve after it.
 
 When a migration itself has to be undone, restore the database from a
 `pg_dump` taken before it, and leave the bucket alone. The bucket holds no
@@ -307,7 +363,7 @@ response carries the trace id too, in `X-Trace-Id`.
 
 The route on a line and on `arca_requests_total` and
 `arca_request_duration_seconds` is the pattern a route is registered under,
-such as `GET /v1/workspaces/{id}/sync`, never the path a caller sent. A path
+such as `POST /v1/uploads/{id}/complete`, never the path a caller sent. A path
 carries what a person called their file, and it belongs in neither. It is
 the route the request's span is named by, with the method in front. A
 request refused before it reaches its route, a 401 or a 429 of either rate
@@ -321,21 +377,18 @@ serves.
 ## Running the reconciler on its own
 
 The reconciler removes bytes the database no longer names, reports rows
-whose bytes are missing, purges trash past its retention and workspaces
-deleted longer ago than that, aborts expired upload sessions, ends expired
-writer leases, removes grants that expired that long ago, prunes stars
+whose bytes are missing, aborts expired upload sessions, purges trash past
+its retention, removes grants that expired that long ago, prunes stars
 whose file is gone and events older than 30 days, and corrects the usage
-counters. It runs inside `arcad serve` every `ARCA_REAP_INTERVAL`, which is
-what a small installation wants. Every pass is safe to run on several
-replicas at once.
+counters. Those are its eight passes. It runs inside `arcad serve` every
+`ARCA_REAP_INTERVAL`, which is what a small installation wants. Every pass
+is safe to run on several replicas at once.
 
 To move it off the API replicas, patch the `arcad-reaper` Deployment to one
 replica in your overlay and set `ARCA_REAP_INTERVAL=0` on `arcad`. Exactly
 one replica: the sweep is over the whole installation, and two would do the
-same work twice. `arcad reap` runs every pass except the lease expiry, which
-needs a serving replica; with the loop off everywhere, an expired writer
-lease still yields to the next writer that attaches, but no `reap` event is
-recorded for it.
+same work twice. `arcad reap` runs every pass a serving replica runs, so
+nothing is left undone with the loop off everywhere else.
 
 To see what a pass would do without changing anything:
 

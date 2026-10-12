@@ -1,11 +1,10 @@
 # Arca
 
-**Durable storage for people, agents, and sandboxes.** Files with versions
-and trash, shares and public links, workspaces a sandbox attaches to and
-syncs back, usage per space, and an event log, over any S3 compatible
-bucket and a Postgres database. Identity comes from any OpenID Connect
-issuer. Permission comes from an endpoint you write, or from a built-in
-owner policy when you write none.
+**Durable storage for people, agents, and sandboxes.** Files and folders
+with versions and trash, shares and public links, usage per space, and an
+event log, over any S3 compatible bucket and a Postgres database. Identity
+comes from any OpenID Connect issuer. Permission comes from an endpoint you
+write, or from a built-in owner policy when you write none.
 
 This repository is the whole service: anyone with a bucket, a Postgres
 database, and an issuer can run it.
@@ -44,10 +43,15 @@ and every change an event a consumer can tail.
   short-lived presigned URL, and a large upload goes to the bucket in
   parts the client sends directly. The server handles metadata,
   authorization, and small objects.
-- **A workspace has one writer at a time.** A sandbox attaches, takes a
-  writer lease, downloads the tree, works on its own disk, and syncs the
-  result back. The lease expires on its own, so a sandbox that crashes
-  does not hold the workspace.
+- **A space is one tree.** Every path begins with `files/`, and a folder
+  is a prefix: nothing is stored for it, and a folder with nothing in it
+  does not exist. A folder is deleted in one call and copied in one call,
+  and the bucket does the copying.
+- **Arca stores no limit.** An authorizer's answer can cap what a space
+  holds, keep no version of the write it admits, make the delete it admits
+  permanent, and leave subtrees out of what a caller lists. Each holds for
+  that answer only, and Arca keeps no list of folders with rules of their
+  own.
 - **Any replica serves any request.** Nothing is kept on local disk and
   there is no leader. Scale the Deployment.
 
@@ -104,21 +108,27 @@ An authorization endpoint is optional.
 
 ## What you get
 
-- **Files.** Put, get, head, list, move, and delete, with a version kept
-  on every overwrite, a trash that holds deleted files for 30 days by
+- **Files.** Put, get, head, list, move, copy, and delete, with a version
+  kept on every overwrite, a trash that holds deleted files for 30 days by
   default, stars, and conditional requests on the object's checksum.
+- **Folders.** Delete everything under a folder in one call, to the trash
+  or for good. Copy a folder to another path of the same space without a
+  byte passing through the server. Fetch one as a manifest of presigned
+  URLs.
 - **Uploads in parts.** An object up to 5 GiB by default goes to the
   bucket in parts over presigned URLs, and the server assembles it.
 - **Shares and links.** Grant a subject `read`, `write`, or `manage` on a
   subtree of a space, or mint a link whose token lets anyone holding it
   read.
-- **Workspaces.** A named subtree a sandbox attaches to, read-only or
-  with the writer lease, materializes as presigned URLs, and syncs back
-  by declaring what the tree holds.
+- **Limits from your authorizer.** Its answer can carry a byte limit for
+  the space, turn versions or the trash off for one write or one delete,
+  and leave subtrees of a shared space out of one reader's listings, so a
+  folder your installation manages for its users needs no rule stored in
+  Arca.
 - **An event log.** Every change to a space is one event, read by cursor,
   so a consumer tails the log rather than receiving webhooks.
 - **Administration.** Usage per space across the installation, and a
-  restore of any space's deleted file or workspace.
+  restore of any space's trashed file.
 - **Telemetry.** Prometheus metrics and alert rules, and, with an OTLP
   collector, one span and one duration measurement per request, the
   bucket calls as its child spans, the trace id on the response in
@@ -127,7 +137,7 @@ An authorization endpoint is optional.
   every installation at `/openapi.json`.
 - **A conformance suite** you run against your own installation, or
   against anything that claims to serve the same API.
-- **Packages to build on.** `latere.ai/x/arca/object` (ids, keys, planes)
+- **Packages to build on.** `latere.ai/x/arca/object` (ids, keys, paths)
   and `latere.ai/x/arca/authorizer` (the action vocabulary an
   authorization endpoint is written against).
 

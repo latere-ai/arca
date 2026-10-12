@@ -19,8 +19,7 @@ authorizer has decided, with a refused object answering exactly as a
 missing one; a decision the authorizer cannot give is a refusal, never
 an allow; a presigned URL names one object, one method, and one
 expiry, and is never logged; a public link resolves to the object its
-token names and to nothing beside it; a workspace has one writer at a
-time and a lease that expires.
+token names and to nothing beside it.
 
 Dependencies are checked for known vulnerabilities on every push. A release
 carries an SPDX bill of materials for the module graph and one per image,

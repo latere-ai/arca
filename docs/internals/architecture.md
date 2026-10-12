@@ -14,7 +14,7 @@ flowchart LR
   arcad -->|verify tokens| issuer[OIDC issuer]
   arcad -->|ask before every action| authz[authorization endpoint]
   arcad -->|bytes at id-derived keys| bucket
-  arcad -->|rows, grants, leases, events, usage| pg[(Postgres)]
+  arcad -->|rows, grants, events, usage| pg[(Postgres)]
 ```
 
 `arcad` keeps nothing on local disk. What it holds in memory is a cache it
@@ -22,8 +22,12 @@ can rebuild: the rate-limit buckets, the authorizer's decision cache, and
 the issuers' key sets.
 Every replica serves every request. The bucket holds bytes and nothing
 else; the database holds every fact about them: which path an object is at,
-who wrote it, its versions, who may read it, which sandbox holds a
-workspace, what a space holds, and what happened to it.
+who wrote it, its versions, who may read it, what a space holds, and what
+happened to it.
+
+A space is one tree. Every path begins with `files/`, which `object.Plane`
+names and `object.SplitPath` enforces, and there is no directory row: a
+folder is a prefix, synthesized in a listing from the objects under it.
 
 The database is the authority on whether an object exists. A key in the
 bucket that no row names is garbage, and a row whose key is missing is an
@@ -83,8 +87,8 @@ request id -> observation (metrics, one log line) -> verifier -> per-subject rat
 The route table is a declaration. `internal/api/routes.go` holds the rows
 the frame answers itself (events and the three public link routes), and
 each owning package declares its own rows through `Table()`:
-`internal/files`, `internal/uploads`, `internal/shares`,
-`internal/workspaces`, and `internal/admin`. `cmd/arcad` concatenates them
+`internal/files`, `internal/uploads`, `internal/shares`, and
+`internal/admin`. `cmd/arcad` concatenates them
 and hands them to `api.New`, which builds the mux and the OpenAPI document
 from the same list, so a route cannot be registered without being
 described or described without being registered. `tools/apidoc` renders
@@ -116,41 +120,55 @@ document both call it.
   same question. Before asking, `internal/auth` looks up the rung the
   caller holds through Arca's own grants table and puts it on the resource
   as `grant`, so an external endpoint can honor Arca's shares without
-  reading its database.
+  reading its database. A question that names a `from`, a move or a copy,
+  carries the lower of the rungs held on the two paths, so a grant on one
+  end confers nothing.
 - **The owner policy** (`policy.go`) allows the owner, the subjects in
   `ARCA_ADMIN_SUBJECTS`, a grantee whose rung reaches the action on the
   permission ladder, and a live link for `link.read`. It always denies the
-  probe id.
+  probe id, and it sends no limits.
 
 Arca reads no claim for meaning. Claims are passed to the authorizer
 verbatim; a plan, a team, or a role is the endpoint's to interpret.
 
-A decision's `limits.quota_bytes` travels to the write path (`files.LimitOf`)
-and is enforced inside the write's transaction against `space_usage`. A
-`filter` on a list action narrows that list's query.
+A decision's `limits` object is decoded whole in one place,
+`auth.ReadLimits`, which `files.LimitsOf` wraps for the handlers. A member
+of the wrong type, or an `omit` entry that is not a path under `files/`,
+fails the decode, and the handler answers `storage_unavailable` and writes
+nothing, so no handler acts on part of an answer it could not read. Arca
+stores none of the four members; each handler reads them off the answer to
+its own question:
+
+| Member | Where it is honored |
+|---|---|
+| `limits.quota_bytes` | inside the write's transaction, against `space_usage` |
+| `limits.versions: false` | in the one write every put, upload completion, and copy commits through (`Write.NoVersion`), and in the restore of a version: the replaced content is not captured, and its bytes are dropped after the commit when nothing else references them |
+| `limits.trash: false` | in the delete handlers, which take the permanent arm the request's `?permanent=1` takes |
+| `limits.omit` | in the query of every enumeration, as one predicate (`notOmitted` in `internal/store`) matched on whole segments, so a page is never short for a row it left out and a count counts only what the caller may enumerate |
+
+A `filter` on a list action narrows that list's query.
 
 ## The packages
 
 | Package | What it holds |
 |---|---|
-| `cmd/arcad` | wiring only: configuration, the two listeners, the subcommands, and the adapters that bind one package's seam to another's (the ledger, the restorer, the lease pass) |
+| `cmd/arcad` | wiring only: configuration, the two listeners, the subcommands, and the adapters that bind one package's seam to another's (the ledger, the restorer, the two passes other packages own) |
 | `internal/config` | every `ARCA_*` variable, read once, with one error naming every problem |
 | `internal/api` | the router, the error envelope and code table, the list envelope, ETags and preconditions, the request id, the two rate limits, the base path, and the served OpenAPI document |
 | `internal/apidocs` | the OpenAPI document built as Go values, so the server needs no YAML library |
-| `internal/auth` | the verifier, the authorizer client, the owner policy, and the grant lookup |
+| `internal/auth` | the verifier, the authorizer client, the owner policy, the grant lookup, and the reading of an answer's limits |
 | `internal/blob` | the bucket: the S3 client, an in-memory store for tests, server-side copy, and presigning (five minutes for a read, 24 hours for an upload part) |
 | `internal/store` | Postgres: one query set per table, the transaction helper, and the migrations |
-| `internal/files` | the files plane: put, get, head, list, move, delete, versions, trash, stars, and materialize |
+| `internal/files` | the tree of a space: put, get, head, list, move, copy, delete, the folder delete and the folder copy, versions, trash, stars, and materialize |
 | `internal/uploads` | multipart sessions: open, complete, abort, and the expiry sweep |
 | `internal/shares` | grants and links, token minting, the public-object stamp, and the expired-grant sweep |
-| `internal/workspaces` | workspaces, attachments and the writer lease, materialize and sync, and the tombstone purge |
 | `internal/events` | the event log, the usage ledger, and `GET /v1/events` |
 | `internal/reaper` | the reconciler and its passes |
 | `internal/admin` | the overview across spaces and the cross-space restore |
 | `internal/check` | the `arcad check` requirements |
 | `internal/metrics` | every metric name and the bucket decorator that counts and times each call |
 | `internal/version` | the build identity, set by `-ldflags` |
-| `object` | exported: object ids, keys, planes, and checksum kinds |
+| `object` | exported: object ids, keys, the plane a path is rooted in, and checksum kinds |
 | `authorizer` | exported: the action vocabulary and the resource shapes an authorization endpoint is written against |
 | `test/conformance` | exported: the black-box suite that drives any installation over HTTP |
 
@@ -166,10 +184,12 @@ are the one-time migration tools described in
 
 ## The schema
 
-Five forward-only migrations under `internal/store/migrations`, applied by
+Six forward-only migrations under `internal/store/migrations`, applied by
 `arcad migrate` through `latere.ai/x/pkg/pgxmigrate`. A server refuses to
 start against a database behind its own migrations, and readiness fails
-while the schema is behind.
+while the schema is behind. The sixth, `0006_one_tree`, moves rows and
+drops two tables, and [operations](../operations.md#the-one-tree-migration)
+says what that means for an upgrade.
 
 | Table | What a row is |
 |---|---|
@@ -179,8 +199,6 @@ while the schema is behind.
 | `stars` | one subject's star on one `(owner, path)` |
 | `upload_sessions` | an open multipart upload: the object id it will land at, the store's upload id, the declared size, and its expiry |
 | `shares` | a grant: owner, path prefix, grantee kind (`subject`, `link`, or `public`), grantee or token, permission, status, and expiry. Constraints keep a token grant at `read` |
-| `workspaces` | a workspace: owner, slug, the writer lease holder and its expiry, `last_sync`, and `deleted_at` |
-| `workspace_attachments` | one sandbox's session on a workspace: mode, status (`active`, `released`, `reaped`), the manifest pinned at attach, and its expiry |
 | `space_usage` | the bytes one space holds |
 | `events` | the log: owner, path, action, actor, detail, and time, with a serial id that is the cursor |
 
@@ -199,26 +217,62 @@ so the session row is the only pointer to them. The reconciler treats the
 session table as a set of referenced keys, and a session past its 24 hour
 expiry is aborted.
 
-## Workspaces and the lease
+## Folders
 
-A workspace is a row plus the subtree `workspaces/<slug>/` of the files
-plane. Its files are ordinary `files` rows; what the workspace adds is the
-writer lease and the attachment record.
+A folder is every row whose path begins with the folder's path and a slash
+(`under` in `internal/store`), never the row at exactly that path. Two
+handlers in `internal/files` take one whole, and both ask the authorizer
+once, with `recursive` on the question.
 
-A `rw` attach is a conditional update on the workspace row, succeeding only
-when no lease is held or the held one has expired, in the same transaction
-as the attachment insert. A second writer matches no row and gets
-`writer_held`. The attachment pins a manifest of the subtree at attach, so
-materialize serves a consistent snapshot even while a sync is in progress.
+**The folder delete** is one statement at any size. The soft form sets
+`deleted_at` on every live row under the folder (`TrashSubtree`). The
+permanent form, taken on `?permanent=1` or on an answer that carries
+`limits.trash: false`, runs one transaction: it deletes the rows, live and
+trashed, with their versions (`DropSubtree`), deletes the grants and links
+whose prefix is the folder or under it, and gives the bytes back to
+`space_usage`. The grants go for the reason a move carries an exact-path
+grant with it: the next object written there must not inherit one. The
+keys go after the commit, a thousand to a bucket call, each batch through
+the reference check first. A request that ends before the last batch
+leaves the rest for the reconciler's first pass.
 
-Sync is declarative. The writer sends the whole post-state; rows under the
-root the manifest omits are deleted (rows, then keys); a named path with no
-row fails the whole sync with `manifest_incomplete`. A successful sync
-rewrites the attachment's pinned manifest and stamps `last_sync`.
+**The copy** is done by the bucket. No row can share an object with
+another: publicity is a setting on the bucket key, so two paths on one key
+could not be public and private apart, and every delete of bytes would
+depend on a reference check that never sees a second row for one id. So
+each object is copied inside the store to the key of a freshly minted id.
 
-Deletes under `workspaces/` are hard, because a trashed row would come back
-as a phantom file at the next materialize. Deleting a workspace itself is
-soft; the tombstone pass purges it after `ARCA_TRASH_RETENTION`.
+```mermaid
+sequenceDiagram
+  autonumber
+  participant C as client
+  participant A as arcad
+  participant P as Postgres
+  participant B as bucket
+  C->>A: POST /v1/files/{owner}/{folder} {copy_to, recursive}
+  A->>P: count the live rows under the folder, sum their sizes
+  A->>A: ask the authorizer file.write once: path, from, copy, recursive, size
+  A->>P: read the rows the answer leaves in, with the path each lands on
+  A->>B: Copy each object to a new id, eight in flight
+  A->>P: tx: confirm the sources are unchanged, write every row create-only, charge usage
+  alt the transaction refused
+    A->>B: DELETE the keys this call wrote
+  end
+  A-->>C: 200 {path, files, bytes}
+```
+
+The order is the write order above, bucket first and rows second. Every
+destination row goes through the same `commit` a `PUT` uses, with the
+create-only precondition, in one transaction, so a caller sees the whole
+copy or none of it: a taken destination is `path_taken`, a charge past the
+answer's limit is `quota_exceeded`, and a source row that changed since it
+was copied is `precondition_failed`. A copy is bounded at
+`files.MaxCopyObjects`, 10,000, because the request stays open while the
+bucket works, and runs `files.CopyConcurrency` copies at a time.
+
+Both handlers enumerate, so both honor `limits.omit`: an omitted subtree is
+neither trashed, removed, nor copied, and the counts in the answer and in
+the event leave it out.
 
 ## Events and usage
 
@@ -226,10 +280,11 @@ soft; the tombstone pass purges it after `ARCA_TRASH_RETENTION`.
 seams `cmd/arcad` binds:
 
 - **The log.** One row per change, with an action from a closed
-  vocabulary; an append with an unknown action is refused. Grant and
-  workspace mutations append inside their own transaction, so the change
-  and its event commit together. File-plane mutations append after their
-  commit, best effort, and a failed append is logged rather than returned.
+  vocabulary of nine; an append with an unknown action is refused. Grant
+  mutations append inside their own transaction, so the change and its
+  event commit together. File mutations append after their commit, best
+  effort, and a failed append is logged rather than returned. A folder
+  delete and a copy append one event each, with the counts in its detail.
   `GET /v1/events` reads the log by keyset on the serial id. Rows older
   than 30 days are pruned.
 - **The usage ledger.** `space_usage` is charged inside each write's
@@ -239,7 +294,7 @@ seams `cmd/arcad` binds:
 
 ## The reconciler
 
-`internal/reaper` runs ten passes in order. Every pass is idempotent and
+`internal/reaper` runs eight passes in order. Every pass is idempotent and
 conditional on the state it read, so several replicas may run it at once
 without a lease. A pass that fails does not stop the run; the run reports
 failure at the end.
@@ -248,20 +303,20 @@ failure at the end.
 |---|---|
 | 1 | removes keys under the prefix that no row, version, or open session references, after a 24 hour grace |
 | 2 | reports rows whose key the bucket does not hold (`missing_bytes`); deletes nothing |
-| 3 | ends writer leases past their expiry and marks their attachments `reaped` |
 | 4 | aborts upload sessions past their expiry |
 | 5 | purges trash past `ARCA_TRASH_RETENTION`, rows then keys, with the ledger delta in the same transaction |
-| 6 | purges soft deleted workspaces past the same window |
-| 7 | removes grants that expired longer ago than that window |
+| 7 | removes grants that expired longer ago than the same window |
 | 8 | prunes stars whose file no longer exists at all |
 | 9 | prunes events older than 30 days |
 | 10 | recomputes `space_usage` and corrects rows that disagree |
 
-`arcad serve` runs the passes every `ARCA_REAP_INTERVAL`. `arcad reap` runs
-them as a process of its own, except pass 3, which needs the workspace
-service a serving replica builds. `-dry-run` reports every finding and
-changes nothing. Each finding is counted on
-`arca_reaper_findings_total{kind, outcome}`.
+The numbers are the design record's. Passes 3 and 6 are retired, and
+their numbers are not reused.
+
+`arcad serve` runs the passes every `ARCA_REAP_INTERVAL`, and `arcad reap`
+runs the same eight as a process of its own. `-dry-run` reports every
+finding and changes nothing. Each finding is counted on
+`arca_reaper_findings_total{kind, action}`.
 
 ## Observability
 

@@ -91,8 +91,8 @@ make test-e2e
 It builds `out/arcad` and `out/arca-stubs`, starts the stack, and runs
 `test/e2e` with `ARCA_BINARY` pointing at the built server. Each test starts
 `arcad` as a process against the stack and the stubs and drives it over
-HTTP: files, uploads, shares and links, workspaces, events,
-administration, and serving under a non-default base path.
+HTTP: files, uploads, shares and links, events, administration, and
+serving under a non-default base path.
 
 ## The stubs
 

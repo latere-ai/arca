@@ -87,7 +87,7 @@ behind, and expires what has a deadline. See
 | Variable | Required | Default | What it is |
 |---|---|---|---|
 | `ARCA_REAP_INTERVAL` | no | `5m` | How often `arcad serve` runs the reconciler. `0` turns the in-process loop off, for an installation that runs `arcad reap` on its own. |
-| `ARCA_TRASH_RETENTION` | no | `720h` (30 days) | How long a trashed object stays restorable before it is purged. The same window applies to a soft deleted workspace and to how long an expired grant is kept. Must be above zero. |
+| `ARCA_TRASH_RETENTION` | no | `720h` (30 days) | How long a trashed object stays restorable before it is purged. An expired grant is kept for the same window. Must be above zero. A delete made permanent, by the request or by an authorizer's answer, never enters the trash; see the [API guide](api.md#what-an-answer-may-limit). |
 
 ## Telemetry
 
