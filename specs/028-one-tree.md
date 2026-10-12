@@ -351,6 +351,10 @@ taken in one release with no window in which both shapes answer.
   authorizer's.
 - A Go client package. Open question 6 says where one would live.
 - A numeric limit on versions or on trash retention per answer.
+- An answer member that leaves named prefixes out of a listing. A
+  listing answers every object under its prefix, so an authorizer can
+  refuse a read inside a subtree and cannot yet keep the subtree's names
+  out of a listing above it.
 - Copying between two spaces.
 
 ## Acceptance criteria
