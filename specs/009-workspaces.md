@@ -1,6 +1,6 @@
 ---
 title: "Workspaces: durable subtrees, the writer lease, materialize and sync"
-status: complete
+status: superseded
 track: core
 depends_on:
   - specs/004-metadata-store.md
@@ -10,11 +10,19 @@ depends_on:
 affects: [space/, authorizer/, internal/workspaces/, internal/api/, internal/store/, docs/]
 effort: xlarge
 created: 2026-09-18
-updated: 2026-09-19
+updated: 2026-10-12
 author: changkun
 ---
 
 # Workspaces
+
+**Superseded on 2026-10-12 by [[028-one-tree]].** A space becomes one
+tree under `files/`, and the plane, the lease, the twelve routes, the
+eight actions and the two tables this spec built are removed by that
+spec, whose migration moves every object under `workspaces/<slug>/` into
+an ordinary folder. Everything below is the record of what was built and
+is still served until [[028-one-tree]] is. Nothing new is designed
+against it.
 
 ## Overview
 
