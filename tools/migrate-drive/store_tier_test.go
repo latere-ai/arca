@@ -40,6 +40,9 @@ import (
 // needs.
 const skipWithoutTheStack = "set E2E_DATABASE_URL (make up)"
 
+// schemaOfTheMove is the last migration of the schema this command writes.
+const schemaOfTheMove = 5
+
 // The fixture's principals and organization. They are the source's ids, and
 // the copy rewrites them into subjects under the issuer below.
 const (
@@ -535,7 +538,10 @@ func tierDatabases(t *testing.T) (source, target string) {
 	if _, err := src.Exec(t.Context(), seed); err != nil {
 		t.Fatalf("seed the source: %v", err)
 	}
-	if err := store.Migrate(target); err != nil {
+	// The schema this command writes: the one an installation had when it
+	// was moved, which is every migration up to 0005. The command copies the
+	// two tables spec 028's migration 0006 later folds into files/.
+	if err := store.MigrateTo(target, schemaOfTheMove); err != nil {
 		t.Fatalf("apply Arca's migrations: %v", err)
 	}
 	return source, target

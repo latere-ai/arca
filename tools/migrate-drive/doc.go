@@ -9,6 +9,13 @@
 // in dependency order. It writes nothing to the source, so Drive is read-only
 // for the length of the run and is not changed by it.
 //
+// The schema it writes is the one of migrations 0001 through 0005, which is
+// what an installation had when the cutover ran. Migration 0006 of spec 028
+// later moves what this command put under workspaces/ into files/ and drops
+// the two tables it copied, so a target past 0005 is refused before a row is
+// written: the first thing the run reads is a table that target no longer
+// has.
+//
 //	migrate-drive \
 //	  -source postgres://user@host/drive \
 //	  -target postgres://user@host/arca \

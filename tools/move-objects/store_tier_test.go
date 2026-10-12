@@ -42,6 +42,9 @@ import (
 // skipWithoutTheStack names both services and the command that starts them.
 const skipWithoutTheStack = "set E2E_DATABASE_URL and E2E_S3_ENDPOINT (make up)"
 
+// schemaOfTheMove is the last migration of the schema the row copy writes.
+const schemaOfTheMove = 5
+
 // The fixture's principal and its files. The ids are kept through the copy,
 // so a row and the object it points at pair by id.
 const (
@@ -358,7 +361,9 @@ func tierDatabases(t *testing.T, prefix string) (source, target string) {
 	if _, err := src.Exec(t.Context(), seed(prefix)); err != nil {
 		t.Fatalf("seed the source: %v", err)
 	}
-	if err := store.Migrate(target); err != nil {
+	// The row copy this move follows writes the schema an installation had
+	// when it was moved, which is every migration up to 0005.
+	if err := store.MigrateTo(target, schemaOfTheMove); err != nil {
 		t.Fatalf("apply Arca's migrations: %v", err)
 	}
 	return source, target

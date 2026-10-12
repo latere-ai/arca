@@ -8,7 +8,7 @@ depends_on:
 affects: [internal/store/, internal/store/migrations/, cmd/arcad/, .lateregate.yaml]
 effort: large
 created: 2026-09-18
-updated: 2026-09-19
+updated: 2026-10-12
 author: changkun
 ---
 
@@ -115,7 +115,7 @@ CREATE TABLE subjects (
 CREATE TABLE files (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     owner         TEXT NOT NULL,            -- the space
-    path          TEXT NOT NULL,            -- plane-rooted: files/…, workspaces/…
+    path          TEXT NOT NULL,            -- plane-rooted: files/…
     object_id     UUID NOT NULL,            -- the bytes; 003 derives the key
     created_by    TEXT NOT NULL,            -- the subject that first wrote the path
     content_type  TEXT NOT NULL DEFAULT 'application/octet-stream',
@@ -189,32 +189,8 @@ CREATE TABLE shares (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX shares_subtree_idx ON shares (owner, path_prefix);  -- plus partial indexes on (grantee_kind, grantee) and (token)
--- A durable subtree with one writer, and who has it mounted. 009 owns both.
-CREATE TABLE workspaces (
-    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    owner             TEXT NOT NULL,
-    slug              TEXT NOT NULL,        -- [a-z0-9-]{1,64}
-    created_by        TEXT NOT NULL,
-    writer_holder     TEXT,                 -- the lease holder; NULL is free
-    writer_expires_at TIMESTAMPTZ,          -- the reaper's deadline for the lease
-    last_sync         TIMESTAMPTZ,          -- the snapshot materialize pins
-    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-    deleted_at        TIMESTAMPTZ,          -- soft delete; the reaper purges
-    UNIQUE (owner, slug)
-);
-CREATE TABLE workspace_attachments (
-    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    holder       TEXT NOT NULL,             -- the sandbox or process that attached
-    subject      TEXT NOT NULL,             -- who it attached as
-    mode         TEXT NOT NULL CHECK (mode IN ('ro','rw')),
-    status       TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','released','reaped')),
-    manifest     JSONB NOT NULL,            -- [{path, checksum, size}] pinned at attach
-    expires_at   TIMESTAMPTZ NOT NULL,
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    released_at  TIMESTAMPTZ
-);
+-- The two tables 0004 created for the second plane are dropped by 0006
+-- ([[028-one-tree]]), and what they named lives in files.
 -- The usage ledger and the log. 010 owns both. There is no limit
 -- column and no limits table: a limit reaches Arca only on the
 -- authorizer's answer, and is never stored.
@@ -248,6 +224,13 @@ not claim one number.
 | `0003_shares.up.sql` | `shares` | [[008-shares-and-links]] |
 | `0004_workspaces.up.sql` | `workspaces`, `workspace_attachments` | [[009-workspaces]] |
 | `0005_usage_events.up.sql` | `space_usage`, `events` | [[010-events-and-reaper]] |
+| `0006_one_tree.up.sql` | nothing: moves every object of the second plane into a folder under `files/`, carries what keys on its paths, and drops `workspace_attachments` and `workspaces` | [[028-one-tree]] |
+
+**Amended 2026-10-12 ([[028-one-tree]]).** `0006_one_tree.up.sql` is the
+first migration that drops a table. It is forward only like every other:
+a rollback is a later migration that creates the two tables again,
+empty, and the objects stay in `files/workspaces/`, where an earlier
+binary reads them as ordinary files.
 
 Migrations are forward only. There are no `.down.sql` files: the source
 driver accepts an up only set, a rollback of a shipped change is a new
@@ -381,6 +364,14 @@ pool sizing ([[016-release-and-installation]]); the wire ([[013-api]]).
 | 9 | The `depcheck` allow list names every package this spec adds | `go tool lateregate` |
 
 ## Outcome
+
+**Amended 2026-10-12 by [[028-one-tree]].** Six migrations are in the
+tree. `0006_one_tree.up.sql` folds the second plane into `files/` and
+drops its two tables, so a migrated database holds eight tables, and
+`internal/store/onetree_tier_test.go` seeds a database at `0005` and
+proves the fold. `store.MigrateTo`, built for the tiers alone, is how a
+test stops at a version. The text below this paragraph is the record of
+2026-09-19.
 
 Complete on 2026-09-19. The schema, the migrator, the transaction
 discipline and the two query sets this spec owns are in `internal/store`,
