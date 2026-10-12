@@ -224,7 +224,9 @@ func (p *OwnerPolicy) decide(ctx context.Context, req authz.Request) (authz.Deci
 }
 
 // granted is the grant step: a live grant on a prefix of the resource's path
-// for this subject, at or above the rung the action needs.
+// for this subject, at or above the rung the action needs. A resource that
+// names a source beside its path needs that rung on both, which is what
+// [heldOn] answers.
 func (p *OwnerPolicy) granted(ctx context.Context, req authz.Request) (bool, error) {
 	need, ok := Granted(req.Action)
 	if !ok || p.Grants == nil || req.Subject == "" {
@@ -234,7 +236,7 @@ func (p *OwnerPolicy) granted(ctx context.Context, req authz.Request) (bool, err
 	if owner == "" || path == "" {
 		return false, nil
 	}
-	held, err := p.Grants.Permission(ctx, owner, req.Subject, path)
+	held, err := heldOn(ctx, p.Grants, owner, req.Subject, req.Resource)
 	if err != nil {
 		return false, fmt.Errorf("the grants of %s: %w", owner, err)
 	}

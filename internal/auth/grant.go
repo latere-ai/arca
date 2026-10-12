@@ -70,7 +70,7 @@ func (a *Authorizer) granted(ctx context.Context, res authz.Resource) (authz.Res
 	if subject == "" || owner == "" || path == "" || subject == owner {
 		return res, nil
 	}
-	held, err := a.grants.Permission(ctx, owner, subject, path)
+	held, err := heldOn(ctx, a.grants, owner, subject, res)
 	if err != nil {
 		return res, fmt.Errorf("the grants of %s: %w", owner, err)
 	}
@@ -88,6 +88,37 @@ func (a *Authorizer) granted(ctx context.Context, res authz.Resource) (authz.Res
 // GrantField is the member of the resource the rung is sent as, the name
 // spec 006's table gives it and `authorizer.File.Grant` renders.
 const GrantField = "grant"
+
+// FromField is the member of the resource that names a second path, the
+// source of an operation whose resource path is its destination.
+const FromField = "from"
+
+// heldOn answers the rung subject holds on a resource of owner's space. A
+// resource that names a source beside its path is read on both paths, and
+// the answer is the lower of the two rungs, with no rung below read: the
+// question is about both ends, so the rung it carries is the one the caller
+// holds on both.
+//
+// It is the one reading of the table the field above and the owner policy's
+// grant step share, so the two cannot answer differently about one resource.
+func heldOn(ctx context.Context, grants GrantLookup, owner, subject string, res authz.Resource) (Permission, error) {
+	held, err := grants.Permission(ctx, owner, subject, grantPath(res))
+	if err != nil || held == PermissionNone {
+		return PermissionNone, err
+	}
+	from := res.String(FromField)
+	if from == "" {
+		return held, nil
+	}
+	source, err := grants.Permission(ctx, owner, subject, from)
+	if err != nil {
+		return PermissionNone, err
+	}
+	if rung(source) < rung(held) {
+		return source, nil
+	}
+	return held, nil
+}
 
 // carriesGrant reports whether a kind carries the field. A file, an upload
 // and a workspace name a subtree a grant can cover; a share, a link, an

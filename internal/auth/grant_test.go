@@ -27,7 +27,11 @@ import (
 // it was asked, so a case states the question the seam put as well as the
 // answer it took.
 type lookup struct {
-	held  auth.Permission
+	held auth.Permission
+	// by answers one rung per path, for a case whose question names two
+	// paths. A path it does not hold answers no rung. Nil answers held for
+	// every path.
+	by    map[string]auth.Permission
 	err   error
 	asked []string
 }
@@ -36,6 +40,9 @@ func (l *lookup) Permission(_ context.Context, owner, subject, path string) (aut
 	l.asked = append(l.asked, owner+" "+subject+" "+path)
 	if l.err != nil {
 		return auth.PermissionNone, l.err
+	}
+	if l.by != nil {
+		return l.by[path], nil
 	}
 	return l.held, nil
 }
@@ -268,4 +275,99 @@ func TestBothModesResolveTheGrant(t *testing.T) {
 	if len(ownerTable.asked) != 0 {
 		t.Errorf("an owner's own question read the grants table %d times, want none", len(ownerTable.asked))
 	}
+}
+
+// TestAGrantMustCoverBothEnds: a question that names a source beside its
+// path carries the lower of the two rungs the caller holds, and the owner
+// policy decides on the same rung, so both modes read one answer.
+func TestAGrantMustCoverBothEnds(t *testing.T) {
+	const source, destination = "files/reports/q3.pdf", "files/inbox/q3.pdf"
+	moved := authorizer.File{
+		ID: "01J8R4", Owner: alice, Path: destination, Plane: "files", From: source,
+	}.Resource()
+	both := alice + " " + carol + " " + destination + "; " + alice + " " + carol + " " + source
+
+	for _, c := range []struct {
+		name          string
+		onSource      auth.Permission
+		onDestination auth.Permission
+		want          auth.Permission
+		asked         string
+	}{
+		{"the same rung on both", auth.PermissionWrite, auth.PermissionWrite, auth.PermissionWrite, both},
+		{"a higher rung on the source", auth.PermissionManage, auth.PermissionRead, auth.PermissionRead, both},
+		{"a higher rung on the destination", auth.PermissionRead, auth.PermissionManage, auth.PermissionRead, both},
+		{"no rung on the source", auth.PermissionNone, auth.PermissionWrite, auth.PermissionNone, both},
+		// No rung on the destination settles the answer, so the source is
+		// not read.
+		{"no rung on the destination", auth.PermissionWrite, auth.PermissionNone, auth.PermissionNone,
+			alice + " " + carol + " " + destination},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			held := map[string]auth.Permission{source: c.onSource, destination: c.onDestination}
+
+			s := endpoint(t)
+			s.Allow(stub.Rule{Subject: "*", Action: "*", Resource: "*", Allow: true})
+			table := &lookup{by: held}
+			a := asking(t, s, nil).WithGrants(table)
+			if _, err := a.Decide(serving(carol), authorizer.ActionFileWrite, moved); err != nil {
+				t.Fatalf("the question was refused: %v", err)
+			}
+			got := sent(t, s)
+			if got.String(auth.GrantField) != string(c.want) {
+				t.Errorf("the question carries the grant %q, want %q", got.String(auth.GrantField), c.want)
+			}
+			if _, present := got.Fields[auth.GrantField]; present != (c.want != auth.PermissionNone) {
+				t.Errorf("the grant field is present=%v on a question whose rung is %q", present, c.want)
+			}
+			if asked := strings.Join(table.asked, "; "); asked != c.asked {
+				t.Errorf("the table was asked %q, want %q", asked, c.asked)
+			}
+
+			policy := &auth.OwnerPolicy{Grants: &lookup{by: held}}
+			d, err := policy.Authorize(t.Context(), authz.Request{
+				Subject: carol, Action: authorizer.ActionFileWrite, Resource: moved, Claims: map[string]any{},
+			})
+			if err != nil {
+				t.Fatalf("the policy produced no decision: %v", err)
+			}
+			if want := auth.Admits(c.want, auth.PermissionWrite); d.Allow != want {
+				t.Errorf("the owner policy answered allow=%t, want %t", d.Allow, want)
+			}
+		})
+	}
+}
+
+// TestATableThatCannotAnswerForTheSourceStopsTheQuestion: the second read
+// fails as the first does, so a question is never sent with the rung of one
+// end.
+func TestATableThatCannotAnswerForTheSourceStopsTheQuestion(t *testing.T) {
+	s := endpoint(t)
+	s.Allow(stub.Rule{Subject: "*", Action: "*", Resource: "*", Allow: true})
+	table := &failingOn{path: "files/reports/q3.pdf", held: auth.PermissionWrite}
+	a := asking(t, s, nil).WithGrants(table)
+
+	_, err := a.Decide(serving(carol), authorizer.ActionFileWrite, authorizer.File{
+		ID: "01J8R4", Owner: alice, Path: "files/inbox/q3.pdf", Plane: "files", From: "files/reports/q3.pdf",
+	}.Resource())
+	if auth.CodeOf(err) != auth.CodeAuthorizerUnavailable {
+		t.Errorf("a table that cannot answer for the source gave %v, want %s", err, auth.CodeAuthorizerUnavailable)
+	}
+	if seen := s.Requests(); len(seen) != 0 {
+		t.Errorf("the endpoint was asked %d questions with the grant unresolved", len(seen))
+	}
+}
+
+// failingOn is a grants table that answers one rung for every path but one,
+// and fails on that one.
+type failingOn struct {
+	path string
+	held auth.Permission
+}
+
+func (f *failingOn) Permission(_ context.Context, _, _, path string) (auth.Permission, error) {
+	if path == f.path {
+		return auth.PermissionNone, errors.New("the database is gone")
+	}
+	return f.held, nil
 }

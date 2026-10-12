@@ -127,6 +127,41 @@ func TestAGrantOnAWorkspaceIsReadAgainstItsSubtree(t *testing.T) {
 	}
 }
 
+// TestAQuestionWithASourceIsDecidedOnBothPaths: a question that names a
+// source beside its path is admitted on the lower of the two rungs the
+// grants table answers.
+func TestAQuestionWithASourceIsDecidedOnBothPaths(t *testing.T) {
+	moved := authorizer.File{
+		ID: "01J8FILE", Owner: owner, Path: "files/inbox/q3.pdf", Plane: "files",
+		From: "files/reports/q3.pdf",
+	}.Resource()
+	for _, c := range []struct {
+		name  string
+		held  map[string]string
+		allow bool
+	}{
+		{"write on both", map[string]string{"files/reports": "write", "files/inbox": "write"}, true},
+		{"one grant above both", map[string]string{"files": "write"}, true},
+		{"write on the destination alone", map[string]string{"files/inbox": "write"}, false},
+		{"write on the source alone", map[string]string{"files/reports": "write"}, false},
+		{"read on the source", map[string]string{"files/reports": "read", "files/inbox": "manage"}, false},
+		{"read on the destination", map[string]string{"files/reports": "manage", "files/inbox": "read"}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tbl := newTable()
+			for prefix, permission := range c.held {
+				tbl.put(store.Grant{
+					Owner: owner, PathPrefix: prefix, GranteeKind: store.GranteeSubject,
+					Grantee: grantee, Permission: permission, CreatedBy: owner,
+				})
+			}
+			if got := ask(t, policy(tbl), grantee, authorizer.ActionFileWrite, moved); got != c.allow {
+				t.Errorf("a move by a grantee holding %v = %t, want %t", c.held, got, c.allow)
+			}
+		})
+	}
+}
+
 // TestWhatTheGrantStepDoesNotAdmit: the segment rule, the expiry, the
 // revoke, another space's grant, another subject's grant, and a token grant,
 // which is the link step's and not this one's.
