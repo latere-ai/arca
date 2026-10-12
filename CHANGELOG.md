@@ -6,6 +6,41 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Breaking
+
+- **A space is one tree under `files/`.** The `/v1/workspaces` routes, the
+  `workspace.*` actions, the `Workspace` kind, the `workspaces` plane, the
+  `attach`, `release` and `sync` events, the reaper's lease passes, the
+  lease metrics and the codes `slug_taken`, `writer_held`,
+  `lease_not_held`, `manifest_incomplete` and `attachment_gone` are
+  removed. Migration `0006_one_tree` moves each workspace's objects, with
+  their versions, stars, grants and links, to `files/workspaces/<slug>/`
+  in the same space, and drops the two workspace tables. It runs forward
+  only. A `/v1/workspaces` route now answers `404` `not_found`, and a path
+  under `workspaces/` answers `400` `unknown_plane`.
+
+### Added
+
+- **A folder is deleted or copied in one call.**
+  `DELETE /v1/files/{owner}/{path}?recursive=1` trashes everything under
+  the folder, and `&permanent=1` removes it with its versions.
+  `POST /v1/files/{owner}/{path}` with `{"copy_to": "files/...",
+  "recursive": true}` copies the folder on the server and answers the
+  number of files and bytes copied; a folder of more than 10,000 objects
+  is `422` `too_many_objects`.
+- **An authorizer's answer can turn versions and the trash off, and leave
+  folders out of a listing.** `limits.versions: false` on a write keeps no
+  version of what it replaces, `limits.trash: false` on a delete makes it
+  permanent, and `limits.omit`, a list of folder paths, leaves those
+  folders out of every answer that lists or counts: folder listings,
+  downloads of a folder, the trash, the stars, the event log, the share
+  and link lists, and a folder delete or copy. A space's usage stays the
+  whole space's.
+
+### Fixed
+
+- A grant id that is not an identifier answers `404`, not `500`.
+
 ## v0.4.2 - 2026-10-12
 
 ### Fixed
