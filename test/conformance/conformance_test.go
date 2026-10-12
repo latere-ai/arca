@@ -87,7 +87,7 @@ func TestErrorTableMatchesTheSpec(t *testing.T) {
 	}
 }
 
-// TestEveryRouteHasACase: every one of the forty-one rows of spec 013's
+// TestEveryRouteHasACase: every one of the twenty-nine rows of spec 013's
 // table is driven by at least one case, and every route a case names is a
 // row of the table. A case naming a route the table does not hold is a case
 // driving something the contract does not fix.
@@ -96,8 +96,8 @@ func TestEveryRouteHasACase(t *testing.T) {
 	for _, r := range surfaceTable {
 		inTable[r.key()] = true
 	}
-	if len(surfaceTable) != 41 {
-		t.Errorf("spec 013's table is forty-one routes and the suite declares %d", len(surfaceTable))
+	if len(surfaceTable) != 29 {
+		t.Errorf("spec 013's table is twenty-nine routes and the suite declares %d", len(surfaceTable))
 	}
 	driven := map[string]bool{}
 	for _, sp := range cases() {
@@ -216,7 +216,7 @@ func TestCaseNamesAreUnique(t *testing.T) {
 // The rule runs in the direction that catches a lie. A case with no marker
 // is not a failure: a case drives a route of spec 013's table, which
 // criterion 2 already holds whole, and requiring a marker for each would put
-// forty-one rows into the acceptance tables of specs this one does not own.
+// twenty-nine rows into the acceptance tables of specs this one does not own.
 func TestEveryCriterionHasACase(t *testing.T) {
 	declared := caseFunctions(t)
 	markerRE := regexp.MustCompile(`\bcase\d{3}[A-Z][A-Za-z0-9]*\b`)
@@ -319,7 +319,7 @@ func noToken(context.Context, string) (string, error) { return "t", nil }
 func TestSurfaceReadsTheServedDocument(t *testing.T) {
 	served := []route{
 		{http.MethodGet, "/v1/events", "010"},
-		{http.MethodPost, "/v1/workspaces", "009"},
+		{http.MethodPost, "/v1/shares", "008"},
 	}
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/openapi.json" {
@@ -465,17 +465,17 @@ func TestNamesAreTheRunsOwn(t *testing.T) {
 func TestRunCleansUpWhatItMade(t *testing.T) {
 	s := newSession(Options{URL: "x", Token: noToken})
 	var order []string
-	for _, what := range []string{"workspace 1", "share 2", "link 3"} {
+	for _, what := range []string{"object 1", "share 2", "link 3"} {
 		s.record(what, func(testing.TB) error {
 			order = append(order, what)
 			return nil
 		})
 	}
 	made := s.cleanup(t)
-	if !slices.Equal(made, []string{"workspace 1", "share 2", "link 3"}) {
+	if !slices.Equal(made, []string{"object 1", "share 2", "link 3"}) {
 		t.Errorf("the run reported %v", made)
 	}
-	if !slices.Equal(order, []string{"link 3", "share 2", "workspace 1"}) {
+	if !slices.Equal(order, []string{"link 3", "share 2", "object 1"}) {
 		t.Errorf("the cleanup deleted in the order %v, and it deletes newest first", order)
 	}
 }
@@ -518,10 +518,10 @@ func TestUnverifiableIsNotASkip(t *testing.T) {
 // written, because the body is a map and not a pair list.
 func TestBodyRendersTheFieldsACaseNames(t *testing.T) {
 	var got map[string]any
-	if err := json.Unmarshal([]byte(body(fields{"owner": "me", "slug": "s", "ttl_seconds": 60})), &got); err != nil {
+	if err := json.Unmarshal([]byte(body(fields{"owner": "me", "path": "p", "size": 60})), &got); err != nil {
 		t.Fatalf("body rendered %v", err)
 	}
-	if got["owner"] != "me" || got["slug"] != "s" || got["ttl_seconds"] != float64(60) {
+	if got["owner"] != "me" || got["path"] != "p" || got["size"] != float64(60) {
 		t.Errorf("body rendered %v", got)
 	}
 	if body(fields{}) != "{}" {
@@ -732,7 +732,7 @@ type stopped struct{}
 func TestTheBasePathIsAppliedAtTheOneChokepoint(t *testing.T) {
 	served := []route{
 		{http.MethodGet, "/v1/events", "010"},
-		{http.MethodPost, "/v1/workspaces", "009"},
+		{http.MethodPost, "/v1/shares", "008"},
 	}
 	var asked []string
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -753,9 +753,9 @@ func TestTheBasePathIsAppliedAtTheOneChokepoint(t *testing.T) {
 	defer target.Close()
 
 	s := newSession(Options{URL: target.URL, Token: noToken, BasePath: "/v1/storage"})
-	s.do(t, request{method: http.MethodGet, path: "/v1/workspaces"})
+	s.do(t, request{method: http.MethodGet, path: "/v1/shares"})
 	s.do(t, request{method: http.MethodGet, path: "/openapi.json"})
-	if want := []string{"/v1/storage/workspaces", "/openapi.json"}; !slices.Equal(asked, want) {
+	if want := []string{"/v1/storage/shares", "/openapi.json"}; !slices.Equal(asked, want) {
 		t.Errorf("the suite asked for %v, want %v", asked, want)
 	}
 
@@ -768,8 +768,8 @@ func TestTheBasePathIsAppliedAtTheOneChokepoint(t *testing.T) {
 
 	asked = nil
 	root := newSession(Options{URL: target.URL, Token: noToken})
-	root.do(t, request{method: http.MethodGet, path: "/v1/workspaces"})
-	if want := []string{"/v1/workspaces"}; !slices.Equal(asked, want) {
+	root.do(t, request{method: http.MethodGet, path: "/v1/shares"})
+	if want := []string{"/v1/shares"}; !slices.Equal(asked, want) {
 		t.Errorf("a run that set no base path asked for %v, want %v", asked, want)
 	}
 }

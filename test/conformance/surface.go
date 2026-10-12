@@ -15,7 +15,7 @@ import (
 // The surface of spec 013 as the suite holds it, and what the target
 // answers of it.
 //
-// The table below is the suite's own declaration of the forty-one routes,
+// The table below is the suite's own declaration of the twenty-nine routes,
 // not a reading of the server's registrations: a build that dropped a route
 // has to fail, and a suite that read the build's own list would drop it too.
 // What the target serves is read from the document spec 013 publishes, and
@@ -38,7 +38,7 @@ func (r route) key() string { return r.method + " " + r.path }
 // has no such form, so the suffix goes.
 func (r route) template() string { return strings.ReplaceAll(r.path, "...", "") }
 
-// surfaceTable is the forty-one routes of spec 013, grouped by the spec that
+// surfaceTable is the twenty-nine routes of spec 013, grouped by the spec that
 // owns each. Outside /v1 sits one more document, GET /openapi.json, which
 // the errors group asserts and which is not a row here because it is not a
 // route of the surface.
@@ -74,20 +74,6 @@ var surfaceTable = []route{
 	{http.MethodGet, "/v1/shares/links/{token}/meta", "008"},
 	{http.MethodGet, "/v1/shares/links/{token}", "008"},
 	{http.MethodGet, "/v1/shares/links/{token}/files/{path...}", "008"},
-
-	// Workspaces (spec 009).
-	{http.MethodPost, "/v1/workspaces", "009"},
-	{http.MethodGet, "/v1/workspaces", "009"},
-	{http.MethodGet, "/v1/workspaces/deleted", "009"},
-	{http.MethodGet, "/v1/workspaces/{id}", "009"},
-	{http.MethodPatch, "/v1/workspaces/{id}", "009"},
-	{http.MethodDelete, "/v1/workspaces/{id}", "009"},
-	{http.MethodPost, "/v1/workspaces/{id}/restore", "009"},
-	{http.MethodPost, "/v1/workspaces/{id}/attach", "009"},
-	{http.MethodPost, "/v1/workspaces/{id}/attach/{aid}/renew", "009"},
-	{http.MethodDelete, "/v1/workspaces/{id}/attach/{aid}", "009"},
-	{http.MethodGet, "/v1/workspaces/{id}/materialize", "009"},
-	{http.MethodPost, "/v1/workspaces/{id}/sync", "009"},
 
 	// Events (spec 010).
 	{http.MethodGet, "/v1/events", "010"},

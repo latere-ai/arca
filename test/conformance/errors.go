@@ -26,11 +26,6 @@ const (
 	CodeNotFound              = "not_found"
 	CodeNotAcceptable         = "not_acceptable"
 	CodePathTaken             = "path_taken"
-	CodeSlugTaken             = "slug_taken"
-	CodeWriterHeld            = "writer_held"
-	CodeLeaseNotHeld          = "lease_not_held"
-	CodeManifestIncomplete    = "manifest_incomplete"
-	CodeAttachmentGone        = "attachment_gone"
 	CodeLengthRequired        = "length_required"
 	CodePreconditionFailed    = "precondition_failed"
 	CodeObjectTooLarge        = "object_too_large"
@@ -38,6 +33,7 @@ const (
 	CodeQuotaExceeded         = "quota_exceeded"
 	CodeUnsupportedMediaType  = "unsupported_media_type"
 	CodeTooManyParts          = "too_many_parts"
+	CodeTooManyObjects        = "too_many_objects"
 	CodeLinkReadOnly          = "link_read_only"
 	CodeRateLimited           = "rate_limited"
 	CodeInternal              = "internal"
@@ -72,11 +68,6 @@ var codeTable = map[string]row{
 	CodeNotFound:              {404, "There is no such object."},
 	CodeNotAcceptable:         {406, "This endpoint answers in JSON."},
 	CodePathTaken:             {409, "Something already exists at that path."},
-	CodeSlugTaken:             {409, "This space already has a workspace with that name."},
-	CodeWriterHeld:            {409, "Another writer holds this workspace."},
-	CodeLeaseNotHeld:          {409, "This attachment does not hold the writer lease."},
-	CodeManifestIncomplete:    {409, "The manifest names objects that have not been uploaded."},
-	CodeAttachmentGone:        {410, "This attachment has ended; attach again."},
 	CodeLengthRequired:        {411, "Send a Content-Length with the body."},
 	CodePreconditionFailed:    {412, "The object is not in the state the request required."},
 	CodeObjectTooLarge:        {413, "The object is larger than this server accepts."},
@@ -84,6 +75,7 @@ var codeTable = map[string]row{
 	CodeQuotaExceeded:         {413, "This space has no room left."},
 	CodeUnsupportedMediaType:  {415, "Send the body as JSON."},
 	CodeTooManyParts:          {422, "The object needs more parts than this server allows."},
+	CodeTooManyObjects:        {422, "The folder holds more objects than one copy accepts."},
 	CodeLinkReadOnly:          {422, "A link grants reading and nothing more."},
 	CodeRateLimited:           {429, "Too many requests; wait and retry."},
 	CodeInternal:              {500, "Something went wrong on this server."},
@@ -101,12 +93,12 @@ func table(t testing.TB, code string) (int, string) {
 	return r.status, r.sentence
 }
 
-// provoked names the codes a caller outside the installation can make a
-// conforming server answer, which is what criterion 2 of spec 017 holds the
-// suite to. The rest are here for the sentence comparison alone:
+// unprovoked names the codes no case makes a conforming server answer, each
+// with the reason, which is what criterion 2 of spec 017 holds the suite to.
+// They are in the table above for the sentence comparison alone:
 //
-//   - internal and storage_unavailable are a fault inside the installation,
-//     which is the e2e tier's of spec 014 and not a black box suite's.
+//   - internal is a fault inside the installation, which is the e2e tier's
+//     of spec 014 and not a black box suite's.
 //   - rate_limited is reachable, and is not provoked: draining a subject's
 //     bucket against a shared installation is a denial of service against
 //     whoever else is using it, and spec 017 asserts an answer and never a
@@ -115,9 +107,17 @@ func table(t testing.TB, code string) (int, string) {
 //     it. The pending group reads it off the served document rather than
 //     provoking it, so a partial build is reported once and not once per
 //     route.
+//   - too_many_objects takes a folder above the bound of one copy, which is
+//     ten thousand and one objects written into an installation somebody
+//     else may be using. The bound is proved in process, beside the handler.
+//
+// storage_unavailable is not here. A store cut underneath a request is the
+// e2e tier's, and the code is also what an answer the installation cannot
+// read is refused with, which the limits cases of spec 028 provoke through
+// the stub authorizer.
 var unprovoked = map[string]string{
-	CodeInternal:           "a fault inside the installation, which is the e2e tier's",
-	CodeStorageUnavailable: "a store cut underneath a request, which is the e2e tier's",
-	CodeRateLimited:        "draining a bucket on a shared installation is a denial of service",
-	CodeNotImplemented:     "read off the served document by the pending group",
+	CodeInternal:       "a fault inside the installation, which is the e2e tier's",
+	CodeRateLimited:    "draining a bucket on a shared installation is a denial of service",
+	CodeNotImplemented: "read off the served document by the pending group",
+	CodeTooManyObjects: "ten thousand and one objects written into an installation to be refused a copy of them",
 }

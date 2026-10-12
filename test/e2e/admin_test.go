@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -31,11 +32,13 @@ type overviewRow struct {
 	Files        int64      `json:"files"`
 	Bytes        int64      `json:"bytes"`
 	TrashedBytes int64      `json:"trashed_bytes"`
-	Workspaces   int64      `json:"workspaces"`
-	Leases       int64      `json:"leases"`
 	Links        int64      `json:"links"`
 	LastWriteAt  *time.Time `json:"last_write_at"`
 }
+
+// overviewMembers are the members of an overview row, which are the fields of
+// overviewRow and nothing else.
+var overviewMembers = []string{"owner", "files", "bytes", "trashed_bytes", "links", "last_write_at"}
 
 // TestE2ECheckPassesAgainstTheStack is criterion 12 of spec 012 where an
 // operator meets it: every requirement of an installation reached for real,
@@ -138,8 +141,8 @@ func TestE2ETheAdministrativeOverviewReadsAcrossSpaces(t *testing.T) {
 	i.allowEverything()
 	db := i.database(t)
 
-	// Two objects and a workspace in the caller's own space, seeded the way
-	// the routes of spec 005 would leave them.
+	// Two objects in the caller's own space, seeded the way the routes of
+	// spec 005 would leave them.
 	first := i.put(t, db, "files/reports/q3.pdf", "the third quarter")
 	second := i.put(t, db, "files/reports/q4.pdf", "the fourth quarter")
 	if _, err := db.Querier().Exec(t.Context(),
@@ -148,13 +151,8 @@ func TestE2ETheAdministrativeOverviewReadsAcrossSpaces(t *testing.T) {
 		i.subject(), first.size+second.size); err != nil {
 		t.Fatalf("seed the ledger: %v", err)
 	}
-	var workspace struct {
-		ID string `json:"id"`
-	}
-	i.expect(t, http.StatusCreated, http.MethodPost, "/v1/workspaces",
-		map[string]any{"slug": "build"}, &workspace)
-	// One link, so the seventh counter is read off spec 008's table rather
-	// than off a build that binds no counter.
+	// One link, so the last counter is read off spec 008's table rather than
+	// off a build that binds no counter.
 	i.expect(t, http.StatusCreated, http.MethodPost, "/v1/shares/links",
 		map[string]any{"owner": "me", "path_prefix": "files/reports"}, nil)
 
@@ -182,11 +180,20 @@ func TestE2ETheAdministrativeOverviewReadsAcrossSpaces(t *testing.T) {
 	if row.TrashedBytes != 0 {
 		t.Errorf("the space's trashed bytes are %d, want 0", row.TrashedBytes)
 	}
-	if row.Workspaces != 1 {
-		t.Errorf("the space holds %d live workspaces, want 1", row.Workspaces)
+	// A space is one tree (spec 028), so the row counts nothing of a second
+	// plane. The row is read again as a plain object, so a member the
+	// overview should no longer answer is seen rather than dropped by the
+	// decoder.
+	var raw struct {
+		Entries []map[string]any `json:"entries"`
 	}
-	if row.Leases != 0 {
-		t.Errorf("the space holds %d leases and nothing attached", row.Leases)
+	i.expect(t, http.StatusOK, http.MethodGet, "/v1/admin/overview", nil, &raw)
+	for _, entry := range raw.Entries {
+		for member := range entry {
+			if !slices.Contains(overviewMembers, member) {
+				t.Errorf("an overview row answers %q, which spec 012's row does not name: %v", member, entry)
+			}
+		}
 	}
 	if row.Links != 1 {
 		t.Errorf("the space holds %d links, want the one that was issued", row.Links)
@@ -212,15 +219,12 @@ func TestE2EADeniedAdministratorIsForbidden(t *testing.T) {
 	}
 }
 
-// TestE2ETheRestoreAcrossOwnersReturnsAnObjectAndAWorkspace is criterion 7
-// of spec 012 through the running server: one route, one id, and the kind in
-// the answer saying which of the two tables it came from.
-//
-// Both ids are database identifiers of the same shape, so the node's adapter
-// asks the trash first and the tombstones second; what this holds is that
-// each arm answers for its own rows and that an id neither knows is one
-// refusal naming the retention window.
-func TestE2ETheRestoreAcrossOwnersReturnsAnObjectAndAWorkspace(t *testing.T) {
+// TestE2ETheRestoreAcrossOwnersReturnsATrashedObject is criterion 7 of spec
+// 012 through the running server: one route, one id, and the kind in the
+// answer saying it was a file. A space is one tree (spec 028), so the trash
+// is the one table the route returns a row to, and an id the trash does not
+// hold is one refusal naming the retention window.
+func TestE2ETheRestoreAcrossOwnersReturnsATrashedObject(t *testing.T) {
 	i := start(t)
 	i.allowEverything()
 	db := i.database(t)
@@ -234,13 +238,6 @@ func TestE2ETheRestoreAcrossOwnersReturnsAnObjectAndAWorkspace(t *testing.T) {
 		i.subject(), "files/reports/q3.pdf").Scan(&trashed); err != nil {
 		t.Fatalf("read the trashed row: %v", err)
 	}
-
-	var workspace struct {
-		ID string `json:"id"`
-	}
-	i.expect(t, http.StatusCreated, http.MethodPost, "/v1/workspaces",
-		map[string]any{"slug": "build"}, &workspace)
-	i.expect(t, http.StatusNoContent, http.MethodDelete, "/v1/workspaces/"+workspace.ID, nil, nil)
 
 	var restored struct {
 		ID     string `json:"id"`
@@ -261,17 +258,20 @@ func TestE2ETheRestoreAcrossOwnersReturnsAnObjectAndAWorkspace(t *testing.T) {
 		t.Errorf("the object is still trashed at %v", deleted)
 	}
 
-	i.expect(t, http.StatusOK, http.MethodPost, "/v1/admin/spaces/me/restore",
-		map[string]any{"id": workspace.ID}, &restored)
-	if restored.Kind != "workspace" {
-		t.Fatalf("the workspace restore answered %+v", restored)
+	if body := i.expect(t, http.StatusOK, http.MethodGet,
+		"/v1/files/"+url.PathEscape(i.subject())+"/files/reports/q3.pdf", nil, nil); string(body) != "the third quarter" {
+		t.Errorf("the restored object reads %q", body)
 	}
-	i.expect(t, http.StatusOK, http.MethodGet, "/v1/workspaces/"+workspace.ID, nil, nil)
 
-	// An id neither table knows and one past the window are one answer, and
-	// the developer detail names the window so an administrator is not left
-	// guessing between a typo and an expiry.
-	code, body := i.api(t, http.MethodPost, "/v1/admin/spaces/me/restore", map[string]any{"id": "01J8R4A"})
+	// An id that is no longer in the trash, one the trash never held and one
+	// past the window are one answer, and the developer detail names the
+	// window so an administrator is not left guessing between a typo and an
+	// expiry.
+	code, body := i.api(t, http.MethodPost, "/v1/admin/spaces/me/restore", map[string]any{"id": trashed})
+	if code != http.StatusNotFound || errorCode(t, body) != "not_found" {
+		t.Fatalf("restoring an object that is live again answered %d: %s", code, body)
+	}
+	code, body = i.api(t, http.MethodPost, "/v1/admin/spaces/me/restore", map[string]any{"id": "01J8R4A"})
 	if code != http.StatusNotFound {
 		t.Fatalf("an id that names nothing answered %d: %s", code, body)
 	}

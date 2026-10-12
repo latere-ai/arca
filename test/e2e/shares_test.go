@@ -275,8 +275,8 @@ func TestE2EAGrantIsCreatedReadAndRevoked(t *testing.T) {
 
 	// Criterion 10 through the binary: every mutation above appended a row
 	// of spec 010's log inside its own transaction, and the tail of that
-	// spec reads them back. This is the one place the whole chain runs — the
-	// handler, the adapter the node binds, the log, and the real table — so a
+	// spec reads them back. This is the one place the whole chain runs: the
+	// handler, the adapter the node binds, the log, and the real table. A
 	// ledger that was left defaulted is caught here and nowhere else.
 	code, body, _ = i.sharesCall(t, http.MethodGet, "/v1/events", alice, nil)
 	if code != http.StatusOK {

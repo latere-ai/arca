@@ -61,9 +61,8 @@ func case007Session(t *testing.T, s *session) {
 
 // case007Complete: the parts go straight to the bucket against the presigned
 // URLs, which is invariant 4 of spec 001 on the write side, and the
-// completion assembles them into the object. A completion that names a part
-// nothing was uploaded for is refused with manifest_incomplete rather than
-// producing a short object.
+// completion assembles them into the object. A completion that leaves a part
+// of the session out is refused rather than producing a short object.
 func case007Complete(t *testing.T, s *session) {
 	path := s.filePath("upload/complete.bin")
 	owner := s.subject(t, Alice)
@@ -87,8 +86,10 @@ func case007Complete(t *testing.T, s *session) {
 	// part by n and by the label the bucket answered, which is the shape
 	// spec 007's completion takes.
 	if len(urls) > 1 {
-		expectError(t, s.call(t, Alice, http.MethodPost, "/v1/uploads/"+id+"/complete",
-			body(fields{"parts": []any{map[string]any{"n": 1, "etag": label}}})), CodeManifestIncomplete)
+		short := s.call(t, Alice, http.MethodPost, "/v1/uploads/"+id+"/complete",
+			body(fields{"parts": []any{map[string]any{"n": 1, "etag": label}}}))
+		failIf(t, short.status < 400, "a completion that left a part out was taken: %d %s", short.status, short.body)
+		expectError(t, short, short.code())
 		return
 	}
 

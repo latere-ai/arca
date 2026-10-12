@@ -31,7 +31,7 @@ func cases012() []testCase {
 		{name: "NotAnAdministrator", group: GroupAdministraton, routes: admin,
 			codes: []string{CodeNotFound}, run: case012NotAnAdministrator},
 		{name: "AcrossSpaces", group: GroupAdministraton, routes: append(append([]string{}, admin...),
-			"GET /v1/events", "POST /v1/workspaces", "DELETE /v1/workspaces/{id}"), run: case012AcrossSpaces},
+			"GET /v1/events", "PUT /v1/files/{owner}/{path...}", "GET /v1/files/{owner}/{path...}"), run: case012AcrossSpaces},
 	}
 }
 
@@ -75,20 +75,22 @@ func case012NotAnAdministrator(t *testing.T, s *session) {
 // space's own routes, and what an administrator did is on that space's event
 // tail rather than on a second log.
 func case012AcrossSpaces(t *testing.T, s *session) {
-	made := s.workspace(t, Alice, "admin-sees")
 	owner := s.subject(t, Alice)
+	folder := s.filePath("admin-sees")
+	made := folder + "/report.txt"
+	expectAWrite(t, s.put(t, Alice, made, "an object of another space\n", "text/plain"))
 
 	seen := s.call(t, s.options.Admin, http.MethodGet, "/v1/events?owner="+escape(owner)+"&limit=1000", "")
 	expectStatus(t, seen, http.StatusOK)
 	failIf(t, seen.json["entries"] == nil, "an administrator reading another space's log got a null entries: %s", seen.body)
 
-	listed := s.call(t, s.options.Admin, http.MethodGet, "/v1/workspaces?owner="+escape(owner)+"&limit=1000", "")
+	listed := s.call(t, s.options.Admin, http.MethodGet, s.fileRoute(owner, folder)+"?list=1&limit=1000", "")
 	expectStatus(t, listed, http.StatusOK)
 	found := false
 	for _, e := range list(listed.json, "entries") {
-		if str(e, "id") == str(made, "id") {
+		if str(e, "path") == made {
 			found = true
 		}
 	}
-	failIf(t, !found, "an administrator listing another space does not see its workspace")
+	failIf(t, !found, "an administrator listing a folder of another space does not see the object in it")
 }

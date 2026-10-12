@@ -377,20 +377,43 @@ func case005Stars(t *testing.T, s *session) {
 	expectError(t, hidden, CodeNotFound)
 }
 
-// case005Materialize: one space as a manifest of presigned URLs. It needs no
-// lease, because there is no writer to exclude; the leased form is spec
-// 009's.
+// case005Materialize: a folder of one space as a manifest of presigned URLs,
+// one per object under it. ?prefix= names the folder below the plane, and a
+// manifest names each object by its path below the manifest's root.
 func case005Materialize(t *testing.T, s *session) {
 	path := s.filePath("materialize/a.txt")
 	expectAWrite(t, s.put(t, Alice, path, "manifest me\n", "text/plain"))
 
-	m := expectStatus(t, s.call(t, Alice, http.MethodGet,
-		"/v1/files/materialize?owner=me&prefix="+escape(s.filePath("materialize")), ""), http.StatusOK)
-	failIf(t, m.json["files"] == nil, "the manifest answers a null files: %s", m.body)
+	m := s.manifest(t, Alice, "me", s.filePath("materialize"))
 	failIf(t, m.json["pinned_at"] != nil, "GET /v1/files/materialize pins nothing, so pinned_at is null: %s", m.body)
+	files := manifestPaths(m)
+	failIf(t, len(files) != 1 || !files[path],
+		"the manifest of the folder names %v, want the one object %q under it", files, path)
 	for _, f := range list(m.json, "files") {
 		failIf(t, str(f, "url") == "", "a manifest entry carries no presigned url: %v", f)
 	}
+}
+
+// manifest reads one folder of a space as GET /v1/files/materialize answers
+// it. The folder is given as the path it has in the space, and the route
+// takes it below the plane, so the plane's own segment is taken off here.
+func (s *session) manifest(t testing.TB, principal, owner, folder string) response {
+	t.Helper()
+	m := expectStatus(t, s.call(t, principal, http.MethodGet,
+		"/v1/files/materialize?owner="+escape(owner)+"&prefix="+escape(strings.TrimPrefix(folder, "files/")), ""),
+		http.StatusOK)
+	failIf(t, m.json["files"] == nil, "the manifest answers a null files: %s", m.body)
+	return m
+}
+
+// manifestPaths is the set of objects a manifest names, each as the path it
+// has in the space: the manifest's root and the entry's own path below it.
+func manifestPaths(m response) map[string]bool {
+	out := map[string]bool{}
+	for _, f := range list(m.json, "files") {
+		out[str(m.json, "root")+str(f, "path")] = true
+	}
+	return out
 }
 
 // case005RootUsage: an owner reads what its own space holds off the root of

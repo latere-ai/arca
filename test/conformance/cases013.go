@@ -4,7 +4,10 @@
 package conformance
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"strings"
 	"testing"
@@ -16,15 +19,18 @@ import (
 // documents that take no token.
 
 func cases013() []testCase {
-	create := []string{"POST /v1/workspaces", "DELETE /v1/workspaces/{id}"}
-	pages := []string{"GET /v1/workspaces", "GET /v1/shares", "GET /v1/events"}
+	// The JSON route every body rule is driven through is the grant create,
+	// and the list route every page rule is driven through is the grant
+	// listing: both answer with nothing in the space first.
+	create := []string{"POST /v1/shares", "GET /v1/shares"}
+	pages := []string{"GET /v1/trash", "GET /v1/shares", "GET /v1/events"}
 	return []testCase{
 		{name: "Envelope", group: GroupErrors, routes: create,
 			codes: []string{CodeMissingField}, run: case013Envelope},
 		{name: "ErrorTable", group: GroupErrors, routes: create, codes: []string{
 			CodeUnauthenticated, CodeMissingField, CodeUnknownField, CodeInvalidField,
 			CodeBadRequest, CodeUnsupportedMediaType, CodeNotAcceptable, CodeNotFound,
-			CodeSlugTaken, CodeUnknownPlane, CodeInvalidPath, CodeWriterHeld,
+			CodePathTaken, CodeUnknownPlane, CodeInvalidPath,
 		}, run: case013ErrorTable},
 		{name: "Documents", group: GroupErrors, run: case013Documents},
 		{name: "RequestID", group: GroupErrors, routes: create,
@@ -45,7 +51,7 @@ func cases013() []testCase {
 // paths at fault. A caller branches on the code and shows the sentence, so
 // the sentence never carries a value.
 func case013Envelope(t *testing.T, s *session) {
-	r := s.call(t, Alice, http.MethodPost, "/v1/workspaces", body(fields{"owner": "me"}))
+	r := s.call(t, Alice, http.MethodPost, "/v1/shares", body(fields{"owner": "me"}))
 	details := expectError(t, r, CodeMissingField)
 	fields := expectFields(t, details)
 	failIf(t, len(fields) == 0, "a field naming refusal carries no details.fields")
@@ -72,59 +78,66 @@ func case013Envelope(t *testing.T, s *session) {
 // the reason, so the table is read whole and the gaps are recorded rather
 // than passed over.
 func case013ErrorTable(t *testing.T, s *session) {
-	made := s.workspace(t, Alice, "codes")
-	id, slug := str(made, "id"), str(made, "slug")
+	// A grant with every field it needs, so each provocation below changes
+	// the one thing its code is about. A nil value takes a field out.
+	grant := func(change fields) string {
+		f := fields{"owner": "me", "path_prefix": s.grantPrefix("codes"),
+			"grantee": s.absentSubject(), "permission": "read"}
+		for k, v := range change {
+			if v == nil {
+				delete(f, k)
+				continue
+			}
+			f[k] = v
+		}
+		return body(f)
+	}
 
 	provoke := []struct {
 		code  string
 		drive func() response
 	}{
 		{CodeUnauthenticated, func() response {
-			return s.do(t, request{method: http.MethodGet, path: "/v1/workspaces"})
+			return s.do(t, request{method: http.MethodGet, path: "/v1/shares"})
 		}},
 		{CodeMissingField, func() response {
-			return s.call(t, Alice, http.MethodPost, "/v1/workspaces", body(fields{"owner": "me"}))
+			return s.call(t, Alice, http.MethodPost, "/v1/shares", grant(fields{"grantee": nil}))
 		}},
 		{CodeUnknownField, func() response {
-			return s.call(t, Alice, http.MethodPost, "/v1/workspaces", body(fields{"owner": "me", "slug": s.name("x"), "color": "green"}))
+			return s.call(t, Alice, http.MethodPost, "/v1/shares", grant(fields{"color": "green"}))
 		}},
 		{CodeInvalidField, func() response {
-			return s.call(t, Alice, http.MethodGet, "/v1/workspaces?limit=5000", "")
+			return s.call(t, Alice, http.MethodGet, "/v1/shares?limit=5000", "")
 		}},
 		{CodeBadRequest, func() response {
-			return s.do(t, request{method: http.MethodPost, path: "/v1/workspaces", subject: Alice,
+			return s.do(t, request{method: http.MethodPost, path: "/v1/shares", subject: Alice,
 				body: strings.NewReader("{not json"), contentType: "application/json"})
 		}},
 		{CodeUnsupportedMediaType, func() response {
-			return s.do(t, request{method: http.MethodPost, path: "/v1/workspaces", subject: Alice,
-				body: strings.NewReader(body(fields{"owner": "me", "slug": s.name("y")})), contentType: "text/plain"})
+			return s.do(t, request{method: http.MethodPost, path: "/v1/shares", subject: Alice,
+				body: strings.NewReader(grant(nil)), contentType: "text/plain"})
 		}},
 		{CodeNotAcceptable, func() response {
-			return s.with(t, Alice, http.MethodGet, "/v1/workspaces", "", map[string]string{"Accept": "text/plain"})
+			return s.with(t, Alice, http.MethodPost, "/v1/shares", grant(nil), map[string]string{"Accept": "text/plain"})
 		}},
 		{CodeNotFound, func() response {
-			return s.call(t, Alice, http.MethodGet, "/v1/workspaces/"+s.name("no-such-workspace"), "")
+			return s.call(t, Alice, http.MethodGet, "/v1/shares/"+absentID(), "")
 		}},
-		{CodeSlugTaken, func() response {
-			return s.call(t, Alice, http.MethodPost, "/v1/workspaces", body(fields{"owner": "me", "slug": slug}))
+		{CodePathTaken, func() response {
+			// A restore names a path of the trash. A path a live object
+			// holds is not in it, and the caller, who was admitted to the
+			// space, is told that something is there.
+			live := s.filePath("codes-taken.txt")
+			if written := s.put(t, Alice, live, "a live object\n", "text/plain"); written.status >= 300 {
+				return written
+			}
+			return s.call(t, Alice, http.MethodPost, "/v1/trash/restore", body(fields{"owner": "me", "path": live}))
 		}},
 		{CodeUnknownPlane, func() response {
-			return s.call(t, Alice, http.MethodPost, "/v1/shares",
-				body(fields{"owner": "me", "path_prefix": "secrets/x", "grantee": s.subject(t, Bob), "permission": "read"}))
+			return s.call(t, Alice, http.MethodPost, "/v1/shares", grant(fields{"path_prefix": "secrets/x"}))
 		}},
 		{CodeInvalidPath, func() response {
-			return s.call(t, Alice, http.MethodPost, "/v1/shares",
-				body(fields{"owner": "me", "path_prefix": "/files/x", "grantee": s.subject(t, Bob), "permission": "read"}))
-		}},
-		{CodeWriterHeld, func() response {
-			held := s.call(t, Alice, http.MethodPost, "/v1/workspaces/"+id+"/attach",
-				body(fields{"sandbox_id": s.name("codes-a"), "mode": "rw", "ttl_seconds": 120}))
-			if held.status != http.StatusCreated {
-				return held
-			}
-			defer s.call(t, Alice, http.MethodDelete, "/v1/workspaces/"+id+"/attach/"+str(held.json, "id"), "")
-			return s.call(t, Alice, http.MethodPost, "/v1/workspaces/"+id+"/attach",
-				body(fields{"sandbox_id": s.name("codes-b"), "mode": "rw", "ttl_seconds": 120}))
+			return s.call(t, Alice, http.MethodPost, "/v1/shares", grant(fields{"path_prefix": "/files/x"}))
 		}},
 	}
 	for _, p := range provoke {
@@ -149,12 +162,12 @@ func case013ErrorTable(t *testing.T, s *session) {
 // rather than failing as though the answer were wrong.
 func routesOfCode(code string) []string {
 	switch code {
-	case CodeUnknownPlane, CodeInvalidPath:
-		return []string{"POST /v1/shares"}
-	case CodeWriterHeld:
-		return []string{"POST /v1/workspaces/{id}/attach", "DELETE /v1/workspaces/{id}/attach/{aid}"}
+	case CodeNotFound:
+		return []string{"GET /v1/shares/{id}"}
+	case CodePathTaken:
+		return []string{"PUT /v1/files/{owner}/{path...}", "POST /v1/trash/restore"}
 	}
-	return []string{"POST /v1/workspaces", "GET /v1/workspaces"}
+	return []string{"POST /v1/shares", "GET /v1/shares"}
 }
 
 // case013Documents: the two public documents answer without a bearer. A
@@ -178,7 +191,7 @@ func case013Documents(t *testing.T, s *session) {
 // event, so a caller that sent one finds its request in every record.
 func case013RequestID(t *testing.T, s *session) {
 	mine := "conformance-" + s.run
-	kept := s.with(t, Alice, http.MethodGet, "/v1/workspaces?limit=1", "", map[string]string{HeaderRequestID: mine})
+	kept := s.with(t, Alice, http.MethodGet, "/v1/shares?limit=1", "", map[string]string{HeaderRequestID: mine})
 	failIf(t, kept.header.Get(HeaderRequestID) != mine,
 		"a client id within the rule came back as %q, want %q", kept.header.Get(HeaderRequestID), mine)
 
@@ -188,14 +201,14 @@ func case013RequestID(t *testing.T, s *session) {
 	// at all, so no target ever sees one and a case sending one would be
 	// asserting against its own client.
 	for _, outside := range []string{strings.Repeat("a", 200), "aéb"} {
-		r := s.with(t, Alice, http.MethodGet, "/v1/workspaces?limit=1", "", map[string]string{HeaderRequestID: outside})
+		r := s.with(t, Alice, http.MethodGet, "/v1/shares?limit=1", "", map[string]string{HeaderRequestID: outside})
 		got := r.header.Get(HeaderRequestID)
 		failIf(t, got == outside, "a client id outside the rule was echoed: %q", got)
 		failIf(t, got == "", "an answer carries no %s", HeaderRequestID)
 	}
 
 	// The id is on a refusal too, in the header and in the details.
-	refused := s.with(t, Alice, http.MethodGet, "/v1/workspaces?limit=5000", "", map[string]string{HeaderRequestID: mine})
+	refused := s.with(t, Alice, http.MethodGet, "/v1/shares?limit=5000", "", map[string]string{HeaderRequestID: mine})
 	details := expectError(t, refused, CodeInvalidField)
 	failIf(t, str(details, "request_id") != refused.header.Get(HeaderRequestID),
 		"the envelope's request_id is %q and the header's is %q", str(details, "request_id"), refused.header.Get(HeaderRequestID))
@@ -206,7 +219,7 @@ func case013RequestID(t *testing.T, s *session) {
 // only when a further page exists, so its presence is the only has-more
 // signal and a client stops when it is absent.
 func case013ListEnvelope(t *testing.T, s *session) {
-	for _, path := range []string{"/v1/workspaces?owner=me", "/v1/shares?owner=me", "/v1/events?owner=me"} {
+	for _, path := range []string{"/v1/trash?owner=me", "/v1/shares?owner=me", "/v1/events?owner=me"} {
 		t.Run(strings.Trim(strings.SplitN(path, "?", 2)[0], "/"), func(t *testing.T) {
 			if waiting := s.pendingRoutes([]string{listRoute(path)}); len(waiting) > 0 {
 				t.Skipf("the pending group holds it: the target does not serve %s", strings.Join(waiting, ", "))
@@ -244,14 +257,14 @@ func listRoute(path string) string {
 func case013Limit(t *testing.T, s *session) {
 	for _, limit := range []string{"5000", "0", "-1", "many"} {
 		t.Run(limit, func(t *testing.T) {
-			r := s.call(t, Alice, http.MethodGet, "/v1/workspaces?owner=me&limit="+limit, "")
+			r := s.call(t, Alice, http.MethodGet, "/v1/shares?owner=me&limit="+limit, "")
 			details := expectError(t, r, CodeInvalidField)
 			fields := expectFields(t, details)
 			failIf(t, !strings.Contains(strings.Join(fields, ","), "limit"),
 				"the refusal names the fields %v and not limit", fields)
 		})
 	}
-	expectStatus(t, s.call(t, Alice, http.MethodGet, "/v1/workspaces?owner=me&limit=1000", ""), http.StatusOK)
+	expectStatus(t, s.call(t, Alice, http.MethodGet, "/v1/shares?owner=me&limit=1000", ""), http.StatusOK)
 }
 
 // case013BodiesAndTypes: a JSON route refuses a field it does not know, a
@@ -259,20 +272,31 @@ func case013Limit(t *testing.T, s *session) {
 // that misspells a field learns it at once rather than silently writing a
 // default.
 func case013BodiesAndTypes(t *testing.T, s *session) {
-	expectError(t, s.call(t, Alice, http.MethodPost, "/v1/workspaces",
-		body(fields{"owner": "me", "slug": s.name("typo"), "slugg": "x"})), CodeUnknownField)
+	// One grant with every field it needs, and a copy of it per provocation,
+	// so each changes the one thing its code is about.
+	grant := func(change fields) fields {
+		f := fields{"owner": "me", "path_prefix": s.grantPrefix("bodies"),
+			"grantee": s.absentSubject(), "permission": "read"}
+		maps.Copy(f, change)
+		return f
+	}
 
-	expectError(t, s.do(t, request{method: http.MethodPost, path: "/v1/workspaces", subject: Alice,
-		body: strings.NewReader(body(fields{"owner": "me", "slug": s.name("type")})), contentType: "application/x-www-form-urlencoded"}),
+	expectError(t, s.call(t, Alice, http.MethodPost, "/v1/shares",
+		body(grant(fields{"granteee": "x"}))), CodeUnknownField)
+
+	expectError(t, s.do(t, request{method: http.MethodPost, path: "/v1/shares", subject: Alice,
+		body: strings.NewReader(body(grant(nil))), contentType: "application/x-www-form-urlencoded"}),
 		CodeUnsupportedMediaType)
 
-	expectError(t, s.with(t, Alice, http.MethodGet, "/v1/workspaces", "",
+	expectError(t, s.with(t, Alice, http.MethodPost, "/v1/shares", body(grant(nil)),
 		map[string]string{"Accept": "text/csv"}), CodeNotAcceptable)
 
 	// A body far above what any route accepts is body_too_large and not a
-	// connection the server dropped.
-	huge := `{"owner":"me","slug":"` + strings.Repeat("x", 4<<20) + `"}`
-	r := s.do(t, request{method: http.MethodPost, path: "/v1/workspaces", subject: Alice,
+	// connection the server dropped. The size is carried by the one field
+	// whose values are a closed set, so a target that reads the body whole
+	// refuses the value and stores nothing.
+	huge := body(grant(fields{"permission": strings.Repeat("x", 4<<20)}))
+	r := s.do(t, request{method: http.MethodPost, path: "/v1/shares", subject: Alice,
 		body: strings.NewReader(huge), contentType: "application/json"})
 	failIf(t, r.status < 400, "a body of four megabytes on a JSON route was accepted")
 	code := r.code()
@@ -281,25 +305,22 @@ func case013BodiesAndTypes(t *testing.T, s *session) {
 	expectError(t, r, code)
 }
 
-// case013Planes: the two planes of spec 001 are the whole of what this
-// server serves. A path under a third prefix is refused with unknown_plane,
-// and a path that escapes its space is refused with invalid_path, so the two
-// are told apart and an operator reading the second learns the planes are
-// two and which.
+// case013Planes: the one plane of spec 001 is the whole of what this server
+// serves. A path under another prefix is refused with unknown_plane, and a
+// path that escapes its space is refused with invalid_path, so the two are
+// told apart and an operator reading the first learns which plane there is.
 func case013Planes(t *testing.T, s *session) {
 	bob := s.subject(t, Bob)
-	for _, plane := range []string{"files/" + s.run, "workspaces/" + s.run} {
-		r := s.call(t, Alice, http.MethodPost, "/v1/shares",
-			body(fields{"owner": "me", "path_prefix": plane, "grantee": bob, "permission": "read"}))
-		expectStatus(t, r, http.StatusCreated)
-		s.record("share "+str(r.json, "id"), func(t testing.TB) error {
-			s.call(t, Alice, http.MethodDelete, "/v1/shares/"+str(r.json, "id"), "")
-			return nil
-		})
-	}
-	for _, third := range []string{"repos/x", "memory/x", "secrets/x", "x"} {
+	r := s.call(t, Alice, http.MethodPost, "/v1/shares",
+		body(fields{"owner": "me", "path_prefix": "files/" + s.run, "grantee": bob, "permission": "read"}))
+	expectStatus(t, r, http.StatusCreated)
+	s.record("share "+str(r.json, "id"), func(t testing.TB) error {
+		s.call(t, Alice, http.MethodDelete, "/v1/shares/"+str(r.json, "id"), "")
+		return nil
+	})
+	for _, other := range []string{"repos/x", "memory/x", "secrets/x", "x"} {
 		expectError(t, s.call(t, Alice, http.MethodPost, "/v1/shares",
-			body(fields{"owner": "me", "path_prefix": third, "grantee": bob, "permission": "read"})), CodeUnknownPlane)
+			body(fields{"owner": "me", "path_prefix": other, "grantee": bob, "permission": "read"})), CodeUnknownPlane)
 	}
 	// A path that leaves its space, begins outside a plane, or holds a
 	// segment no path of this server may hold. A trailing slash is not one
@@ -311,6 +332,19 @@ func case013Planes(t *testing.T, s *session) {
 		failIf(t, r.status == http.StatusCreated, "a path that escapes its plane was accepted: %q", escaping)
 		expectError(t, r, r.code())
 	}
+}
+
+// absentID is an identifier in the shape a server mints one, a UUID, that
+// names nothing: drawn here, so no row of any installation holds it. A
+// reference that resolves to nothing is what not_found is about, and an
+// identifier that is well formed asks exactly that.
+func absentID() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	b[6] = b[6]&0x0f | 0x40
+	b[8] = b[8]&0x3f | 0x80
+	h := hex.EncodeToString(b[:])
+	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
 }
 
 // mustMarshal renders a decoded value back to JSON, so a case can assert

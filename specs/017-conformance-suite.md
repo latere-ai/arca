@@ -9,7 +9,7 @@ depends_on:
 affects: [test/conformance/, internal/auth/, internal/config/, .github/workflows/verify.yml, .github/workflows/release.yml, docs/]
 effort: large
 created: 2026-09-18
-updated: 2026-10-02
+updated: 2026-10-12
 author: changkun
 ---
 
@@ -38,6 +38,27 @@ URL the server handed it. Anything that needs a hand inside the
 installation is not a case here.
 
 ## Current state
+
+**Amended 2026-10-12 by [[028-one-tree]].** A space is one tree, so the
+`workspaces` group and its six cases are removed with the plane they
+drove, and so are the twelve routes under `/v1/workspaces` in the
+suite's surface, which is twenty-nine routes, and the five codes of
+[[013-api]]'s error table that only that plane answered: `slug_taken`,
+`writer_held`, `lease_not_held`, `manifest_incomplete` and
+`attachment_gone`. Six cases of [[028-one-tree]] join the groups that
+already held their kind of assertion: the folder delete and the folder
+copy in `files`, the answer's `limits.versions` and `limits.trash` in
+`usage`, a question that names two paths and the answer's `limits.omit`
+in `authorizer`, and the plane that is no longer served in `paths`. The
+suite is fifty-three cases in seventeen groups, the pending one
+included. The cases that read a principal's subject off the target
+create and revoke a grant where they created and deleted a workspace,
+and the cases of the events, errors and administration groups that wrote
+to the removed plane write objects and grants. The `codes` drift sends
+`path_taken` out as `not_found`, so the cases that refuse a live
+destination catch it: a move onto one, a restore onto one and a copy
+onto one. The Design below is amended in place, and the text of this
+section after this paragraph is the record of 2026-09-19.
 
 Built and in the tree on 2026-09-19. `test/conformance` holds the suite,
 `contract_test.go` under the `tiers` tag drives it, `make
@@ -275,7 +296,7 @@ type Options struct {
 	Token func(ctx context.Context, subject string) (string, error)
 	Admin string // the subject the target treats as an administrator
 
-	AuthorizerControl string // the stub authorizer's control URL; empty skips the deny, outage, and byte-limit cases
+	AuthorizerControl string // the stub authorizer's control URL; empty skips the deny, outage, and limit cases
 	Anonymous         bool   // the target serves public links to an unauthenticated caller
 	BucketDial        string // the address the bucket is reached at from where the suite runs; empty dials presigned URLs as given
 
@@ -299,10 +320,10 @@ instead of compiling.
 
 ### Isolation
 
-Every path, workspace slug, share, and link the run creates carries the
-prefix `arca-conformance-<run>-`, where `<run>` is
-drawn at start. The suite records the id of everything it creates and
-deletes exactly those ids at the end, never by prefix and never by
+Every path, share, and link the run creates carries the prefix
+`arca-conformance-<run>-`, where `<run>` is drawn at start. The suite
+records the id of everything it creates and deletes exactly those ids
+at the end, never by prefix and never by
 listing, so two runs against one installation touch nothing of each
 other's and a run against a live installation leaves the objects
 somebody else put there alone. A case that cannot delete what it made,
@@ -328,12 +349,17 @@ answers.
 Every group names its routes and the codes it provokes. A group whose
 input is empty skips with a reason in the report and never silently.
 
+**Amended 2026-10-12 ([[028-one-tree]]).** The `workspaces` row is
+removed, and the rows of `paths`, `files`, `usage`, `authorizer` and
+`errors` name what [[028-one-tree]] adds to each, its cases by their
+function names. The table had eighteen rows before.
+
 | Group | Proves | Routes and codes | From |
 |---|---|---|---|
 | identity | a request with no bearer, an expired one, one from an issuer the target does not list, and one whose audience is not `arca` are each refused with `unauthenticated`; a request for another principal's space is `not_found` and never `forbidden` (invariant 6); an action a principal may not take on its own space is `forbidden` | every route; `unauthenticated`, `forbidden`, `not_found` | 001, [[006-identity]] |
-| authorizer | under `AuthorizerControl`: a flipped deny refuses before lookup, an authorizer that is unreachable refuses every request with `authorizer_unavailable` and never allows, and a target with no authorizer configured applies the owner policy, which the same cases assert by their answers | every route; `authorizer_unavailable` | 001, [[006-identity]] |
-| paths | the two planes of [[001-architecture]] answer under their prefixes and a path under a third prefix is refused; a path that escapes its space is refused; a name the object model forbids is `invalid_field` | the file routes; `invalid_path`, `invalid_field` | 001, [[005-files]] |
-| files | put, get, head, list, move, delete over the `files/` plane; the ETag and the checksum the server returns match the bytes sent; a conditional put with `If-None-Match: *` creates once and is refused the second time; a move leaves the ETag equal, which is invariant 8 seen from outside | the file routes; `already_exists`, `not_found` | 005, 003 |
+| authorizer | under `AuthorizerControl`: a flipped deny refuses before lookup, an authorizer that is unreachable refuses every request with `authorizer_unavailable` and never allows, and a target with no authorizer configured applies the owner policy, which the same cases assert by their answers; under the stub's grants mode, a move and a copy are refused to a grantee whose grant covers one of their two paths and admitted to one whose grant covers both (`case028BothEnds`); with `limits.omit` on every answer to one subject, nothing under the omitted prefix is in that subject's listing, manifest, trash, stars, log, grants or links, a folder delete and a folder copy leave it where it is and out of their counts, a page of the log moves past an omitted event, an object inside it is still read, a second subject reads the space whole, and an entry that is not a path under `files/` is `storage_unavailable` (`case028Omit`) | every route; `authorizer_unavailable`, `storage_unavailable` | 001, [[006-identity]], [[028-one-tree]] |
+| paths | the one plane of [[001-architecture]] answers under its prefix and a path under another prefix is refused, `workspaces/` included, and nothing is registered under `/v1/workspaces` (`case028NoSecondPlane`); a path that escapes its space is refused; a name the object model forbids is `invalid_field` | the file routes; `invalid_path`, `invalid_field`, `unknown_plane` | 001, [[005-files]], [[028-one-tree]] |
+| files | put, get, head, list, move, delete over the `files/` plane; the ETag and the checksum the server returns match the bytes sent; a conditional put with `If-None-Match: *` creates once and is refused the second time; a move leaves the ETag equal, which is invariant 8 seen from outside; a folder delete trashes the subtree and nothing beside it, a permanent one leaves nothing, a folder with nothing under it is `204` twice, and the plane root is `invalid_path` (`case028FolderDelete`); a folder copy is readable at both ends, a live destination refuses the whole copy, a destination inside the source is refused, and the log records one `copy` (`case028FolderCopy`) | the file routes; `path_taken`, `not_found`, `invalid_path`, `invalid_field`, `exclusive_fields` | 005, 003, [[028-one-tree]] |
 | bytes | an object below the inline threshold streams through the server, one above it answers a redirect; the redirect names one object and one method, is refused after its expiry, and is refused for a second object; this is invariant 4 seen from outside | `GET` on a file; `not_found` on the expired URL from the store | 001, [[003-object-store]] |
 | versions | a second put makes a version, the list is ordered, an old version is readable and restorable, and a delete of the current version does not delete the history | the version routes | 005 |
 | trash | a delete moves an object to trash, a trashed object is absent from the listing and readable from the trash route, a restore returns it to its path, a purge removes it, and a purge of an object another case starred clears the star | the trash routes; `not_found` | 005 |
@@ -341,12 +367,11 @@ input is empty skips with a reason in the report and never silently.
 | uploads | a session above the part size, part URLs used directly against the bucket, completion with the part ETags, a completion with a part missing refused, an abort, a session that is not completed expiring, and a declared size above `ARCA_MAX_UPLOAD_BYTES` refused at creation | the upload routes; `too_large`, `invalid_field`, `not_found` | [[007-uploads]] |
 | shares | each rung of the permission ladder grants what it names and nothing above it, a grant is revocable, a revoked grant takes effect on the next request, and the shared-with-me listing shows the grant to the grantee and to nobody else | the share routes; `forbidden`, `not_found` | [[008-shares-and-links]] |
 | links | a public link serves the object to an unauthenticated caller when `Anonymous` is set, an expired link is refused, a revoked link is refused, and a link to an object whose grant was revoked is refused | the link routes | 008 |
-| workspaces | two attaches yield one lease and the second is refused, which is invariant 7 seen from outside; a renew extends it, a release ends it, a lease expires without a renew, and materialize and sync round-trip a subtree byte for byte | the workspace routes; `lease_held`, `lease_expired` | [[009-workspaces]] |
 | conditional writes | a conditional write with the current ETag applies, one with a stale ETag is refused, a create-only write onto an existing path is refused, and a write with neither header succeeds on every path | the file routes; `precondition_failed` | [[005-files]], [[013-api]] |
-| usage | under `AuthorizerControl`, with a byte limit on the answer: a write that would cross it is refused and the object does not appear, a delete frees room and the same write then succeeds, and with no limit on the answer no write is refused for size; under `Admin`, the overview's `bytes` for the space equals the sum of what the run put | the file routes and the overview; `quota_exceeded` | [[010-events-and-reaper]] |
+| usage | under `AuthorizerControl`, with a byte limit on the answer: a write that would cross it is refused and the object does not appear, a delete frees room and the same write then succeeds, and with no limit on the answer no write is refused for size; under `Admin`, the overview's `bytes` for the space equals the sum of what the run put; an overwrite under `limits.versions: false` keeps no version, a delete under `limits.trash: false` is permanent, and a member that is not a boolean is `storage_unavailable` with nothing written (`case028Limits`) | the file routes, the trash routes and the overview; `quota_exceeded`, `storage_unavailable` | [[010-events-and-reaper]], [[028-one-tree]] |
 | events | every mutation the run makes appears on the event cursor, in the order the run made them, with the cursor resumable from a saved position; no event of another principal's space appears; a token value planted in a file name appears in no event | the event routes | 010 |
 | administration | under `Admin`: the overview pages one row per space with its usage, a restore returns an object from another space, an administrator's own moderation delete appears on that space's event tail marked `admin`, and each of those is refused with `not_found` for a non-administrator | the two admin routes, the file routes, the event routes; `forbidden`, `not_found` | [[012-administration]] |
-| errors | every code of [[013-api]]'s table the suite can provoke arrives with the status and the sentence that table fixes, and the two public documents answer without a bearer | every route | 013 |
+| errors | every code of [[013-api]]'s table the suite can provoke arrives with the status and the sentence that table fixes, and the two public documents answer without a bearer. `too_many_objects` is recorded as unprovoked: provoking it writes ten thousand and one objects into the target | every route | 013 |
 
 ### The invariants this suite can see
 
@@ -358,7 +383,7 @@ input is empty skips with a reason in the report and never silently.
 | 4, bytes off the hot path | the `bytes` group | asserted |
 | 5, verify and ask | the `identity` and `authorizer` groups | asserted |
 | 6, a refused object answers as a missing one | the `identity` group | asserted |
-| 7, one writer per workspace | the `workspaces` group | asserted |
+| 7, retired by [[028-one-tree]] on 2026-10-12 with the plane it was about | no group | the number is not reused |
 | 8, the key is not the path | the `files` group's move case: the ETag survives the move | asserted |
 | 9, no cloud SDK, no Kubernetes client | a build-list property | the `depcheck` gate |
 | 10, nothing Latere in the tree | a tree property | the `identity` gate |
@@ -448,10 +473,10 @@ from an empty directory.
 
 `ARCA_TEST_DRIFT`, a variable that joins the table of
 [[002-repository-scaffold]], names one case the server is to answer
-wrong: with `paths` set, `arcad` accepts a fifth path prefix that is
-not a plane; with `codes` set, one route answers `404` where
-[[013-api]] fixes `409`; with `etag` set, a move returns a fresh ETag
-instead of the one the object had. Every value makes the server refuse
+wrong: with `paths` set, `arcad` accepts a path prefix that is not the
+plane; with `codes` set, the one row of [[013-api]]'s table at `409`,
+`path_taken`, goes out as `404` `not_found`; with `etag` set, a move
+returns a fresh ETag instead of the one the object had. Every value makes the server refuse
 something it should serve or answer with the wrong shape, and no value
 grants an authority the server would otherwise withhold, so a seam set
 by accident on a real installation is a visible defect and never a way
@@ -487,7 +512,7 @@ wrote.
 | `drive/test/e2e/faults_test.go`, `targeted_faults_test.go`, `multipart_faults_test.go`, `versions_faults_test.go`, `visibility_faults_test.go`, `errmap_faults_test.go` | the e2e tier's, not this suite's. They cut the bucket or the pool underneath a request, which no caller outside the installation can do. Invariants 1 and 2 are proved there |
 | `drive/test/e2e/openapi_conformance_test.go` | the `errors` group: the served document and the handlers agree on every code and status |
 | `drive/test/e2e/audience_test.go`, `roles_test.go` | the `identity` group, plus the in-process audience suite above |
-| `drive/test/e2e/mount_conformance_test.go` | the `workspaces` group's materialize and sync cases, without the filesystem mount the service ran for its own client |
+| `drive/test/e2e/mount_conformance_test.go` | the `workspaces` group's materialize and sync cases, without the filesystem mount the service ran for its own client. **Amended 2026-10-12:** removed with that group by [[028-one-tree]]; a folder read as a manifest is `case005Materialize` |
 
 ## Not in this spec
 
@@ -516,6 +541,23 @@ in the release pipeline and a temporary module rather than a case here
 | 9 | This release's suite passes against this release's published image, with no route in the pending group | the same `conformance` job and the same two runs; a failed case, the pending group included, stops the release ([[016-release-and-installation]]). Running the **previous** release's suite against this release's binary was this criterion's first form and is [[024-conformance-against-a-published-release]], which carries it verbatim: the previous tag's driver imports this repository's stub packages, so the step is a temporary module and a release-only run rather than an edit here |
 
 ## Outcome
+
+**Amended 2026-10-12 by [[028-one-tree]].** The suite holds no case of
+[[009-workspaces]]: the `workspaces` group, its six cases, the twelve
+routes of the surface and the five codes of the error table only that
+plane answered are removed, and every case that used the plane as a
+fixture drives a route that exists. Six cases prove [[028-one-tree]] on
+the wire: `case028FolderDelete`, `case028FolderCopy`, `case028Limits`,
+`case028BothEnds`, `case028Omit` and `case028NoSecondPlane`. The surface
+is twenty-nine routes, twenty-two of the twenty-six rows of the error
+table are provoked by a case and four are recorded as unprovoked with
+the reason, and `TestSuiteCatchesADrift` expects the `codes` drift in the
+three cases that refuse a live destination. `make test-conformance`
+against the compose stack on 2026-10-12 logged `53 passed, 0 failed, 0
+skipped, 96 objects created and deleted`, with `TestSuiteCatchesADrift`,
+`TestConcurrentRuns` and `TestTheSuiteReachesNoHelperOfThisTree` green
+beside it; no release run has measured this suite yet. The text below
+this paragraph is the record of 2026-09-19.
 
 Complete on 2026-09-19. `test/conformance` is in the tree with
 fifty-three cases across eighteen groups, `contract_test.go` under the

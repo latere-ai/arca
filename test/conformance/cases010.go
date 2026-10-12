@@ -17,7 +17,7 @@ import (
 
 func cases010() []testCase {
 	events := []string{"GET /v1/events"}
-	writes := []string{"GET /v1/events", "POST /v1/workspaces", "DELETE /v1/workspaces/{id}"}
+	writes := []string{"GET /v1/events", "PUT /v1/files/{owner}/{path...}", "DELETE /v1/files/{owner}/{path...}"}
 	return []testCase{
 		{name: "Tail", group: GroupEvents, routes: writes, run: case010Tail},
 		{name: "Cursor", group: GroupEvents, routes: writes, run: case010Cursor},
@@ -59,11 +59,12 @@ func (s *session) tail(t *testing.T, principal, cursor string) ([]map[string]any
 func case010Tail(t *testing.T, s *session) {
 	before, cursor := s.tail(t, Alice, "")
 	_ = before
-	first := s.workspace(t, Alice, "tail-one")
-	second := s.workspace(t, Alice, "tail-two")
+	first, second := s.filePath("tail-one.txt"), s.filePath("tail-two.txt")
+	expectAWrite(t, s.put(t, Alice, first, "one\n", "text/plain"))
+	expectAWrite(t, s.put(t, Alice, second, "two\n", "text/plain"))
 
 	after, _ := s.tail(t, Alice, cursor)
-	failIf(t, len(after) < 2, "two workspaces were created and the log gained %d entries", len(after))
+	failIf(t, len(after) < 2, "two objects were written and the log gained %d entries", len(after))
 	for _, e := range after {
 		failIf(t, str(e, "action") == "", "an event names no action: %v", e)
 		failIf(t, str(e, "owner") == "", "an event names no owner: %v", e)
@@ -74,25 +75,25 @@ func case010Tail(t *testing.T, s *session) {
 	// oldest first.
 	firstAt, secondAt := -1, -1
 	for i, e := range after {
-		if strings.Contains(string(mustMarshal(t, e)), str(first, "slug")) {
+		if str(e, "path") == first {
 			firstAt = i
 		}
-		if strings.Contains(string(mustMarshal(t, e)), str(second, "slug")) {
+		if str(e, "path") == second {
 			secondAt = i
 		}
 	}
-	if firstAt >= 0 && secondAt >= 0 {
-		failIf(t, firstAt > secondAt, "the log answers the second write before the first; spec 013 tails oldest first")
-	}
+	failIf(t, firstAt < 0 || secondAt < 0,
+		"the log holds no event at %q or none at %q, and a write a caller made is on its space's log", first, second)
+	failIf(t, firstAt > secondAt, "the log answers the second write before the first; spec 013 tails oldest first")
 }
 
 // case010Cursor: a cursor saved from one page resumes the tail exactly
 // where it stopped, which is what a consumer tailing a log relies on, and
 // next_cursor is absent on the last page rather than repeated.
 func case010Cursor(t *testing.T, s *session) {
-	s.workspace(t, Alice, "cursor-one")
+	expectAWrite(t, s.put(t, Alice, s.filePath("cursor-one.txt"), "one\n", "text/plain"))
 	_, at := s.tail(t, Alice, "")
-	s.workspace(t, Alice, "cursor-two")
+	expectAWrite(t, s.put(t, Alice, s.filePath("cursor-two.txt"), "two\n", "text/plain"))
 
 	resumed, _ := s.tail(t, Alice, at)
 	for _, e := range resumed {
@@ -114,8 +115,8 @@ func case010Cursor(t *testing.T, s *session) {
 // A consumer tailing its own log learning what happened in somebody else's
 // is the same leak as reading their objects.
 func case010OneSpace(t *testing.T, s *session) {
-	made := s.workspace(t, Alice, "one-space")
-	mine := str(made, "slug")
+	mine := s.filePath("one-space.txt")
+	expectAWrite(t, s.put(t, Alice, mine, "one space\n", "text/plain"))
 
 	page := s.call(t, Bob, http.MethodGet, "/v1/events?owner=me&limit=1000", "")
 	if page.status != http.StatusOK {
@@ -127,7 +128,7 @@ func case010OneSpace(t *testing.T, s *session) {
 	for _, e := range list(page.json, "entries") {
 		failIf(t, str(e, "owner") == alice, "an event of another principal's space is on this caller's log: %v", e)
 		failIf(t, strings.Contains(string(mustMarshal(t, e)), mine),
-			"an event naming another space's workspace is on this caller's log: %v", e)
+			"an event naming another space's object is on this caller's log: %v", e)
 	}
 }
 
@@ -135,15 +136,8 @@ func case010OneSpace(t *testing.T, s *session) {
 // into the log as anything but that name. The log is read by a consumer and
 // kept, so a token that reached it once is a token that leaked.
 func case010NoSecretInAName(t *testing.T, s *session) {
-	planted := s.name("plant-" + strings.Repeat("z", 8))
-	r := s.call(t, Alice, http.MethodPost, "/v1/workspaces", body(fields{"owner": "me", "slug": planted}))
-	if r.status == http.StatusCreated {
-		id := str(r.json, "id")
-		s.record("workspace "+id, func(t testing.TB) error {
-			s.call(t, Alice, http.MethodDelete, "/v1/workspaces/"+id, "")
-			return nil
-		})
-	}
+	planted := s.filePath("plant-" + strings.Repeat("z", 8) + ".txt")
+	expectAWrite(t, s.put(t, Alice, planted, "planted\n", "text/plain"))
 	entries, _ := s.tail(t, Alice, "")
 	for _, e := range entries {
 		raw := string(mustMarshal(t, e))
@@ -165,6 +159,13 @@ func case010QuotaExceeded(t *testing.T, s *session) {
 			"the target does not serve "+strings.Join(waiting, ", ")+", which the pending group reports")
 		return
 	}
+	// The limit reaches the target on its authorizer's answer, so a run with
+	// no stub to put one there has no way to make the target refuse.
+	if s.options.AuthorizerControl == "" {
+		s.unverifiable(t, "a write past the answer's quota_bytes is refused with quota_exceeded",
+			"Options.AuthorizerControl is not set, so no answer of this target's authorizer carries a limit the suite chose")
+		return
+	}
 	s.quota(t, 1)
 	defer s.setRules(t)
 	path := "files/" + s.name("quota.txt")
@@ -182,6 +183,7 @@ func case010NoLimitNoRefusal(t *testing.T, s *session) {
 		s.quota(t, -1)
 		defer s.setRules(t)
 	}
-	made := s.workspace(t, Alice, "no-limit")
-	failIf(t, str(made, "id") == "", "a write was refused with no limit on the answer")
+	written := s.put(t, Alice, s.filePath("no-limit.txt"), strings.Repeat("x", 4096), "text/plain")
+	failIf(t, written.status != http.StatusOK && written.status != http.StatusCreated,
+		"a write was refused with no limit on the answer: %d %s", written.status, written.body)
 }

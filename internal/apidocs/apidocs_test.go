@@ -96,11 +96,11 @@ func TestAPathTemplateIsNotTheRoutersSpelling(t *testing.T) {
 // method and the path, so rewording a summary does not move them.
 func TestAnOperationIdIsStable(t *testing.T) {
 	cases := map[string]string{
-		"/v1/files/{owner}/{path...}":            "getV1FilesByOwnerByPath",
-		"/v1/shares/links/{token}/meta":          "getV1SharesLinksByTokenMeta",
-		"/v1/workspaces/{id}/attach/{aid}/renew": "getV1WorkspacesByIdAttachByAidRenew",
-		"/v1/admin/spaces/{owner}/restore":       "getV1AdminSpacesByOwnerRestore",
-		"/v1/shares/with-me":                     "getV1SharesWithMe",
+		"/v1/files/{owner}/{path...}":              "getV1FilesByOwnerByPath",
+		"/v1/shares/links/{token}/meta":            "getV1SharesLinksByTokenMeta",
+		"/v1/shares/links/{token}/files/{path...}": "getV1SharesLinksByTokenFilesByPath",
+		"/v1/admin/spaces/{owner}/restore":         "getV1AdminSpacesByOwnerRestore",
+		"/v1/shares/with-me":                       "getV1SharesWithMe",
 	}
 	for path, want := range cases {
 		if got := operationID(Route{Method: http.MethodGet, Path: path}); got != want {

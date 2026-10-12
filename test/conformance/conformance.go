@@ -22,8 +22,8 @@
 // signed host, rather than rewriting the URL, which would hand the store a
 // signature over a host it never saw.
 //
-// Every path, workspace slug, share and link a run creates carries the
-// prefix arca-conformance-<run>-, where <run> is drawn at start. The run
+// Every path, share and link a run creates carries the prefix
+// arca-conformance-<run>-, where <run> is drawn at start. The run
 // records the id of everything it creates and deletes exactly those ids at
 // the end, never by prefix and never by listing, so two runs against one
 // installation touch nothing of each other's and a run against a live
@@ -78,8 +78,10 @@ type Options struct {
 	Admin string
 
 	// AuthorizerControl is the stub authorizer's control URL, the shared
-	// control API of latere.ai/x/pkg/authz/stub. Empty skips the deny, the
-	// outage and the byte limit cases.
+	// control API of latere.ai/x/pkg/authz/stub. Empty skips the authorizer
+	// group, which holds the deny, the outage, the grant and the omission
+	// cases, and the limit cases of the usage group record what they could
+	// not verify.
 	AuthorizerControl string
 	// Anonymous reports that the target serves public links to an
 	// unauthenticated caller. Empty skips the anonymous half of the links
@@ -134,7 +136,6 @@ const (
 	GroupUploads       = "uploads"
 	GroupShares        = "shares"
 	GroupLinks         = "links"
-	GroupWorkspaces    = "workspaces"
 	GroupConditional   = "conditional-writes"
 	GroupUsage         = "usage"
 	GroupEvents        = "events"
@@ -151,8 +152,8 @@ const (
 var Groups = []string{
 	GroupIdentity, GroupAuthorizer, GroupPaths, GroupFiles, GroupBytes,
 	GroupVersions, GroupTrash, GroupStars, GroupUploads, GroupShares,
-	GroupLinks, GroupWorkspaces, GroupConditional, GroupUsage, GroupEvents,
-	GroupAdministraton, GroupErrors, GroupPending,
+	GroupLinks, GroupConditional, GroupUsage, GroupEvents, GroupAdministraton,
+	GroupErrors, GroupPending,
 }
 
 // Prefix begins the name of everything a run creates, ahead of the run's own
@@ -204,9 +205,9 @@ func cases() []specCases {
 		{"005", cases005()},
 		{"007", cases007()},
 		{"008", cases008()},
-		{"009", cases009()},
 		{"010", cases010()},
 		{"012", cases012()},
+		{"028", cases028()},
 		{"017", []testCase{{name: "Pending", group: GroupPending, run: case017Pending}}},
 	}
 }
@@ -235,7 +236,7 @@ type session struct {
 
 // created is one object a run made, with what it takes to delete it.
 type created struct {
-	// what names the resource for the report: "workspace 01J8...".
+	// what names the resource for the report: "share 01J8...".
 	what string
 	// remove deletes it. It answers an error the cleanup reports and the
 	// run does not fail on, because a target that refuses a delete has
@@ -443,13 +444,13 @@ func (s *session) record(what string, remove func(t testing.TB) error) {
 }
 
 // cleanup deletes everything the run created, newest first, and answers what
-// it made. Newest first because a workspace created inside a space is
-// deleted before the objects a case put beside it, and a delete that fails
-// is reported and never retried past its own budget.
+// it made. Newest first because a grant or a link on a subtree is revoked
+// before the objects a case put under it are deleted, and a delete that
+// fails is reported and never retried past its own budget.
 func (s *session) cleanup(t testing.TB) []string {
 	t.Helper()
 	// The last case's deadline is spent by now, and a delete sent on a
-	// cancelled context would report a failure the target did not make.
+	// canceled context would report a failure the target did not make.
 	s.setContext(context.WithoutCancel(t.Context()))
 	s.mu.Lock()
 	made := slices.Clone(s.created)

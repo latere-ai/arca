@@ -22,9 +22,9 @@ import (
 func cases006() []testCase {
 	events := []string{"GET /v1/events"}
 	// Reading what the target calls a principal takes a resource whose
-	// answer renders the owner in full, which is a workspace: the cases that
+	// answer renders the owner in full, which is a grant: the cases that
 	// name a second space drive those rows too.
-	named := []string{"GET /v1/events", "POST /v1/workspaces", "DELETE /v1/workspaces/{id}"}
+	named := []string{"GET /v1/events", "POST /v1/shares", "DELETE /v1/shares/{id}"}
 	return []testCase{
 		{name: "NoBearer", group: GroupIdentity, routes: events,
 			codes: []string{CodeUnauthenticated}, run: case006NoBearer},
@@ -322,18 +322,31 @@ func (s *session) subject(t testing.TB, principal string) string {
 	if held {
 		return known
 	}
-	// A workspace names its owner, and me resolves to the caller, so one
-	// create and one delete answer what the target calls this principal.
-	r := s.call(t, principal, http.MethodPost, "/v1/workspaces",
-		body(fields{"owner": "me", "slug": s.name("who-" + principal)}))
-	failIf(t, r.status != http.StatusCreated, "read the subject of %q: POST /v1/workspaces answered %d: %s", principal, r.status, r.body)
-	id, owner := str(r.json, "id"), str(r.json, "owner")
-	failIf(t, owner == "", "the workspace answers no owner, and spec 013 renders a subject in full: %s", r.body)
-	_ = s.call(t, principal, http.MethodDelete, "/v1/workspaces/"+id, "")
+	r := s.whoAmI(t, principal)
+	failIf(t, r.status != http.StatusCreated, "read the subject of %q: POST /v1/shares answered %d: %s", principal, r.status, r.body)
+	owner := str(r.json, "owner")
+	failIf(t, owner == "", "the grant answers no owner, and spec 013 renders a subject in full: %s", r.body)
 	s.mu.Lock()
 	s.subjects[principal] = owner
 	s.mu.Unlock()
 	return owner
+}
+
+// whoAmI makes one grant in the principal's own space and revokes it. A
+// grant names its owner, and me resolves to the caller, so the answer to
+// the create is what the target calls this principal. The grant covers a
+// subtree of the run's own name that holds nothing and goes to a subject no
+// principal has, so it shares nothing with anybody for the moment it lives.
+func (s *session) whoAmI(t testing.TB, principal string) response {
+	t.Helper()
+	r := s.call(t, principal, http.MethodPost, "/v1/shares", body(fields{
+		"owner": "me", "path_prefix": s.grantPrefix("who-" + principal),
+		"grantee": s.absentSubject(), "permission": "read",
+	}))
+	if id := str(r.json, "id"); r.status == http.StatusCreated && id != "" {
+		s.call(t, principal, http.MethodDelete, "/v1/shares/"+id, "")
+	}
+	return r
 }
 
 // warm reads what the target calls each principal before any case runs, so
@@ -342,12 +355,11 @@ func (s *session) subject(t testing.TB, principal string) string {
 // unread, and the cases that need one fail on their own rather than on this.
 func (s *session) warm(t *testing.T) {
 	t.Helper()
-	if !s.served.serves("POST /v1/workspaces") {
+	if !s.served.serves("POST /v1/shares") {
 		return
 	}
 	for _, principal := range []string{Alice, Bob} {
-		r := s.call(t, principal, http.MethodPost, "/v1/workspaces",
-			body(fields{"owner": "me", "slug": s.name("who-" + principal)}))
+		r := s.whoAmI(t, principal)
 		if r.status != http.StatusCreated {
 			continue
 		}
@@ -356,7 +368,6 @@ func (s *session) warm(t *testing.T) {
 			s.subjects[principal] = owner
 			s.mu.Unlock()
 		}
-		s.call(t, principal, http.MethodDelete, "/v1/workspaces/"+str(r.json, "id"), "")
 	}
 }
 

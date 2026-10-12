@@ -52,7 +52,7 @@ var (
 	flagToken      = flag.String("token", os.Getenv("ARCA_TEST_TOKEN"), "a bearer for the first principal, for a target with no stub issuer")
 	flagTokenBob   = flag.String("token-bob", os.Getenv("ARCA_TEST_TOKEN_BOB"), "a bearer for the second principal")
 	flagAdmin      = flag.String("admin", os.Getenv("ARCA_TEST_ADMIN"), "the subject the target treats as an administrator; empty skips the administration group")
-	flagAuthorizer = flag.String("authorizer", os.Getenv("ARCA_TEST_AUTHORIZER_URL"), "the stub authorizer's control URL; empty skips the deny, outage and byte limit cases")
+	flagAuthorizer = flag.String("authorizer", os.Getenv("ARCA_TEST_AUTHORIZER_URL"), "the stub authorizer's control URL; empty skips the deny, outage, grant, omission and limit cases")
 	flagAnonymous  = flag.Bool("anonymous", os.Getenv("ARCA_TEST_ANONYMOUS") != "", "the target serves public links to an unauthenticated caller")
 	// The bucket is the one host the suite reaches that the target names
 	// rather than serves, and a presigned URL is signed over that name. A
@@ -245,9 +245,13 @@ func TestSuiteCatchesADrift(t *testing.T) {
 			"013/Planes":     {"POST /v1/shares"},
 			"013/ErrorTable": {"POST /v1/shares"},
 		}},
+		// The codes drift sends path_taken out as not_found, so every case
+		// that makes the target refuse a live destination catches it: a
+		// move onto one, a restore onto one, and a copy onto one.
 		{"codes", map[string][]string{
-			"009/SlugTaken":  {"POST /v1/workspaces"},
-			"013/ErrorTable": {"POST /v1/workspaces"},
+			"005/MoveKeepsTheETag": {"POST /v1/files/{owner}/{path...}"},
+			"013/ErrorTable":       {"POST /v1/trash/restore"},
+			"028/FolderCopy":       {"POST /v1/files/{owner}/{path...}"},
 		}},
 		// The etag drift reaches the validator a route answers, so the
 		// cases that read one catch it. The version history is not one of

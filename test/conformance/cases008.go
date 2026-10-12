@@ -20,10 +20,9 @@ func cases008() []testCase {
 	links := []string{"POST /v1/shares/links", "GET /v1/shares/links", "DELETE /v1/shares/links/{id}"}
 	redeem := []string{"GET /v1/shares/links/{token}/meta", "GET /v1/shares/links/{token}"}
 	return []testCase{
-		{name: "Grant", group: GroupShares, routes: append(append([]string{}, shares...),
-			"POST /v1/workspaces", "DELETE /v1/workspaces/{id}"), run: case008Grant},
+		{name: "Grant", group: GroupShares, routes: shares, run: case008Grant},
 		{name: "WithMe", group: GroupShares, routes: append(append([]string{}, shares...),
-			"GET /v1/shares/with-me", "POST /v1/workspaces", "DELETE /v1/workspaces/{id}"), run: case008WithMe},
+			"GET /v1/shares/with-me"), run: case008WithMe},
 		{name: "Ladder", group: GroupShares, routes: shares,
 			codes: []string{CodeInvalidField, CodeUnknownPlane}, run: case008Ladder},
 		{name: "Link", group: GroupLinks, routes: append(append([]string{}, links...), redeem...),
@@ -130,9 +129,9 @@ func case008Ladder(t *testing.T, s *session) {
 	failIf(t, refused.status == http.StatusCreated, "a permission outside the ladder was granted")
 	expectError(t, refused, CodeInvalidField)
 
-	// A prefix under no plane is not a subtree of this space, and the two
-	// refusals are told apart so an operator reading the second learns the
-	// planes are two.
+	// A prefix outside the plane is not a subtree of this space, and it is
+	// refused with a code of its own, so an operator reading it learns the
+	// path was a path and the plane was the fault.
 	outside := s.call(t, Alice, http.MethodPost, "/v1/shares",
 		body(fields{"owner": "me", "path_prefix": "secrets/" + s.run, "grantee": bob, "permission": "read"}))
 	expectError(t, outside, CodeUnknownPlane)

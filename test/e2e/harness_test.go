@@ -332,7 +332,7 @@ func (l *lines) String() string {
 
 // The helpers every tier of this package drives the installation through:
 // one request, one request held to its status, the stub's one rule, the two
-// stores a tier seeds through, and a presigned URL fetched the way a sandbox
+// stores a tier seeds through, and a presigned URL fetched the way a client
 // fetches one. They are here rather than beside the tier that first needed
 // them, so the tier of the next spec drives the same installation the same
 // way.
@@ -417,7 +417,7 @@ func (i *installation) allowEverything() {
 }
 
 // bucket opens the run's own bucket, for seeding and for reading back what a
-// sync removed.
+// delete removed.
 func (i *installation) bucket(t *testing.T) blob.Store {
 	t.Helper()
 	b, err := blob.NewS3(t.Context(), blob.Options{
@@ -459,65 +459,18 @@ func (i *installation) put(t *testing.T, db *store.DB, path, content string) see
 	if err != nil {
 		t.Fatalf("seed %q: %v", path, err)
 	}
-	return i.row(t, db, path, id, written.SHA256, int64(len(content)), object.ChecksumSHA256, []byte(content))
-}
-
-// putInParts writes one object as a multipart upload and the row that names
-// it. Such an object carries the store's composite label rather than a
-// digest of its bytes, and a key the path does not predict, which is the
-// case materialize has to presign from the row.
-func (i *installation) putInParts(t *testing.T, db *store.DB, path, content string) seeded {
-	t.Helper()
-	b := i.bucket(t)
-	id := object.NewID()
-	key := id.Key(i.prefix)
-	upload, err := b.CreateMultipart(t.Context(), key, blob.PutOptions{})
-	if err != nil {
-		t.Fatalf("open the multipart upload: %v", err)
-	}
-	url, err := b.PresignPart(t.Context(), key, upload, 1)
-	if err != nil {
-		t.Fatalf("sign the part: %v", err)
-	}
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodPut, url, strings.NewReader(content))
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.ContentLength = int64(len(content))
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("send the part: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("the part answered %d: %s", resp.StatusCode, body)
-	}
-	etag := strings.Trim(resp.Header.Get("ETag"), `"`)
-	assembled, err := b.CompleteMultipart(t.Context(), key, upload, []blob.Part{{Number: 1, ETag: etag}})
-	if err != nil {
-		t.Fatalf("assemble the parts: %v", err)
-	}
-	if !strings.Contains(assembled.ETag, "-") {
-		t.Fatalf("the assembled object's label is %q, which is not a composite", assembled.ETag)
-	}
-	return i.row(t, db, path, id, assembled.ETag, int64(len(content)), object.ChecksumETag, []byte(content))
-}
-
-// row writes the metadata half of a seeded object.
-func (i *installation) row(t *testing.T, db *store.DB, path string, id object.ID, checksum string, size int64, kind object.ChecksumKind, content []byte) seeded {
-	t.Helper()
+	size := int64(len(content))
 	created, err := store.NewFiles().Insert(t.Context(), db.Querier(), store.File{
 		Owner: i.subject(), Path: path, ObjectID: id, CreatedBy: i.subject(),
-		SizeBytes: size, Checksum: checksum, ChecksumKind: kind,
+		SizeBytes: size, Checksum: written.SHA256, ChecksumKind: object.ChecksumSHA256,
 	})
 	if err != nil || !created {
 		t.Fatalf("seed the row for %q: %v, %v", path, created, err)
 	}
-	return seeded{path: path, id: id, checksum: checksum, size: size, bytes: content}
+	return seeded{path: path, id: id, checksum: written.SHA256, size: size, bytes: []byte(content)}
 }
 
-// fetch reads a presigned URL the way a sandbox does: straight from the
+// fetch reads a presigned URL the way a client does: straight from the
 // bucket, with no bearer of Arca's.
 func fetch(t *testing.T, url string) (int, []byte) {
 	t.Helper()
