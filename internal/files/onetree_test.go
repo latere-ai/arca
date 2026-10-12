@@ -1014,3 +1014,47 @@ func TestACopyNeedsAGrantOnBothEnds(t *testing.T) {
 		}
 	}
 }
+
+// TestBytesTheFolderOperationsCannotRemoveAreLeftForTheReaper: the rows are
+// gone or never written when a folder delete or a refused copy drops bytes,
+// so a request that ended, a reference check that will not answer, and a
+// bucket that will not delete each leave keys nothing points at, which the
+// reaper's first pass collects, and none of them fails the request.
+func TestBytesTheFolderOperationsCannotRemoveAreLeftForTheReaper(t *testing.T) {
+	h := newHarness(t)
+	row := h.write(t, "files/notes/a.md", "aaaa")
+	ended, cancel := context.WithCancel(t.Context())
+	cancel()
+	h.service.dropMany(ended, []object.ID{row.ObjectID})
+	if _, held := h.objects.Bytes(row.ObjectID.Key("arca/")); !held {
+		t.Error("a request that had ended removed bytes")
+	}
+
+	h.store.failWrite = errOutage
+	h.service.dropMany(t.Context(), []object.ID{row.ObjectID})
+	if _, held := h.objects.Bytes(row.ObjectID.Key("arca/")); !held {
+		t.Error("bytes went while the reference check could not answer")
+	}
+	h.store.failWrite = nil
+
+	// A row still names the object, so nothing is asked of the bucket.
+	before := h.bucket.Calls(blob.MethodDeleteMany)
+	h.service.dropMany(t.Context(), []object.ID{row.ObjectID})
+	if h.bucket.Calls(blob.MethodDeleteMany) != before {
+		t.Error("bytes a row still names were offered to the bucket")
+	}
+
+	// A copy refused after the bucket wrote its keys deletes them, and a
+	// bucket that will not delete leaves them for the reaper.
+	refused := newHarness(t)
+	folderOf(t, refused)
+	refused.seed(t, "files/reports/deep/b.md", "taken")
+	keys := len(refused.objects.Keys())
+	refused.bucket.FailNth(blob.MethodDeleteMany, 1, errOutage)
+	if got := code(t, refused.post(t, "files/notes", `{"copy_to":"files/reports","recursive":true}`)); got != api.CodePathTaken {
+		t.Fatalf("the copy is %q", got)
+	}
+	if got := len(refused.objects.Keys()); got != keys+2 {
+		t.Errorf("a refused copy whose keys could not be deleted left %d keys, want the %d before and its two", got, keys)
+	}
+}
