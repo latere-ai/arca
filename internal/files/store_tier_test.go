@@ -474,3 +474,92 @@ func TestStoreTheTierSkipsWithoutTheStack(t *testing.T) {
 		t.Skip(skipWithoutTheStack)
 	}
 }
+
+// TestStoreAFolderCopyIsReadableAtBothEnds is criterion 17 of spec 028
+// against the real stores: the bucket copies, every copy is an object of its
+// own with the source's bytes, and the server reads and writes no body.
+func TestStoreAFolderCopyIsReadableAtBothEnds(t *testing.T) {
+	h, stores := tier(t)
+	contents := map[string]string{"a.md": "the first content", "deep/b.md": "the second, nested"}
+	for rest, content := range contents {
+		if w := h.put(t, "files/notes/"+rest, content); w.Code != http.StatusCreated {
+			t.Fatalf("seeding %s answered %d: %s", rest, w.Code, w.Body)
+		}
+	}
+	puts, gets := h.bucket.Calls(blob.MethodPut), h.bucket.Calls(blob.MethodGet)
+
+	w := h.post(t, "files/notes", `{"copy_to":"files/copy","recursive":true}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("the copy answered %d: %s", w.Code, w.Body)
+	}
+	if h.bucket.Calls(blob.MethodPut) != puts || h.bucket.Calls(blob.MethodGet) != gets {
+		t.Error("the copy read or wrote an object body through the server")
+	}
+	if got := len(stores.keys(t)); got != 4 {
+		t.Fatalf("the bucket holds %d keys, want the two objects and their two copies", got)
+	}
+	for rest, content := range contents {
+		source, _ := stores.row(t, h.owner, "files/notes/"+rest)
+		copied, held := stores.row(t, h.owner, "files/copy/"+rest)
+		if !held || copied.ObjectID == source.ObjectID || copied.Checksum != source.Checksum {
+			t.Fatalf("the copy of %s is %+v, from %+v", rest, copied, source)
+		}
+		for _, path := range []string{"files/notes/" + rest, "files/copy/" + rest} {
+			read := h.call(t, http.MethodGet, h.object(path), nil)
+			if read.Code != http.StatusOK || read.Body.String() != content {
+				t.Errorf("%s reads %d %q, want %q", path, read.Code, read.Body, content)
+			}
+		}
+	}
+}
+
+// TestStoreAPermanentFolderDeleteLeavesBothStoresEmpty is criterion 14 of
+// spec 028 against the real stores: the rows under the folder, live and
+// trashed, their versions and their bytes go, and what is beside the folder
+// stays.
+func TestStoreAPermanentFolderDeleteLeavesBothStoresEmpty(t *testing.T) {
+	h, stores := tier(t)
+	for path, content := range map[string]string{
+		"files/notes/a.md":    "one",
+		"files/notes/b.md":    "two",
+		"files/notes-x/c.md":  "beside",
+		"files/notes/deep/d":  "deep",
+		"files/notes/old.txt": "old",
+	} {
+		if w := h.put(t, path, content); w.Code != http.StatusCreated {
+			t.Fatalf("seeding %s answered %d: %s", path, w.Code, w.Body)
+		}
+	}
+	if w := h.put(t, "files/notes/a.md", "one, again"); w.Code != http.StatusOK {
+		t.Fatalf("the overwrite answered %d: %s", w.Code, w.Body)
+	}
+	if w := h.call(t, http.MethodDelete, h.object("files/notes/old.txt"), nil); w.Code != http.StatusNoContent {
+		t.Fatalf("the trash answered %d: %s", w.Code, w.Body)
+	}
+	if got := len(stores.keys(t)); got != 6 {
+		t.Fatalf("the bucket holds %d keys before the delete", got)
+	}
+
+	if w := h.call(t, http.MethodDelete, h.object("files/notes")+"?recursive=1&permanent=1", nil); w.Code != http.StatusNoContent {
+		t.Fatalf("the folder delete answered %d: %s", w.Code, w.Body)
+	}
+	if got := len(stores.keys(t)); got != 1 {
+		t.Errorf("the bucket holds %d keys after the delete, want the one beside the folder", got)
+	}
+	for _, path := range []string{"files/notes/a.md", "files/notes/b.md", "files/notes/deep/d", "files/notes/old.txt"} {
+		if _, held := stores.row(t, h.owner, path); held {
+			t.Errorf("the folder delete left the row of %s", path)
+		}
+	}
+	if _, held := stores.row(t, h.owner, "files/notes-x/c.md"); !held {
+		t.Error("the folder delete took an object beside the folder")
+	}
+	var versions int
+	if err := stores.db.Querier().QueryRow(t.Context(),
+		`SELECT count(*) FROM file_versions WHERE owner = $1`, h.owner).Scan(&versions); err != nil {
+		t.Fatal(err)
+	}
+	if versions != 0 {
+		t.Errorf("the folder delete left %d versions", versions)
+	}
+}
