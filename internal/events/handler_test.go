@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -349,3 +350,45 @@ func TestTheTailAnswersAStoreThatDidNotAnswer(t *testing.T) {
 }
 
 const anotherSpace = "https://issuer.example|9ab3c4d5"
+
+// TestTheTailReadsTheOmissionOffItsAnswer: limits.omit on the answer to
+// event.read reaches the query the log is read with, so the omission is in
+// the statement and a page is never short for a row it left out. An answer
+// with none narrows nothing, and limits this server cannot read are no
+// decision: the log is not read at all.
+func TestTheTailReadsTheOmissionOffItsAnswer(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		limits string
+		want   []string
+	}{
+		{"no limits", ``, nil},
+		{"limits naming no omission", `{"quota_bytes":5}`, nil},
+		{"an omission", `{"omit":["files/team/payroll","files/agents/7c1e"]}`,
+			[]string{"files/team/payroll", "files/agents/7c1e"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d := allowed()
+			d.Limits = json.RawMessage(c.limits)
+			log := &fakeLog{page: Page{Entries: pageOf(1)}}
+			if w := ask(t, log, &fakeGuard{caller: aSpace, decision: d}, ""); w.Code != http.StatusOK {
+				t.Fatalf("the read answered %d %s", w.Code, w.Body)
+			}
+			if !slices.Equal(log.query.Omit, c.want) {
+				t.Errorf("the log was read omitting %v, want %v", log.query.Omit, c.want)
+			}
+		})
+	}
+	for _, limits := range []string{`{"omit":"files/team"}`, `{"omit":["files"]}`, `{"omit":["../x"]}`, `{"trash":"no"}`} {
+		d := allowed()
+		d.Limits = json.RawMessage(limits)
+		log := &fakeLog{}
+		w := ask(t, log, &fakeGuard{caller: aSpace, decision: d}, "")
+		if w.Code != http.StatusServiceUnavailable || errorOf(t, w) != codeStorageUnavailable {
+			t.Errorf("an answer whose limits are %s gave %d %s", limits, w.Code, w.Body)
+		}
+		if log.tailed != 0 {
+			t.Errorf("an answer whose limits are %s read the log", limits)
+		}
+	}
+}

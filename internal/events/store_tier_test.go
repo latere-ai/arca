@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -455,4 +456,66 @@ func insertVersion(t *testing.T, q store.Querier, owner, path string, size int64
 		return errors.New("insert the version: " + err.Error())
 	}
 	return nil
+}
+
+// TestStoreTheTailLeavesOutWhatTheAnswerOmits: an event whose path, or
+// whose detail's from, is at or under an omitted prefix is on no page, a
+// page is as full as the rows the caller may read allow, and the cursor
+// moves past every omitted row to the next one the caller may read. A tail
+// with no omission reads every row.
+func TestStoreTheTailLeavesOutWhatTheAnswerOmits(t *testing.T) {
+	db, log := tier(t), NewLog()
+	omit := []string{"files/team/payroll"}
+	type row struct {
+		path   string
+		detail map[string]any
+		read   bool
+	}
+	rows := []row{
+		{"files/team/plan.md", nil, true},
+		{"files/team/payroll/may.pdf", nil, false},
+		{"files/team/payroll", map[string]any{"recursive": true}, false},
+		{"files/archive/may.pdf", map[string]any{"from": "files/team/payroll/may.pdf"}, false},
+		{"files/team/payroll/june.pdf", map[string]any{"from": "files/inbox/june.pdf"}, false},
+		{"files/team/payroll-notes.md", nil, true},
+		{"files/inbox/copy.md", map[string]any{"from": "files/team/payroll-notes.md"}, true},
+		{"", nil, true},
+		{"files/other.md", nil, true},
+	}
+	var want []int64
+	for _, r := range rows {
+		id, err := log.Append(t.Context(), db.Querier(), Event{Owner: aSpace, Path: r.path, Action: ActionMove, Detail: r.detail})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.read {
+			want = append(want, id)
+		}
+	}
+
+	var read []int64
+	cursor := int64(0)
+	for range len(rows) + 1 {
+		page, err := log.Tail(t.Context(), db.Querier(), Query{Owner: aSpace, Cursor: cursor, Limit: 1, Omit: omit})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range page.Entries {
+			read = append(read, e.ID)
+		}
+		if page.NextCursor == 0 {
+			break
+		}
+		if len(page.Entries) != 1 || page.NextCursor != page.Entries[0].ID {
+			t.Fatalf("a page before the last holds %d rows with the cursor %d", len(page.Entries), page.NextCursor)
+		}
+		cursor = page.NextCursor
+	}
+	if !slices.Equal(read, want) {
+		t.Errorf("the tail with the prefix omitted read %v, want %v", read, want)
+	}
+	whole, err := log.Tail(t.Context(), db.Querier(), Query{Owner: aSpace, Limit: 100})
+	if err != nil || len(whole.Entries) != len(rows) {
+		t.Errorf("the tail with no omission read %d rows, %v, want %d", len(whole.Entries), err, len(rows))
+	}
 }
