@@ -26,17 +26,17 @@ func TestTheDriftSeamIsOffByDefault(t *testing.T) {
 	if CurrentDrift() != DriftNone {
 		t.Fatalf("the package starts in the drift %q", CurrentDrift())
 	}
-	if got := driftedCode(CodeSlugTaken); got != CodeSlugTaken {
+	if got := driftedCode(CodePathTaken); got != CodePathTaken {
 		t.Errorf("a refusal goes out as %q with no drift set", got)
 	}
 	if got := driftedETag("9f2c"); got != "9f2c" {
 		t.Errorf("a validator goes out as %q with no drift set", got)
 	}
-	if !PlaneServed("files/a.txt") || !PlaneServed("workspaces/build/a.txt") {
-		t.Error("a path in one of the two planes is not served")
+	if !PlaneServed("files/a.txt") {
+		t.Error("a path in the plane is not served")
 	}
 	if PlaneServed("secrets/a.txt") || PlaneServed("nothing") {
-		t.Error("a path under a third prefix is served with no drift set")
+		t.Error("a path under another prefix is served with no drift set")
 	}
 }
 
@@ -86,37 +86,37 @@ func TestSetDriftIsWhatTheNodeCalls(t *testing.T) {
 	}
 }
 
-// TestDriftPathsTakesAFifthPrefixForAPlane: the paths drift admits a path
-// under a prefix that is not one of the two planes of spec 001, which is a
-// path this server does not serve. It grants no authority: the space is
-// still the caller's own, and what it changes is that a path the server
-// should refuse is taken.
-func TestDriftPathsTakesAFifthPrefixForAPlane(t *testing.T) {
+// TestDriftPathsTakesAnotherPrefixForThePlane: the paths drift admits a path
+// under a prefix that is not the plane of spec 001, which is a path this
+// server does not serve. It grants no authority: the space is still the
+// caller's own, and what it changes is that a path the server should refuse
+// is taken.
+func TestDriftPathsTakesAnotherPrefixForThePlane(t *testing.T) {
 	withDrift(t, DriftPaths)
 	if !PlaneServed("secrets/a.txt") {
-		t.Error("the paths drift does not take a fifth prefix, so the suite has nothing to catch")
+		t.Error("the paths drift does not take another prefix, so the suite has nothing to catch")
 	}
 	if PlaneServed("nothing") {
 		t.Error("the paths drift takes a value that is not a path at all")
 	}
-	// The two planes still answer, so the drift is one extra prefix and not
-	// a server that stopped serving.
-	if !PlaneServed("files/a.txt") || !PlaneServed("workspaces/build/a.txt") {
-		t.Error("the paths drift stopped the two planes answering")
+	// The plane still answers, so the drift is one extra prefix and not a
+	// server that stopped serving.
+	if !PlaneServed("files/a.txt") {
+		t.Error("the paths drift stopped the plane answering")
 	}
 }
 
 // TestDriftCodesAnswers404WhereTheTableFixes409: the codes drift sends one
 // row of spec 013's table out under the wrong code and the wrong status, so
-// a caller that would have learned the slug was taken learns the space is
-// not there. Every other row is unchanged, which is what makes the drift one
+// a caller that would have learned a path was taken learns there is nothing
+// there. Every other row is unchanged, which is what makes the drift one
 // named answer and not a broken error table.
 func TestDriftCodesAnswers404WhereTheTableFixes409(t *testing.T) {
 	withDrift(t, DriftCodes)
-	if got := driftedCode(CodeSlugTaken); got != CodeNotFound {
-		t.Errorf("slug_taken goes out as %q, want not_found", got)
+	if got := driftedCode(CodePathTaken); got != CodeNotFound {
+		t.Errorf("path_taken goes out as %q, want not_found", got)
 	}
-	for _, code := range []string{CodeWriterHeld, CodePathTaken, CodeNotFound, CodeForbidden, CodeInvalidField} {
+	for _, code := range []string{CodePreconditionFailed, CodeTooManyObjects, CodeNotFound, CodeForbidden, CodeInvalidField} {
 		if got := driftedCode(code); got != code {
 			t.Errorf("%s goes out as %q under the codes drift", code, got)
 		}
@@ -126,8 +126,8 @@ func TestDriftCodesAnswers404WhereTheTableFixes409(t *testing.T) {
 	// status and that code's sentence, so the answer is wrong and is still
 	// one row of the table rather than a shape nobody wrote.
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest("POST", "/v1/workspaces", nil)
-	WriteError(w, r, Refuse(CodeSlugTaken, "the slug %q is taken", "build"))
+	r := httptest.NewRequest("POST", "/v1/files/me/files/a.txt", nil)
+	WriteError(w, r, Refuse(CodePathTaken, "%q is taken", "files/b.txt"))
 	if w.Code != Status(CodeNotFound) {
 		t.Errorf("the refusal answered %d, want %d", w.Code, Status(CodeNotFound))
 	}

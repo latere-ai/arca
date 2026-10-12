@@ -112,7 +112,15 @@ func (s *Service) listStars(w http.ResponseWriter, r *http.Request) {
 	if d.Filter != nil {
 		owners = d.Filter.Owners
 	}
-	rows, err := s.stars.List(ctx, s.db.Querier(), caller, owners, cursor, limit+1)
+	// The answer may leave subtrees out (spec 028). The listing crosses
+	// spaces under this one answer, so a prefix leaves out the matching path
+	// of every space on the page.
+	limits, err := LimitsOf(d)
+	if err != nil {
+		api.WriteError(w, r, fault(ctx, "read the answer's limits", err))
+		return
+	}
+	rows, err := s.stars.List(ctx, s.db.Querier(), caller, owners, cursor, limit+1, limits.Omit)
 	if err != nil {
 		api.WriteError(w, r, fault(ctx, "list the bookmarks", err))
 		return

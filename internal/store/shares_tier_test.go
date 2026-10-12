@@ -176,7 +176,7 @@ func TestStoreSharesAPageWalksEachGrantOnceAndResumesWhereItStopped(t *testing.T
 	seen := map[string]int{}
 	cursor := ""
 	for range 12 {
-		page, err := shares.ListSpace(t.Context(), db.Querier(), alice, "", cursor, 5)
+		page, err := shares.ListSpace(t.Context(), db.Querier(), alice, "", cursor, 5, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -200,7 +200,7 @@ func TestStoreSharesAPageWalksEachGrantOnceAndResumesWhereItStopped(t *testing.T
 		}
 	}
 
-	narrowed, err := shares.ListSpace(t.Context(), db.Querier(), alice, "files/p03", "", 100)
+	narrowed, err := shares.ListSpace(t.Context(), db.Querier(), alice, "files/p03", "", 100, nil)
 	if err != nil || len(narrowed) != 1 {
 		t.Fatalf("a page narrowed to one subtree = %d, %v", len(narrowed), err)
 	}
@@ -216,7 +216,7 @@ func TestStoreSharesWithMeIsTheGranteeIndexAndNoMembership(t *testing.T) {
 	expired.ExpiresAt = &past
 	grant(t, db, expired)
 
-	page, err := shares.ListGrantee(t.Context(), db.Querier(), bobby, "", 100)
+	page, err := shares.ListGrantee(t.Context(), db.Querier(), bobby, "", 100, nil)
 	if err != nil {
 		t.Fatalf("ListGrantee: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestStoreSharesWithMeIsTheGranteeIndexAndNoMembership(t *testing.T) {
 	if _, err := shares.Revoke(t.Context(), db.Querier(), mine.ID); err != nil {
 		t.Fatal(err)
 	}
-	page, err = shares.ListGrantee(t.Context(), db.Querier(), bobby, "", 100)
+	page, err = shares.ListGrantee(t.Context(), db.Querier(), bobby, "", 100, nil)
 	if err != nil || len(page) != 0 {
 		t.Fatalf("after the revoke the grantee holds %+v, %v", page, err)
 	}
@@ -304,7 +304,7 @@ func TestStoreLinksTheSubtreeIsThePrefixAndNotItsSibling(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	page, err := NewShares().Subtree(t.Context(), db.Querier(), alice, "files/reports", "", 100)
+	page, err := NewShares().Subtree(t.Context(), db.Querier(), alice, "files/reports", "", 100, nil)
 	if err != nil {
 		t.Fatalf("Subtree: %v", err)
 	}
@@ -318,7 +318,7 @@ func TestStoreLinksTheSubtreeIsThePrefixAndNotItsSibling(t *testing.T) {
 	}
 
 	// The prefix that names one object lists that object alone.
-	one, err := NewShares().Subtree(t.Context(), db.Querier(), alice, "files/elsewhere.txt", "", 100)
+	one, err := NewShares().Subtree(t.Context(), db.Querier(), alice, "files/elsewhere.txt", "", 100, nil)
 	if err != nil || len(one) != 1 || one[0].Path != "files/elsewhere.txt" {
 		t.Fatalf("a prefix naming one object = %+v, %v", one, err)
 	}

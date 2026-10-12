@@ -179,11 +179,27 @@ func (m *memory) RestoreByID(context.Context, store.Querier, string, string, tim
 	return store.File{}, false, nil
 }
 
-func (m *memory) ListTrash(context.Context, store.Querier, string, store.TrashCursor, int, time.Time) ([]store.File, error) {
+func (m *memory) ListTrash(context.Context, store.Querier, string, store.TrashCursor, int, time.Time, []string) ([]store.File, error) {
 	return nil, nil
 }
 
-func (m *memory) PurgeTrash(context.Context, store.Querier, string, string) ([]store.File, error) {
+func (m *memory) PurgeTrash(context.Context, store.Querier, string, string, []string) ([]store.File, error) {
+	return nil, nil
+}
+
+func (m *memory) StatSubtree(context.Context, store.Querier, string, string, []string) (store.Subtree, error) {
+	return store.Subtree{}, nil
+}
+
+func (m *memory) TrashSubtree(context.Context, store.Querier, string, string, []string) (store.Subtree, error) {
+	return store.Subtree{}, nil
+}
+
+func (m *memory) DropSubtree(context.Context, store.Querier, string, string, []string) (store.Subtree, error) {
+	return store.Subtree{}, nil
+}
+
+func (m *memory) Unreferenced(context.Context, store.Querier, []object.ID) ([]object.ID, error) {
 	return nil, nil
 }
 
@@ -191,7 +207,7 @@ func (m *memory) Move(context.Context, store.Querier, string, string, string) (b
 	return false, nil
 }
 
-func (m *memory) ListPrefix(context.Context, store.Querier, string, string, string, int) ([]store.File, string, error) {
+func (m *memory) ListPrefix(context.Context, store.Querier, string, string, string, int, []string) ([]store.File, string, error) {
 	return nil, "", nil
 }
 
@@ -369,7 +385,7 @@ func (v versionsOf) Move(ctx context.Context, q store.Querier, owner, from, to s
 	return v.MoveVersions(ctx, q, owner, from, to)
 }
 
-func (s starsOf) List(ctx context.Context, q store.Querier, subject string, owners []string, cursor store.StarCursor, limit int) ([]store.Star, error) {
+func (s starsOf) List(ctx context.Context, q store.Querier, subject string, owners []string, cursor store.StarCursor, limit int, _ []string) ([]store.Star, error) {
 	return s.ListStars(ctx, q, subject, owners, cursor, limit)
 }
 

@@ -14,6 +14,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -39,7 +40,6 @@ import (
 	"latere.ai/x/arca/internal/store"
 	"latere.ai/x/arca/internal/uploads"
 	"latere.ai/x/arca/internal/version"
-	"latere.ai/x/arca/internal/workspaces"
 )
 
 // Shutdown timing of spec 002: readiness answers 503 at once, the drain
@@ -119,34 +119,20 @@ func reap(ctx context.Context, args []string, getenv config.Getenv, stdout, stde
 		return fail(stderr, err)
 	}
 	defer db.Close()
-	// Pass 3 is not given here. Its sweep is a method of the workspace
-	// service of spec 009, which refuses to build without the authorizer
-	// every one of its handlers decides through, and this process registers
-	// no handler and starts no verifier. A pass that does not run reports
-	// nothing, and a table with no row for it reads exactly like a pass that
-	// found nothing, so the line below is what says which it is: an
-	// installation that moved the reconciler here would otherwise expire no
-	// lease and read a healthy log.
-	//
-	// Passes 4, 6 and 7 are given: the expiry sweep of spec 007, the
-	// tombstone purge of spec 009 and the grant hygiene of spec 008 each ask
-	// nothing of the authorizer, so they run wherever the two stores are
-	// reachable.
+	// Passes 4 and 7 are given: the expiry sweep of spec 007 and the grant
+	// hygiene of spec 008 ask nothing of the authorizer, so every pass runs
+	// wherever the two stores are reachable, and this process runs the same
+	// eight a replica does.
 	log := events.NewLog()
-	tombstones, err := tombstonePass(cfg, db, bucket, log, recorder)
-	if err != nil {
-		return fail(stderr, err)
-	}
 	grants, err := grantPass(cfg, store.NewShares())
 	if err != nil {
 		return fail(stderr, err)
 	}
-	reconciler, err := reaper.New(reaperOptions(cfg, db, bucket, *dryRun, nil,
-		uploadPass(cfg, db, bucket, log), tombstones, grants, recorder))
+	reconciler, err := reaper.New(reaperOptions(cfg, db, bucket, *dryRun,
+		uploadPass(cfg, db, bucket, log, recorder), grants, recorder))
 	if err != nil {
 		return fail(stderr, err)
 	}
-	_, _ = fmt.Fprintln(stdout, "arcad: this process runs nine of the ten passes; the lease expiry of spec 009 runs on a replica with ARCA_REAP_INTERVAL set")
 
 	if !*once {
 		_, _ = fmt.Fprintf(stdout, "arcad: the reconciler runs every %s\n", cfg.ReapInterval)
@@ -177,16 +163,14 @@ func report(stdout io.Writer, findings reaper.Findings, dryRun bool) {
 // reaperOptions is what both roles build the reconciler from. serve and reap
 // read the same configuration and reconcile the same way; what differs is
 // where the loop lives.
-func reaperOptions(cfg config.Config, db *store.DB, bucket blob.Store, dryRun bool, leases, sessions, tombstones, grants reaper.Pass, recorder reaper.Metrics) reaper.Options {
+func reaperOptions(cfg config.Config, db *store.DB, bucket blob.Store, dryRun bool, sessions, grants reaper.Pass, recorder reaper.Metrics) reaper.Options {
 	return reaper.Options{
 		DB:             db,
 		Bucket:         bucket,
 		Prefix:         cfg.BucketPrefix,
 		TrashRetention: cfg.TrashRetention,
 		DryRun:         dryRun,
-		Leases:         leases,
 		Sessions:       sessions,
-		Tombstones:     tombstones,
 		Grants:         grants,
 		Metrics:        recorder,
 	}
@@ -197,77 +181,24 @@ func reaperOptions(cfg config.Config, db *store.DB, bucket blob.Store, dryRun bo
 // routes are bound to on a replica, and its own on the reap process, which
 // registers no handler and asks nothing: the sweep puts no question, so the
 // service it runs on needs no authorizer.
-func uploadPass(cfg config.Config, db *store.DB, bucket blob.Store, log events.Log) *uploads.Service {
+func uploadPass(cfg config.Config, db *store.DB, bucket blob.Store, log events.Log, recorder *metrics.Set) *uploads.Service {
 	return uploads.New(uploads.Options{
 		DB: db, Bucket: bucket, Config: cfg,
-		Ledger: fileLedger{log: log, usage: events.NewLedger()},
-	})
-}
-
-// tombstonePass builds pass 6 of spec 010's table: the tombstone purge of
-// spec 009, over the workspaces and the subtree that spec and spec 005 own.
-// Like the expiry sweep above it asks nothing of the authorizer, so it runs
-// wherever the two stores are reachable and not only on a replica that
-// started a verifier.
-func tombstonePass(cfg config.Config, db *store.DB, bucket blob.Store, log events.Log, recorder *metrics.Set) (reaper.Pass, error) {
-	return workspaces.NewTombstones(workspaces.TombstoneOptions{
-		DB: db, Workspaces: store.NewWorkspaces(), Objects: store.NewWorkspaceObjects(),
-		Bucket: bucket, Prefix: cfg.BucketPrefix, Retention: cfg.TrashRetention,
-		Ledger: ledger{log: log, usage: events.NewLedger(), metrics: recorder},
+		Ledger: fileLedger{log: log, usage: events.NewLedger(), metrics: recorder},
 	})
 }
 
 // grantPass builds pass 7: the grant hygiene of spec 008, over the table
 // that spec owns. The window is the trash retention, because an expired
 // grant is kept for an audit as long as a deleted object is kept for a
-// restore and spec 009 says there is no second retention setting.
+// restore and there is no second retention setting.
 func grantPass(cfg config.Config, grants store.Shares) (reaper.Pass, error) {
 	return shares.NewExpiry(shares.ExpiryOptions{Store: grants, Window: cfg.TrashRetention})
 }
 
-// The two seams spec 009 declared and spec 010 fills. Both are here rather
-// than in either package, because a package that imported the other to bind
-// its own seam would be the dependency the seam exists to avoid: the
-// workspaces know nothing of the log, the reconciler knows nothing of the
-// lease, and the node is what knows both.
-
-// ledger binds the log and the usage counter of spec 010 to the seam of
-// spec 009. Both calls run inside the caller's transaction, which is what
-// makes a mutation and the row recording it one commit.
-type ledger struct {
-	log   events.Log
-	usage events.Ledger
-	// metrics is spec 018's counter of the rows the log took, which is here
-	// rather than in internal/events because this is the one place a
-	// workspace's mutation becomes a row of that log.
-	metrics *metrics.Set
-}
-
-// Append writes one row of the log. The action is one word of spec 010's
-// closed vocabulary, spelled the same on both sides; the append refuses a
-// word the vocabulary does not name, so a mapping that drifted is a refused
-// transaction rather than a row no consumer can filter for.
-//
-// The id the append answers is dropped. A workspace asked for the row to
-// exist and reads no cursor of its own.
-func (l ledger) Append(ctx context.Context, q store.Querier, e workspaces.Event) error {
-	_, err := l.log.Append(ctx, q, events.Event{
-		Owner: e.Owner, Path: e.Path, Action: events.Action(e.Action),
-		Actor: e.Actor, Detail: e.Detail,
-	})
-	if err == nil {
-		l.metrics.EventAppended(e.Action)
-	}
-	return err
-}
-
-// Release gives the bytes a sync dropped back to the space's counter. The
-// total afterwards is the counter's own business: the caller asked for the
-// number to move and reads it back through the routes that report usage.
-func (l ledger) Release(ctx context.Context, q store.Querier, owner string, bytes int64) error {
-	_, err := l.usage.Release(ctx, q, owner, bytes)
-	return err
-}
+// The seams the packages above declared and spec 010 fills. They are here
+// rather than in any one package, because a package that imported another
+// to bind its own seam would be the dependency the seam exists to avoid.
 
 // fileLedger binds the usage counter and the log of spec 010 to the seam of
 // specs 005 and 007. A charge runs inside the write's own transaction, so
@@ -276,6 +207,10 @@ func (l ledger) Release(ctx context.Context, q store.Querier, owner string, byte
 type fileLedger struct {
 	log   events.Log
 	usage events.Ledger
+	// metrics is spec 018's counter of the rows the log took. It is here
+	// rather than in internal/events because this is where a mutation of
+	// the object plane becomes a row of that log. Nil counts nothing.
+	metrics *metrics.Set
 }
 
 // Charge applies the write's delta and holds it to the limit the
@@ -310,10 +245,17 @@ func (l fileLedger) Usage(ctx context.Context, q store.Querier, owner string) (f
 // sides, and a word the vocabulary does not name is dropped with a warning
 // rather than written as a row no consumer can filter for.
 func (l fileLedger) Append(ctx context.Context, q store.Querier, e files.Event) {
-	l.log.Note(ctx, q, events.Event{
+	if _, err := l.log.Append(ctx, q, events.Event{
 		Owner: e.Owner, Path: e.Path, Action: events.Action(e.Action),
 		Actor: e.Actor, Detail: e.Detail,
-	})
+	}); err != nil {
+		slog.WarnContext(ctx, "the event was not appended",
+			"action", e.Action, "owner", e.Owner, "err", err)
+		return
+	}
+	if l.metrics != nil {
+		l.metrics.EventAppended(e.Action)
+	}
 }
 
 // allowance carries the byte limit one authorizer answer named across the
@@ -330,7 +272,12 @@ func allowance(l files.Limit) events.Limit {
 // runs inside the mutation's own transaction, which is what makes a grant
 // that was made a grant that was recorded: a change to who may act on a
 // space is not a notification that may go missing.
-type shareLedger struct{ log events.Log }
+type shareLedger struct {
+	log events.Log
+	// metrics is spec 018's counter of the rows the log took. Nil counts
+	// nothing.
+	metrics *metrics.Set
+}
 
 // Append writes one row of the log and answers its id, which is the cursor a
 // consumer reads the row back at. The action is one word of spec 010's
@@ -338,90 +285,48 @@ type shareLedger struct{ log events.Log }
 // word the vocabulary does not name, so a mapping that drifted is a refused
 // transaction rather than a row no consumer can filter for.
 func (l shareLedger) Append(ctx context.Context, q store.Querier, e shares.Event) (int64, error) {
-	return l.log.Append(ctx, q, events.Event{
+	id, err := l.log.Append(ctx, q, events.Event{
 		Owner: e.Owner, Path: e.Path, Action: events.Action(e.Action),
 		Actor: e.Actor, Detail: e.Detail,
 	})
-}
-
-// leasePass binds pass 3 of spec 010's table to the sweep of spec 009. The
-// reconciler hands every pass a querier and a dry flag; this sweep opens its
-// own transactions, one per row it ends, because a reap is a row, a lease and
-// a log entry written together.
-type leasePass struct {
-	service *workspaces.Service
-	// metrics is spec 018's arca_lease_expiries_total. The reconciler counts
-	// the same sweep as a finding of kind lease_expired; this is the rate a
-	// platform alerts on, and it is recorded here because the sweep's own
-	// package knows nothing of a registry.
-	metrics *metrics.Set
-}
-
-// Sweep ends what outlived its deadline, and runs nothing at all on a dry
-// run. The sweep has no counting half: every statement it issues is a write,
-// so a dry run that called it would change both stores while reporting that
-// it changed neither, which is the one thing a dry run may not do. It
-// reports nothing rather than a number it did not measure.
-func (p leasePass) Sweep(ctx context.Context, _ store.Querier, now time.Time, dry bool) (int, error) {
-	if dry {
-		return 0, nil
+	if err == nil && l.metrics != nil {
+		l.metrics.EventAppended(e.Action)
 	}
-	ended, err := p.service.ExpireLeases(ctx, now)
-	p.metrics.LeaseExpired(ended)
-	return ended, err
+	return id, err
 }
 
-// restorer binds the restore across owners of spec 012 to the two packages
-// that own what it undoes. It is here rather than in either of them for the
-// reason every seam above is: internal/admin knows no trash and no
-// workspace, internal/files and internal/workspaces know no administrator,
-// and the node is what knows all three.
+// restorer binds the restore across owners of spec 012 to the package that
+// owns what it undoes. It is here rather than in either of them for the
+// reason every seam above is: internal/admin knows no trash,
+// internal/files knows no administrator, and the node is what knows both.
 type restorer struct {
 	objects trashRestorer
-	durable tombstoneRestorer
 }
 
-// The two arms, as interfaces, so this adapter is driven with the two
-// answers that decide it — "not mine" and a failure — without a bucket and a
-// database behind each.
-type (
-	// trashRestorer is spec 005's trash, keyed by the row's id.
-	trashRestorer interface {
-		RestoreTrashed(ctx context.Context, owner, id string) (store.File, error)
-	}
-	// tombstoneRestorer is spec 009's soft deleted workspace.
-	tombstoneRestorer interface {
-		RestoreDeleted(ctx context.Context, owner, id string) (store.Workspace, error)
-	}
-)
+// trashRestorer is spec 005's trash, keyed by the row's id. It is an
+// interface so this adapter is driven with the two answers that decide it,
+// an id that is not in the trash and a failure, without a bucket and a
+// database behind it.
+type trashRestorer interface {
+	RestoreTrashed(ctx context.Context, owner, id string) (store.File, error)
+}
 
-// Restore brings back the trashed object or the soft deleted workspace the
-// id names, and answers which it was.
+// Restore brings back the trashed object the id names.
 //
-// Both ids are database identifiers of the same shape, so an id does not say
-// which table it belongs to and spec 012 states no rule that would make it
-// say so. The two arms are therefore tried in order, and each answers its
-// own "not mine" rather than a fault, so a miss on the first is a question
-// put to the second and a miss on both is the one answer the route renders:
-// an id that names nothing this space can still bring back.
-//
-// Both arms are scoped to the space the route named and asked about. An id
-// of another owner is not this space's to restore, and each arm answers it
-// as an id that names nothing.
+// The trash answers an id that is not its own as "not mine" rather than as
+// a fault, which is the one answer the route renders for an id that names
+// nothing this space can still bring back. It is scoped to the space the
+// route named and asked about: an id of another owner is not this space's
+// to restore.
 func (r restorer) Restore(ctx context.Context, owner, id string) (admin.Restored, error) {
 	switch _, err := r.objects.RestoreTrashed(ctx, owner, id); {
 	case err == nil:
 		return admin.Restored{ID: id, Kind: admin.KindFile}, nil
-	case !errors.Is(err, files.ErrNotTrashed):
+	case errors.Is(err, files.ErrNotTrashed):
+		return admin.Restored{}, admin.ErrNotRestorable
+	default:
 		return admin.Restored{}, err
 	}
-	switch _, err := r.durable.RestoreDeleted(ctx, owner, id); {
-	case err == nil:
-		return admin.Restored{ID: id, Kind: admin.KindWorkspace}, nil
-	case !errors.Is(err, workspaces.ErrNotDeleted):
-		return admin.Restored{}, err
-	}
-	return admin.Restored{}, admin.ErrNotRestorable
 }
 
 // bucketOptions is the bucket client every role opens, from the one table of
@@ -563,8 +468,8 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	}
 	// The one log of spec 010 in this process, bound to every seam that
 	// writes a row and to the tail that reads them back. It holds no state,
-	// and one value rather than four is what makes a row appended by a share
-	// and a row appended by a workspace the same log.
+	// and one value rather than several is what makes a row appended by a
+	// share and a row appended by a write the same log.
 	log := events.NewLog()
 
 	// The objects of spec 005 and the sessions of spec 007, built once and
@@ -574,15 +479,10 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	// charge and the same log.
 	content := files.Options{
 		DB: db, Bucket: bucket, Decide: identity.Authorizer, Config: cfg,
-		Ledger: fileLedger{log: log, usage: events.NewLedger()},
+		Ledger: fileLedger{log: log, usage: events.NewLedger(), metrics: recorder},
 		// Spec 018's seam for the bytes a put takes in, the bytes a read
 		// streams out, and the writes a limit refused.
 		Metrics: recorder,
-		// The liveness rule of spec 009, which spec 005 applies: a path
-		// under workspaces/<slug>/ whose workspace is gone or soft deleted
-		// is a missing object to everyone. The query set of spec 004
-		// answers it, so neither package reaches the other.
-		Workspaces: store.NewWorkspaces(),
 	}
 	object := files.New(content)
 	session := uploads.New(uploads.Options{Options: content, Metrics: recorder})
@@ -593,7 +493,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	sharing, err := shares.New(shares.Options{
 		Authorizer: identity.Authorizer, DB: db, Store: grants,
 		Publisher: bucket, BucketPrefix: cfg.BucketPrefix,
-		Ledger: shareLedger{log: log},
+		Ledger: shareLedger{log: log, metrics: recorder},
 		Reader: object,
 		// The base the surface is served under, so the URL a mint answers
 		// with is the address the caller redeems the token at (spec 027).
@@ -602,41 +502,20 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	if err != nil {
 		return fail(stderr, err)
 	}
-	// The workspaces of spec 009. The file plane of spec 005 is still a
-	// seam: the queries below are the file-plane half a workspace reads as
-	// a subtree, and they answer it until that spec lands its own. The
-	// ledger is no longer one: spec 010 is in this build, so an attach, a
-	// release, a sync and a reap append a row of its log and a sync gives
-	// the bytes it dropped back to its space's counter.
-	durable, err := workspaces.New(workspaces.Options{
-		DB: db, Workspaces: store.NewWorkspaces(), Attachments: store.NewAttachments(),
-		Objects: store.NewWorkspaceObjects(), Bucket: bucket, Prefix: cfg.BucketPrefix,
-		Authorizer: identity.Authorizer,
-		Ledger:     ledger{log: log, usage: events.NewLedger(), metrics: recorder},
-		// Spec 018's seam for the bytes a materialize hands out and a sync
-		// declares, which is the workspace plane's half of arca_bytes_*.
-		Metrics: recorder,
-	})
-	if err != nil {
-		return fail(stderr, err)
-	}
-	// The two gauges of spec 018 that no process keeps a number for: a lease
-	// and a session are held across replicas, so what each reads at a scrape
-	// is the database's count at that instant and not this replica's share
-	// of it.
-	recorder.LeasesHeld.Bind(sampling(ctx, "arca_leases_held", durable.HeldLeases))
+	// The gauge of spec 018 that no process keeps a number for: a session
+	// is held across replicas, so what it reads at a scrape is the
+	// database's count at that instant and not this replica's share of it.
 	recorder.SessionsOpen(sampling(ctx, "arca_upload_sessions_open", session.Open))
 
 	// The administration of spec 012, with both of its seams bound. The
-	// restore across owners returns rows the trash of spec 005 and the
-	// deleted workspaces of spec 009 own, and both are in this build, so the
+	// restore across owners returns rows the trash of spec 005 owns, so the
 	// route restores rather than answering not_implemented; the link counter
 	// is spec 008's table, and it is here too, so the overview reports the
 	// links a space actually holds.
 	administration, err := admin.New(admin.Options{
 		Querier: db.Querier(), Spaces: store.NewAdmin(), Authorizer: identity.Authorizer,
 		Links:    shares.LinkCounts(grants),
-		Restorer: restorer{objects: object, durable: durable},
+		Restorer: restorer{objects: object},
 	})
 	if err != nil {
 		return fail(stderr, err)
@@ -656,14 +535,13 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		// The log of spec 010 and the database it reads through, which is
 		// what GET /v1/events tails.
 		Events: log, Querier: db.Querier(),
-		// The thirty-seven rows five packages own: the twelve of spec 009,
-		// the eight of spec 008 that sit behind the verifier, the twelve of
-		// spec 005, the three of spec 007 and the two of spec 012. Each is
-		// declared by the package that answers it and registered through the
-		// one seam of register.go, in the order tools/apidoc unions them, so
-		// the committed document and the mux read one list the same way.
+		// The twenty-five rows four packages own: the eight of spec 008 that
+		// sit behind the verifier, the twelve of spec 005, the three of spec
+		// 007 and the two of spec 012. Each is declared by the package that
+		// answers it and registered through the one seam of register.go, in
+		// the order tools/apidoc unions them, so the committed document and
+		// the mux read one list the same way.
 		Routes: slices.Concat(
-			workspaces.Routes(durable),
 			shares.Routes(sharing),
 			files.Bind(object),
 			uploads.Bind(session),
@@ -683,16 +561,11 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	// ARCA_REAP_INTERVAL to 0 here and runs arcad reap as a process of its
 	// own. It starts before the listeners, so a reconciler that cannot be
 	// built fails the start-up before a port is bound.
-	tombstones, err := tombstonePass(cfg, db, bucket, log, recorder)
-	if err != nil {
-		return fail(stderr, err)
-	}
 	expiredGrants, err := grantPass(cfg, grants)
 	if err != nil {
 		return fail(stderr, err)
 	}
-	if err := startReaper(ctx, cfg, db, bucket, leasePass{service: durable, metrics: recorder},
-		session, tombstones, expiredGrants, recorder, stdout); err != nil {
+	if err := startReaper(ctx, cfg, db, bucket, session, expiredGrants, recorder, stdout); err != nil {
 		return fail(stderr, err)
 	}
 
@@ -811,12 +684,12 @@ func identify(w http.ResponseWriter, _ *http.Request) {
 // startReaper starts the in-process reconciliation loop, or says on the
 // start-up line that this replica runs none. Which it is, is a fact an
 // operator reads once rather than infers from a missing metric.
-func startReaper(ctx context.Context, cfg config.Config, db *store.DB, bucket blob.Store, leases, sessions, tombstones, grants reaper.Pass, recorder reaper.Metrics, stdout io.Writer) error {
+func startReaper(ctx context.Context, cfg config.Config, db *store.DB, bucket blob.Store, sessions, grants reaper.Pass, recorder reaper.Metrics, stdout io.Writer) error {
 	if cfg.ReapInterval <= 0 {
 		_, _ = fmt.Fprintln(stdout, "arcad: the reconciler is off on this replica; ARCA_REAP_INTERVAL is 0")
 		return nil
 	}
-	reconciler, err := reaper.New(reaperOptions(cfg, db, bucket, false, leases, sessions, tombstones, grants, recorder))
+	reconciler, err := reaper.New(reaperOptions(cfg, db, bucket, false, sessions, grants, recorder))
 	if err != nil {
 		return err
 	}

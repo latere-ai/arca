@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 // Package files is the object plane of spec 005: a path in a space with
-// bytes behind it, written, read, listed, moved, deleted, versioned,
-// trashed, restored and starred.
+// bytes behind it, written, read, listed, moved, copied, deleted, versioned,
+// trashed, restored and starred. A space is one tree (spec 028), so every
+// path of it is this package's, and a folder is a prefix this package
+// deletes or copies in one call.
 //
 // Two properties of spec 001 shape all of it. A bucket key derives from an
 // object id and never from a path (invariant 8), so a move is one UPDATE and
@@ -27,9 +29,7 @@ package files
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-
 	"time"
 
 	"latere.ai/x/pkg/authz"
@@ -88,7 +88,7 @@ type Usage struct {
 }
 
 // Event is one row of the log. Action is a member of spec 010's closed
-// vocabulary, and this package appends four of the eleven: put, move,
+// vocabulary, and this package appends five of the nine: put, move, copy,
 // delete, restore.
 type Event struct {
 	Owner  string
@@ -98,12 +98,13 @@ type Event struct {
 	Detail map[string]any
 }
 
-// The four actions of spec 010's closed vocabulary the object plane
+// The five actions of spec 010's closed vocabulary the object plane
 // appends. Spec 007's package appends EventPut too, because a session that
 // completes is an object written.
 const (
 	EventPut     = "put"
 	EventMove    = "move"
+	EventCopy    = "copy"
 	EventDelete  = "delete"
 	EventRestore = "restore"
 )
@@ -144,18 +145,6 @@ type References interface {
 	Referenced(ctx context.Context, q store.Querier, id object.ID) (bool, error)
 }
 
-// Workspaces reports whether the workspace a path names is there and live,
-// which spec 005 requires before anything under workspaces/ is read or
-// written: bytes cannot exist under a workspace that was never created, and
-// a soft-deleted one answers as missing to everyone.
-//
-// Spec 009 owns the table and implements this. Until it lands every
-// workspace is live, which is the honest answer from a build that holds no
-// workspace at all.
-type Workspaces interface {
-	Live(ctx context.Context, q store.Querier, owner, slug string) (bool, error)
-}
-
 // Limit is the byte allowance one authorizer answer carried, and nothing
 // else. Arca stores no limit: there is no column, no route and no default,
 // so a limit exists only as long as the answer that carried it.
@@ -168,23 +157,38 @@ type Limit struct {
 	Set bool
 }
 
-// LimitOf reads limits.quota_bytes off an authorizer's answer. An answer
-// with no limits object, or one naming no quota_bytes, leaves the space
-// unlimited.
-func LimitOf(d auth.Decision) (Limit, error) {
-	if len(d.Limits) == 0 {
-		return Limit{}, nil
+// Limits is what one answer's limits object says to the object plane
+// (spec 006): the byte allowance, and the three members of spec 028. Each
+// handler reads it off the answer to its own question and honors the
+// members that question carries, so nothing here outlives the request.
+type Limits struct {
+	// Quota is limits.quota_bytes.
+	Quota Limit
+	// NoVersions is limits.versions: false, read on a write: the write keeps
+	// no version of the content it replaces.
+	NoVersions bool
+	// NoTrash is limits.trash: false, read on a delete: the delete is
+	// permanent.
+	NoTrash bool
+	// Omit is limits.omit, read on an enumeration: the subtrees it leaves
+	// out.
+	Omit []string
+}
+
+// LimitsOf reads an answer's limits object whole. An answer with none
+// limits nothing. A member that does not decode is an error for every
+// handler, whichever member it acts on, because an answer this server cannot
+// read is one it cannot honor.
+func LimitsOf(d auth.Decision) (Limits, error) {
+	read, err := auth.ReadLimits(d.Limits)
+	if err != nil {
+		return Limits{}, err
 	}
-	var limits struct {
-		QuotaBytes *int64 `json:"quota_bytes"`
+	out := Limits{NoVersions: read.NoVersions, NoTrash: read.NoTrash, Omit: read.Omit}
+	if read.QuotaBytes != nil {
+		out.Quota = Limit{Bytes: *read.QuotaBytes, Set: true}
 	}
-	if err := json.Unmarshal(d.Limits, &limits); err != nil {
-		return Limit{}, fmt.Errorf("files: read limits.quota_bytes: %w", err)
-	}
-	if limits.QuotaBytes == nil {
-		return Limit{}, nil
-	}
-	return Limit{Bytes: *limits.QuotaBytes, Set: true}, nil
+	return out, nil
 }
 
 // OverLimit is a charge the answer's limit does not admit. A handler answers
@@ -220,9 +224,10 @@ type Options struct {
 	Files    store.Files
 	Versions store.Versions
 	Stars    store.Stars
-	// Shares is spec 008's grants table, which a move writes to: a grant on
-	// the exact path an object leaves has to follow it. Nil takes the one
-	// over Postgres.
+	// Shares is spec 008's grants table, which a move and a permanent folder
+	// delete write to: a grant on the exact path an object leaves follows
+	// it, and a grant under a folder that is removed goes with it. Nil takes
+	// the one over Postgres.
 	Shares store.Shares
 	// Decide is the seam of spec 006. A surface built without one would act
 	// where nobody decided, so New refuses it.
@@ -233,9 +238,6 @@ type Options struct {
 	// Metrics is spec 018's seam for the bytes this plane moves and the
 	// writes a limit refused. Nil records nothing.
 	Metrics Metrics
-	// Workspaces is the liveness check of spec 009. Nil answers that every
-	// workspace is live.
-	Workspaces Workspaces
 	// References is the reference check of spec 004. Nil takes the
 	// statement over Postgres.
 	References References
@@ -258,7 +260,6 @@ type Service struct {
 	shares     store.Shares
 	decide     Decider
 	ledger     Ledger
-	workspaces Workspaces
 	references References
 	metrics    Metrics
 	cfg        config.Config
@@ -270,7 +271,7 @@ func New(o Options) *Service {
 	s := &Service{
 		db: o.DB, bucket: o.Bucket,
 		files: o.Files, versions: o.Versions, stars: o.Stars, shares: o.Shares,
-		decide: o.Decide, ledger: o.Ledger, workspaces: o.Workspaces,
+		decide: o.Decide, ledger: o.Ledger,
 		references: o.References, cfg: o.Config, clock: o.Now,
 		metrics: o.Metrics,
 	}
@@ -291,9 +292,6 @@ func New(o Options) *Service {
 	}
 	if s.ledger == nil {
 		s.ledger = noLedger{}
-	}
-	if s.workspaces == nil {
-		s.workspaces = everyWorkspaceLive{}
 	}
 	if s.metrics == nil {
 		s.metrics = uncounted{}
@@ -374,12 +372,4 @@ type schemaReferences struct{}
 
 func (schemaReferences) Referenced(ctx context.Context, q store.Querier, id object.ID) (bool, error) {
 	return store.ObjectReferenced(ctx, q, id)
-}
-
-// everyWorkspaceLive is the answer of a build that holds no workspace table:
-// nothing under workspaces/ is behind a tombstone, because nothing has one.
-type everyWorkspaceLive struct{}
-
-func (everyWorkspaceLive) Live(context.Context, store.Querier, string, string) (bool, error) {
-	return true, nil
 }

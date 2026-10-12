@@ -29,7 +29,6 @@ import (
 	"latere.ai/x/arca/internal/files"
 	"latere.ai/x/arca/internal/shares"
 	"latere.ai/x/arca/internal/uploads"
-	"latere.ai/x/arca/internal/workspaces"
 )
 
 // Path is where the document is committed, relative to the repository root.
@@ -81,7 +80,6 @@ func Render() []byte {
 // twice and cannot disagree.
 func routes() []apidocs.Route {
 	rows := api.Routes()
-	rows = append(rows, api.Described(workspaces.Table())...)
 	rows = append(rows, api.Described(shares.Table())...)
 	rows = append(rows, api.Described(append(files.Table(), uploads.Table()...))...)
 	rows = append(rows, api.Described(admin.Table())...)

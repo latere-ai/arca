@@ -87,15 +87,15 @@ func TestAListingPagesOnThePathAndSynthesisesTheDirectoriesBelowIt(t *testing.T)
 
 // TestARootListingCarriesWhatTheSpaceHolds is spec 005's usage on the
 // listing: an owner reads the bytes and the paths of its own space off the
-// root of a plane, at the file.list it already asked, with no new route and
-// no administrator's action.
+// root of the plane, at the file.list it already asked, with no new route
+// and no administrator's action.
 func TestARootListingCarriesWhatTheSpaceHolds(t *testing.T) {
 	h := newHarness(t)
 	h.seed(t, "files/a.md", "hello")
 	h.seed(t, "files/notes/b.md", "world!")
-	h.seed(t, "workspaces/build/main.go", "package main")
+	h.seed(t, "files/build/main.go", "package main")
 
-	for _, plane := range []string{"files", "workspaces"} {
+	for _, plane := range []string{"files"} {
 		page := h.listing(t, h.object(plane)+"?list=1")
 		if page.Space == nil {
 			t.Fatalf("the root of the %s plane carries no space: %+v", plane, page)
@@ -166,7 +166,7 @@ func TestAListingOutsideTheAnswersFilterIsAnEmptyPageAndNeverARefusal(t *testing
 
 func TestMaterializeAnswersOnePresignedURLPerObjectRelativeToTheRoot(t *testing.T) {
 	h := newHarness(t)
-	for _, path := range []string{"files/a.md", "files/notes/b.md", "workspaces/build/main.go"} {
+	for _, path := range []string{"files/a.md", "files/notes/b.md"} {
 		h.write(t, path, "x")
 	}
 	w := h.call(t, http.MethodGet, "/v1/files/materialize", nil)
@@ -179,7 +179,7 @@ func TestMaterializeAnswersOnePresignedURLPerObjectRelativeToTheRoot(t *testing.
 		t.Fatalf("the manifest is %+v", out)
 	}
 	if len(out.Files) != 2 {
-		t.Fatalf("the manifest holds %+v, and the workspaces plane is not this route's", out.Files)
+		t.Fatalf("the manifest holds %+v, want the two objects of the space", out.Files)
 	}
 	for _, f := range out.Files {
 		if strings.HasPrefix(f.Path, "files/") {

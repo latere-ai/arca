@@ -42,8 +42,8 @@ type harness struct {
 	subject  string
 }
 
-// withRestorer binds the restore seam, which the node leaves unbound until
-// the trash of spec 005 and the workspaces of spec 009 answer it.
+// withRestorer binds the restore seam, which the node binds to the trash of
+// spec 005.
 func withRestorer(f *fakeRestorer) func(*Options) {
 	return func(o *Options) { o.Restorer = f }
 }

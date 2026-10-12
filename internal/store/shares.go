@@ -91,14 +91,19 @@ type Shares interface {
 	// to, inside the move's own transaction. A grant on an ancestor covers a
 	// subtree and stays where it is.
 	Move(ctx context.Context, q Querier, owner, from, to string) (int64, error)
+	// DeleteUnder removes every grant and link whose prefix is a folder or
+	// under it, which a permanent folder delete of spec 028 runs so the next
+	// object written there inherits none. A grant that still covers
+	// something an omission left in place stays.
+	DeleteUnder(ctx context.Context, q Querier, owner, folder string, omit []string) (int64, error)
 	// ListSpace answers one page of the grants on a space, ordered by id,
 	// narrowed to one subtree when prefix is not empty. Revoked grants are
 	// not answered.
-	ListSpace(ctx context.Context, q Querier, owner, prefix, cursor string, limit int) ([]Grant, error)
+	ListSpace(ctx context.Context, q Querier, owner, prefix, cursor string, limit int, omit []string) ([]Grant, error)
 	// ListGrantee answers one page of the live grants whose grantee is the
 	// subject, ordered by id. It is the one query shares/with-me runs, and
 	// it reads no membership anywhere.
-	ListGrantee(ctx context.Context, q Querier, grantee, cursor string, limit int) ([]Grant, error)
+	ListGrantee(ctx context.Context, q Querier, grantee, cursor string, limit int, omit []string) ([]Grant, error)
 	// Covering answers the active, unexpired grants on the space whose
 	// prefix covers path, highest permission first. The prefixes of path are
 	// the whole of the match, so files/reports does not cover
@@ -110,10 +115,10 @@ type Shares interface {
 	// Live reads one live token grant of a space by its id (links.go).
 	Live(ctx context.Context, q Querier, id, owner string) (Grant, error)
 	// ListTokens answers one page of a space's token grants (links.go).
-	ListTokens(ctx context.Context, q Querier, owner, cursor string, limit int) ([]Grant, error)
+	ListTokens(ctx context.Context, q Querier, owner, cursor string, limit int, omit []string) ([]Grant, error)
 	// Subtree answers one page of the live paths a grant's prefix covers
 	// (links.go).
-	Subtree(ctx context.Context, q Querier, owner, prefix, cursor string, limit int) ([]File, error)
+	Subtree(ctx context.Context, q Querier, owner, prefix, cursor string, limit int, omit []string) ([]File, error)
 	// CountLinks answers the live token grants each space named holds,
 	// which is the link counter of spec 012's overview. It takes the page's
 	// owners together, so a page of a hundred spaces is one query.
@@ -251,7 +256,11 @@ func (shares) PurgeExpired(ctx context.Context, q Querier, before time.Time) (in
 // that produced it have to be one comparison; ordering by the uuid and
 // resuming by its text would be two, and they agree only under a collation
 // nobody here chose.
-func (shares) ListSpace(ctx context.Context, q Querier, owner, prefix, cursor string, limit int) ([]Grant, error) {
+//
+// A grant whose prefix is at or under one of omit is left out (limits.omit
+// of spec 028). A grant above an omitted subtree is listed: its own prefix
+// is not inside what the answer left out.
+func (shares) ListSpace(ctx context.Context, q Querier, owner, prefix, cursor string, limit int, omit []string) ([]Grant, error) {
 	if limit <= 0 {
 		return nil, fmt.Errorf("store: list the grants of %q: the page holds %d rows", owner, limit)
 	}
@@ -259,12 +268,15 @@ func (shares) ListSpace(ctx context.Context, q Querier, owner, prefix, cursor st
 		SELECT `+grantColumns+`
 		  FROM shares
 		 WHERE owner = $1 AND status = $2 AND ($3 = '' OR path_prefix = $3) AND id::text > $4
+		   AND `+notOmitted("path_prefix", 6)+`
 		 ORDER BY id::text
-		 LIMIT $5`, owner, GrantActive, prefix, cursor, limit)
+		 LIMIT $5`, owner, GrantActive, prefix, cursor, limit, omitted(omit))
 }
 
 // ListGrantee answers one page of the grants whose grantee is the subject.
-func (shares) ListGrantee(ctx context.Context, q Querier, grantee, cursor string, limit int) ([]Grant, error) {
+// The page crosses spaces under one answer, so a prefix of omit is read
+// against the prefix of every grant on it, whichever space granted it.
+func (shares) ListGrantee(ctx context.Context, q Querier, grantee, cursor string, limit int, omit []string) ([]Grant, error) {
 	if limit <= 0 {
 		return nil, fmt.Errorf("store: list what is shared with %q: the page holds %d rows", grantee, limit)
 	}
@@ -274,8 +286,9 @@ func (shares) ListGrantee(ctx context.Context, q Querier, grantee, cursor string
 		 WHERE grantee_kind = $1 AND grantee = $2 AND status = $3
 		   AND (expires_at IS NULL OR expires_at > now())
 		   AND id::text > $4
+		   AND `+notOmitted("path_prefix", 6)+`
 		 ORDER BY id::text
-		 LIMIT $5`, GranteeSubject, grantee, GrantActive, cursor, limit)
+		 LIMIT $5`, GranteeSubject, grantee, GrantActive, cursor, limit, omitted(omit))
 }
 
 // Covering answers the grants on a space whose prefix covers path.
@@ -314,6 +327,28 @@ func (shares) Move(ctx context.Context, q Querier, owner, from, to string) (int6
 		`UPDATE shares SET path_prefix = $3 WHERE owner = $1 AND path_prefix = $2`, owner, from, to)
 	if err != nil {
 		return 0, classify(fmt.Sprintf("move the grants on %q of %q", from, owner), err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// DeleteUnder removes every grant and link whose prefix is a folder or under
+// it, whatever its status.
+//
+// A row whose prefix is at or under an omitted subtree stays, and so does a
+// row whose prefix is above one: the folder delete left that subtree in
+// place, and a grant that covers it still means what it meant.
+func (shares) DeleteUnder(ctx context.Context, q Querier, owner, folder string, omit []string) (int64, error) {
+	tag, err := q.Exec(ctx, `
+		DELETE FROM shares
+		 WHERE owner = $1 AND (path_prefix = $2 OR path_prefix LIKE $3 ESCAPE '\')
+		   AND NOT EXISTS (
+		    SELECT 1 FROM unnest($4::text[]) AS omitted(prefix)
+		     WHERE path_prefix = omitted.prefix
+		        OR starts_with(path_prefix, omitted.prefix || '/')
+		        OR starts_with(omitted.prefix, path_prefix || '/'))`,
+		owner, folder, under(folder), omitted(omit))
+	if err != nil {
+		return 0, classify(fmt.Sprintf("remove the grants under %q of %q", folder, owner), err)
 	}
 	return tag.RowsAffected(), nil
 }

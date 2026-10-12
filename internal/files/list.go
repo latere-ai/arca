@@ -24,6 +24,12 @@ const manifestPage = 1000
 // list answers the live rows under a prefix, keyset paginated on the path,
 // with the common prefixes below it synthesised so a browser can render a
 // tree this server does not store.
+//
+// The answer's limits.omit leaves subtrees out of the page (spec 028). The
+// omission is in the query, so a page is never short for a row it left out,
+// and a folder that holds nothing else is not synthesised. The usage a
+// listing of the plane root carries is the whole space's and is not
+// narrowed: it is the counter the space is charged against.
 func (s *Service) list(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	t, err := s.Subtree(ctx, r.PathValue("owner"), r.PathValue("path"))
@@ -51,8 +57,14 @@ func (s *Service) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	limits, err := LimitsOf(d)
+	if err != nil {
+		api.WriteError(w, r, fault(ctx, "read the answer's limits", err))
+		return
+	}
+
 	prefix := subtree(t.Path)
-	rows, _, err := s.files.ListPrefix(ctx, s.db.Querier(), t.Owner, prefix, api.Cursor(r), limit+1)
+	rows, _, err := s.files.ListPrefix(ctx, s.db.Querier(), t.Owner, prefix, api.Cursor(r), limit+1, limits.Omit)
 	if err != nil {
 		api.WriteError(w, r, fault(ctx, "list the subtree", err))
 		return
@@ -83,9 +95,9 @@ func (s *Service) list(w http.ResponseWriter, r *http.Request) {
 // one listing that names a space rather than a subtree of one.
 func root(t Target) bool { return t.Path == string(t.Plane) }
 
-// materialize answers one space as a manifest of presigned URLs. It reads
-// one space and needs no lease, because there is no writer to exclude; the
-// leased form is spec 009's.
+// materialize answers a folder of one space as a manifest of presigned URLs,
+// one per live object under the prefix. A subtree the answer's limits.omit
+// names is left out of it (spec 028).
 func (s *Service) materialize(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	base := object.PlaneFiles.Prefix()
@@ -109,6 +121,11 @@ func (s *Service) materialize(w http.ResponseWriter, r *http.Request) {
 		write(w, http.StatusOK, manifest)
 		return
 	}
+	limits, err := LimitsOf(d)
+	if err != nil {
+		api.WriteError(w, r, fault(ctx, "read the answer's limits", err))
+		return
+	}
 
 	// The whole subtree, read a page at a time. The rows are the authority
 	// on what exists, and each one's own object is presigned: a key
@@ -116,7 +133,7 @@ func (s *Service) materialize(w http.ResponseWriter, r *http.Request) {
 	// an id (spec 003).
 	cursor := ""
 	for {
-		rows, _, err := s.files.ListPrefix(ctx, s.db.Querier(), t.Owner, base, cursor, manifestPage)
+		rows, _, err := s.files.ListPrefix(ctx, s.db.Querier(), t.Owner, base, cursor, manifestPage, limits.Omit)
 		if err != nil {
 			api.WriteError(w, r, fault(ctx, "list the subtree", err))
 			return

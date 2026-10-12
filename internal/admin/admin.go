@@ -24,10 +24,10 @@
 // rule and every pagination bug.
 //
 // Two seams keep this package to its own spec. [Restorer] is the restore
-// across owners, which reaches the trash of spec 005 and the soft deleted
-// workspaces of spec 009; [Links] is the token grant count of spec 008.
-// Neither table is this package's, and an installation that has bound
-// neither says so on the wire rather than guessing.
+// across owners, which reaches the trash of spec 005; [Links] is the token
+// grant count of spec 008. Neither table is this package's, and an
+// installation that has bound neither says so on the wire rather than
+// guessing.
 package admin
 
 import (
@@ -41,47 +41,41 @@ import (
 )
 
 // OwnerAlias is the spelling of the caller's own space, so a client that has
-// not read its own subject back still addresses it. It is spec 009's alias,
+// not read its own subject back still addresses it. It is spec 013's alias,
 // spelled the same here because one client reads both surfaces.
 const OwnerAlias = "me"
 
-// The two things a restore can bring back. The answer says which it was,
-// because the route takes an id rather than a path and one id names either.
-const (
-	// KindFile is a trashed object returned to its path.
-	KindFile = "file"
-	// KindWorkspace is a soft deleted workspace returned to its slug.
-	KindWorkspace = "workspace"
-)
+// KindFile is what a restore brings back: a trashed object returned to its
+// path. The answer names the kind, as it did when the route restored a
+// second kind beside it, so a client that reads the member keeps working.
+const KindFile = "file"
 
 // ErrNotRestorable is an id that names nothing the space can bring back: a
 // typo, or an id the reaper has already purged. The two are one answer on
 // the wire, and the developer detail names the window so an administrator is
 // not left guessing between them.
-var ErrNotRestorable = errors.New("admin: no trashed object and no deleted workspace carries that id")
+var ErrNotRestorable = errors.New("admin: no trashed object carries that id")
 
 // Restored is what a restore brought back.
 type Restored struct {
 	// ID is the id the request named.
 	ID string
-	// Kind is [KindFile] or [KindWorkspace].
+	// Kind is [KindFile].
 	Kind string
 }
 
-// Restorer returns one deleted object or workspace to a space. It restores
-// across owners, which is the whole reason it exists beside the owner's own
-// restore of specs 005 and 009, and it takes an id rather than a path so
-// that one route returns either.
+// Restorer returns one trashed object to a space. It restores across
+// owners, which is the whole reason it exists beside the owner's own restore
+// of spec 005, and it takes an id rather than a path.
 //
-// It is a seam because what it undoes belongs to those two specs: the
-// trashed row and the soft deleted workspace are theirs, and the restore
-// touches the database only, per invariant 1 of spec 001. An installation
-// whose build binds none registers the route at its right place and answers
-// not_implemented, which is what spec 013 reserves that code for.
+// It is a seam because what it undoes belongs to that spec: the trashed row
+// is its own, and the restore touches the database only, per invariant 1 of
+// spec 001. An installation whose build binds none registers the route at
+// its right place and answers not_implemented, which is what spec 013
+// reserves that code for.
 type Restorer interface {
-	// Restore returns the object or the workspace the id names to the space,
-	// answering which it was. An id that names nothing still restorable is
-	// [ErrNotRestorable].
+	// Restore returns the object the id names to the space. An id that
+	// names nothing still restorable is [ErrNotRestorable].
 	Restore(ctx context.Context, owner, id string) (Restored, error)
 }
 

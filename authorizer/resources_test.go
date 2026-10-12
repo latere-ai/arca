@@ -19,13 +19,13 @@ var filled = map[string]interface{ Resource() authz.Resource }{
 	KindFile: File{
 		ID: "01J8R4", Owner: "https://issuer.example|9ab3", Path: "files/reports/q3.pdf",
 		Plane: "files", Size: Bytes(48213), From: "files/drafts/q3.pdf", Grant: "write",
+		Recursive: true, Copy: true,
 	},
-	KindUpload:    Upload{Owner: "https://issuer.example|9ab3", Path: "files/video/keynote.mp4", Size: Bytes(1 << 30), Grant: "write"},
-	KindShare:     Share{ID: "01J8R5", Owner: "https://issuer.example|9ab3", Path: "files/reports", Grantee: "https://issuer.example|4c1d", Permission: "read"},
-	KindLink:      Link{ID: "01J8R6", Owner: "https://issuer.example|9ab3", Path: "files/reports"},
-	KindWorkspace: Workspace{ID: "01J8R7", Owner: "https://issuer.example|9ab3", Slug: "build", Grant: "read"},
-	KindEvent:     Event{Owner: "https://issuer.example|9ab3"},
-	KindSpace:     Space{Owner: "https://issuer.example|9ab3"},
+	KindUpload: Upload{Owner: "https://issuer.example|9ab3", Path: "files/video/keynote.mp4", Size: Bytes(1 << 30), Grant: "write"},
+	KindShare:  Share{ID: "01J8R5", Owner: "https://issuer.example|9ab3", Path: "files/reports", Grantee: "https://issuer.example|4c1d", Permission: "read"},
+	KindLink:   Link{ID: "01J8R6", Owner: "https://issuer.example|9ab3", Path: "files/reports"},
+	KindEvent:  Event{Owner: "https://issuer.example|9ab3"},
+	KindSpace:  Space{Owner: "https://issuer.example|9ab3"},
 }
 
 // extras are the members a kind renders that spec 006's table column does not
@@ -60,8 +60,8 @@ func TestResourceShapesMatchSpec006(t *testing.T) {
 	}
 }
 
-// TestEveryActionHasAResourceType: a handler asking any of the twenty-three
-// has a type to build the question's resource with.
+// TestEveryActionHasAResourceType: a handler asking any of the fifteen has a
+// type to build the question's resource with.
 func TestEveryActionHasAResourceType(t *testing.T) {
 	for _, action := range Actions() {
 		if _, ok := filled[Kind(action)]; !ok {
@@ -85,8 +85,6 @@ func TestAnEmptyResourceCarriesOnlyItsKind(t *testing.T) {
 			res = Share{}.Resource()
 		case KindLink:
 			res = Link{}.Resource()
-		case KindWorkspace:
-			res = Workspace{}.Resource()
 		case KindEvent:
 			res = Event{}.Resource()
 		case KindSpace:
@@ -157,4 +155,27 @@ func wireKeys(t *testing.T, res authz.Resource) []string {
 	}
 	delete(out, "kind")
 	return slices.Sorted(maps.Keys(out))
+}
+
+// TestRecursiveAndCopyAreSentOnlyWhenTrue: the two members of spec 028 are
+// present and true or absent, so an endpoint that predates them reads the
+// question it always read, and a question that carries from without copy is
+// a move.
+func TestRecursiveAndCopyAreSentOnlyWhenTrue(t *testing.T) {
+	moved := File{Owner: "o", Path: "files/b", From: "files/a", Plane: "files"}.Resource()
+	for _, member := range []string{"recursive", "copy"} {
+		if _, present := moved.Fields[member]; present {
+			t.Errorf("a move carries %s", member)
+		}
+	}
+	copied := File{Owner: "o", Path: "files/b", From: "files/a", Plane: "files", Copy: true, Recursive: true}.Resource()
+	for _, member := range []string{"recursive", "copy"} {
+		if got, present := copied.Fields[member]; !present || got != true {
+			t.Errorf("a folder copy sends %s as %v, present %v; it sends true", member, got, present)
+		}
+	}
+	removed := File{Owner: "o", Path: "files/a", Plane: "files", Recursive: true}.Resource()
+	if got := wireKeys(t, removed); !slices.Equal(got, []string{"owner", "path", "plane", "recursive"}) {
+		t.Errorf("a folder delete carries %v; it carries no id and no size", got)
+	}
 }

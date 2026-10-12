@@ -17,8 +17,8 @@ import (
 )
 
 // The grant on the resource of spec 006: the rung the caller holds on a
-// prefix of the resource's path rides on every question about a file and a
-// workspace, so an operator's endpoint can tell a grantee from a stranger.
+// prefix of the resource's path rides on every question about a file and an
+// upload, so an operator's endpoint can tell a grantee from a stranger.
 //
 // The wire form is read off the stub's record of what it was sent, which is
 // the same bytes an endpoint reads.
@@ -45,12 +45,6 @@ func (l *lookup) Permission(_ context.Context, owner, subject, path string) (aut
 		return l.by[path], nil
 	}
 	return l.held, nil
-}
-
-// aWorkspace is the resource of a question about one workspace, whose grant
-// is read against the subtree the slug owns.
-func aWorkspace(id string) authz.Resource {
-	return authorizer.Workspace{ID: id, Owner: alice, Slug: "build"}.Resource()
 }
 
 // anUpload is the resource of a multipart write, which a grantee holding
@@ -90,8 +84,6 @@ func TestTheQuestionCarriesTheCallersGrant(t *testing.T) {
 	}{
 		{"a grantee's file", auth.PermissionRead, aFile("01J8R4"), carol, "read",
 			alice + " " + carol + " files/reports/q3.pdf"},
-		{"a grantee's workspace", auth.PermissionWrite, aWorkspace("01J8R7"), carol, "write",
-			alice + " " + carol + " workspaces/build"},
 		{"the highest rung", auth.PermissionManage, aFile("01J8R4"), carol, "manage",
 			alice + " " + carol + " files/reports/q3.pdf"},
 		{"a stranger", auth.PermissionNone, aFile("01J8R4"), carol, "",
@@ -116,7 +108,7 @@ func TestTheQuestionCarriesTheCallersGrant(t *testing.T) {
 		// settled without reading the table at all. That is also the question
 		// this core is asked most, and the read it saves is on the hot path.
 		{"the space's own owner", auth.PermissionManage, aFile("01J8R4"), alice, "", ""},
-		{"the owner of a workspace", auth.PermissionManage, aWorkspace("01J8R7"), alice, "", ""},
+		{"the owner's own multipart write", auth.PermissionManage, anUpload(), alice, "", ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			s := endpoint(t)
@@ -126,8 +118,6 @@ func TestTheQuestionCarriesTheCallersGrant(t *testing.T) {
 
 			action := authorizer.ActionFileRead
 			switch c.resource.Kind {
-			case authorizer.KindWorkspace:
-				action = authorizer.ActionWorkspaceRead
 			case authorizer.KindShare:
 				action = authorizer.ActionShareRead
 			case authorizer.KindUpload:

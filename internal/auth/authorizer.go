@@ -56,8 +56,8 @@ type Decision struct {
 	// quota the answer carried binds a write (spec 010).
 	TTL time.Duration
 	// Limits is the answer's limits object as it came, nil when the answer
-	// carried none. Spec 010 decodes quota_bytes out of it; nothing here
-	// reads it.
+	// carried none. [ReadLimits] decodes it, and a handler reads it only for
+	// the members its own question carries.
 	Limits json.RawMessage
 	// Filter narrows a list action's page to the owners and labels the
 	// authorizer named. The handler applies it to its own query, so a

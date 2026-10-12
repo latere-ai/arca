@@ -41,8 +41,10 @@ func TestTheGuideNamesEveryRoute(t *testing.T) {
 	}
 	body := guide(t)
 	var missing []string
+	described := 0
 	for path, methods := range doc.Paths {
 		for method := range methods {
+			described++
 			row := "| " + strings.ToUpper(method) + " | `" + path + "` |"
 			if !strings.Contains(body, row) {
 				missing = append(missing, strings.ToUpper(method)+" "+path)
@@ -53,8 +55,10 @@ func TestTheGuideNamesEveryRoute(t *testing.T) {
 	for _, m := range missing {
 		t.Errorf("docs/api.md has no row for %s", m)
 	}
-	if len(doc.Paths) < 25 {
-		t.Fatalf("the document describes %d paths, which is not the surface", len(doc.Paths))
+	// A document read back short would hold the guide to less than the
+	// surface and pass.
+	if described != surfaceRoutes {
+		t.Fatalf("the document describes %d routes, and the surface is %d", described, surfaceRoutes)
 	}
 }
 

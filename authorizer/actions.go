@@ -14,24 +14,23 @@ import (
 // personal key qualify their actions with.
 const Core = "arca"
 
-// The seven resource kinds of the arca.latere.ai/v1 API group. They are
+// The six resource kinds of the arca.latere.ai/v1 API group. They are
 // strings because the vocabulary is the half of the contract an endpoint
 // needs, and the kind an action acts on never changes.
 const (
-	KindFile      = "File"
-	KindUpload    = "Upload"
-	KindShare     = "Share"
-	KindLink      = "Link"
-	KindWorkspace = "Workspace"
-	KindEvent     = "Event"
-	KindSpace     = "Space"
+	KindFile   = "File"
+	KindUpload = "Upload"
+	KindShare  = "Share"
+	KindLink   = "Link"
+	KindEvent  = "Event"
+	KindSpace  = "Space"
 )
 
 // The actions of spec 006's table: every question arcad asks an authorizer,
 // and with the resource kinds above the whole of what this module adds to
-// the shared contract's envelope. A constant never changes its string and
-// never disappears; a new action is a new row in that table first and a
-// constant here second.
+// the shared contract's envelope. A new action is a new row in that table
+// first and a constant here second. Spec 028 removed one kind with its eight
+// actions in a minor release of the v0 module, which the changelog names.
 const (
 	ActionFileRead    = "file.read"
 	ActionFileWrite   = "file.write"
@@ -49,15 +48,6 @@ const (
 	ActionLinkCreate = "link.create"
 	ActionLinkRead   = "link.read"
 	ActionLinkRevoke = "link.revoke"
-
-	ActionWorkspaceCreate  = "workspace.create"
-	ActionWorkspaceRead    = "workspace.read"
-	ActionWorkspaceWrite   = "workspace.write"
-	ActionWorkspaceDelete  = "workspace.delete"
-	ActionWorkspaceList    = "workspace.list"
-	ActionWorkspaceAttach  = "workspace.attach"
-	ActionWorkspaceSync    = "workspace.sync"
-	ActionWorkspaceRestore = "workspace.restore"
 
 	ActionEventRead = "event.read"
 
@@ -85,15 +75,6 @@ var table = []authz.Action{
 	{Name: ActionLinkRead, Kind: KindLink},
 	{Name: ActionLinkRevoke, Kind: KindLink},
 
-	{Name: ActionWorkspaceCreate, Kind: KindWorkspace},
-	{Name: ActionWorkspaceRead, Kind: KindWorkspace},
-	{Name: ActionWorkspaceWrite, Kind: KindWorkspace},
-	{Name: ActionWorkspaceDelete, Kind: KindWorkspace},
-	{Name: ActionWorkspaceList, Kind: KindWorkspace},
-	{Name: ActionWorkspaceAttach, Kind: KindWorkspace},
-	{Name: ActionWorkspaceSync, Kind: KindWorkspace},
-	{Name: ActionWorkspaceRestore, Kind: KindWorkspace},
-
 	{Name: ActionEventRead, Kind: KindEvent},
 
 	{Name: ActionSpaceAdmin, Kind: KindSpace},
@@ -105,13 +86,12 @@ var table = []authz.Action{
 // exactly one kind and that grouping is the only correct one, and it names
 // each group with the label here rather than with a word of its own.
 var labels = map[string]string{
-	KindFile:      "Files",
-	KindUpload:    "Uploads",
-	KindShare:     "Shares",
-	KindLink:      "Links",
-	KindWorkspace: "Workspaces",
-	KindEvent:     "Events",
-	KindSpace:     "Spaces",
+	KindFile:   "Files",
+	KindUpload: "Uploads",
+	KindShare:  "Shares",
+	KindLink:   "Links",
+	KindEvent:  "Events",
+	KindSpace:  "Spaces",
 }
 
 // Vocabulary is Arca's action table as the shared contract reads it: the

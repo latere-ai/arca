@@ -22,7 +22,7 @@ type File struct {
 	ID string
 	// Owner is the space, the subject <issuer>|<sub>.
 	Owner string
-	// Path is plane rooted: files/… or workspaces/….
+	// Path is plane rooted: files/….
 	Path string
 	// ObjectID names the bytes.
 	ObjectID object.ID
@@ -62,8 +62,9 @@ type Files interface {
 	// move and ErrConflict when the destination is taken.
 	Move(ctx context.Context, q Querier, owner, from, to string) (bool, error)
 	// ListPrefix answers one page of live paths under a prefix, ordered by
-	// path, with the cursor the next page starts after.
-	ListPrefix(ctx context.Context, q Querier, owner, prefix, cursor string, limit int) ([]File, string, error)
+	// path, with the cursor the next page starts after. A path at or under
+	// one of omit is left out, which is limits.omit of spec 028.
+	ListPrefix(ctx context.Context, q Querier, owner, prefix, cursor string, limit int, omit []string) ([]File, string, error)
 
 	// The write arms, the two deletes and the trash of spec 005, in
 	// files_write.go and files_trash.go, where the comment on each says what
@@ -80,8 +81,14 @@ type Files interface {
 	HardDelete(ctx context.Context, q Querier, owner, path string) (File, bool, error)
 	Restore(ctx context.Context, q Querier, owner, path string, since time.Time) (bool, error)
 	RestoreByID(ctx context.Context, q Querier, owner, id string, since time.Time) (File, bool, error)
-	ListTrash(ctx context.Context, q Querier, owner string, cursor TrashCursor, limit int, since time.Time) ([]File, error)
-	PurgeTrash(ctx context.Context, q Querier, owner, path string) ([]File, error)
+	ListTrash(ctx context.Context, q Querier, owner string, cursor TrashCursor, limit int, since time.Time, omit []string) ([]File, error)
+	PurgeTrash(ctx context.Context, q Querier, owner, path string, omit []string) ([]File, error)
+
+	// The statements over a folder of spec 028, in files_subtree.go.
+	StatSubtree(ctx context.Context, q Querier, owner, folder string, omit []string) (Subtree, error)
+	TrashSubtree(ctx context.Context, q Querier, owner, folder string, omit []string) (Subtree, error)
+	DropSubtree(ctx context.Context, q Querier, owner, folder string, omit []string) (Subtree, error)
+	Unreferenced(ctx context.Context, q Querier, ids []object.ID) ([]object.ID, error)
 }
 
 // files is the query set over Postgres.
@@ -167,7 +174,7 @@ func (files) Move(ctx context.Context, q Querier, owner, from, to string) (bool,
 // ListPrefix answers one page of live paths under a prefix. The page is
 // keyset paginated on the ordered column: the cursor is the last path of the
 // page before, so an insert during the walk shifts nothing.
-func (files) ListPrefix(ctx context.Context, q Querier, owner, prefix, cursor string, limit int) ([]File, string, error) {
+func (files) ListPrefix(ctx context.Context, q Querier, owner, prefix, cursor string, limit int, omit []string) ([]File, string, error) {
 	if limit <= 0 {
 		return nil, "", fmt.Errorf("store: list %q of %q: the page holds %d rows", prefix, owner, limit)
 	}
@@ -175,8 +182,9 @@ func (files) ListPrefix(ctx context.Context, q Querier, owner, prefix, cursor st
 		SELECT `+fileColumns+`
 		  FROM files
 		 WHERE owner = $1 AND path LIKE $2 ESCAPE '\' AND path > $3 AND deleted_at IS NULL
+		   AND `+notOmitted("path", 5)+`
 		 ORDER BY path
-		 LIMIT $4`, owner, likePrefix(prefix), cursor, limit)
+		 LIMIT $4`, owner, likePrefix(prefix), cursor, limit, omitted(omit))
 	if err != nil {
 		return nil, "", fmt.Errorf("store: list %q of %q: %w", prefix, owner, err)
 	}

@@ -10,7 +10,7 @@ import (
 	"latere.ai/x/arca/internal/api"
 )
 
-// Table are the fifteen rows of spec 013's first table, declared without
+// Table are the twelve routes of spec 013's first table, declared without
 // their handlers so tools/apidoc describes the same surface the node mounts.
 // Routes binds them.
 //
@@ -31,7 +31,7 @@ func Table() []api.Route {
 			Method: http.MethodGet, Path: "/v1/files/{owner}/{path...}",
 			Action: authorizer.ActionFileRead, Status: http.StatusOK,
 			Summary:     "Read or list files",
-			Description: "Read one object, its subtree with ?list=1, which carries the space's usage at a plane root, or its versions with ?versions=1.",
+			Description: "Read one object, its subtree with ?list=1, which carries the space's usage at the plane root, or its versions with ?versions=1.",
 		},
 		{
 			Method: http.MethodHead, Path: "/v1/files/{owner}/{path...}",
@@ -42,20 +42,20 @@ func Table() []api.Route {
 		{
 			Method: http.MethodPost, Path: "/v1/files/{owner}/{path...}",
 			Action: authorizer.ActionFileWrite, Status: http.StatusOK,
-			Summary:     "Move or restore file",
-			Description: "Move the object with move_to, or bring a version forward with restore_version.",
+			Summary:     "Move, copy or restore",
+			Description: "Move the object with move_to, copy it with copy_to, copy a folder with copy_to and recursive, or bring a version forward with restore_version.",
 		},
 		{
 			Method: http.MethodDelete, Path: "/v1/files/{owner}/{path...}",
 			Action: authorizer.ActionFileDelete, Status: http.StatusNoContent,
-			Summary:     "Delete file",
-			Description: "Trash the object; ?permanent=1 removes it and ?version=N prunes one version.",
+			Summary:     "Delete file or folder",
+			Description: "Trash the object; ?permanent=1 removes it, ?version=N prunes one version, and ?recursive=1 deletes every object under the folder.",
 		},
 		{
 			Method: http.MethodGet, Path: "/v1/files/materialize",
 			Action: authorizer.ActionFileList, Status: http.StatusOK,
 			Summary:     "Get space manifest",
-			Description: "One space as a manifest of presigned URLs.",
+			Description: "A folder of one space, named with ?prefix=, as a manifest of presigned URLs.",
 		},
 		{
 			Method: http.MethodGet, Path: "/v1/trash",

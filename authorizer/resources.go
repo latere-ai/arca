@@ -16,7 +16,7 @@ import "latere.ai/x/pkg/authz"
 // "a source path this version does not send". Owner is the rendered subject
 // of spec 006, "<issuer>|<sub>", and never a bare sub.
 //
-// Grant is the one field no handler sets. A file and a workspace carry the
+// Grant is the one field no handler sets. A file and an upload carry the
 // rung the caller holds on the resource's own subtree, which internal/auth
 // resolves from Arca's grants table before it asks; the four kinds that
 // carry none are the ones no grant reaches (spec 006).
@@ -27,28 +27,41 @@ import "latere.ai/x/pkg/authz"
 func Bytes(n int64) *int64 { return new(n) }
 
 // File is the resource of every file.* action: a put, a read, a head, a
-// listing, a move, a delete, a version, a star, and a restore from trash.
-// A write that creates carries no id, because the id does not exist until
-// the write is allowed.
+// listing, a move, a copy, a delete, a version, a star, and a restore from
+// trash. A write that creates carries no id, because the id does not exist
+// until the write is allowed.
 type File struct {
-	// ID is the object's id, absent on a write that creates.
+	// ID is the object's id, absent on a write that creates and on a
+	// question about a folder.
 	ID string
 	// Owner is the space the object lives in.
 	Owner string
-	// Path is the object's path within the space, and on a move the target.
+	// Path is the object's path within the space, and on a move or a copy
+	// the target.
 	Path string
-	// Plane is "files" or "workspaces" and nothing else (spec 001).
+	// Plane is "files" and nothing else (spec 001). The member stays on the
+	// wire so an endpoint that reads it keeps answering.
 	Plane string
 	// Size is the object's size in bytes, absent where the question carries
-	// no size: a listing, or a read of an object not yet looked up.
+	// no size: a listing, a folder delete, or a read of an object not yet
+	// looked up. On a copy it is the sum of the bytes to be written.
 	Size *int64
-	// From is the source path of a move, absent on every other question.
+	// From is the source path of a move or a copy, absent on every other
+	// question.
 	From string
+	// Recursive reports that Path, and From where there is one, name a
+	// folder and everything under it: a folder delete or a folder copy. It
+	// is absent unless true.
+	Recursive bool
+	// Copy reports that From is read and stays where it is. A question that
+	// carries From without it is a move. It is absent unless true.
+	Copy bool
 	// Grant is the rung the caller holds on a prefix of Path in Owner's
-	// space: read, write, or manage, absent where the caller holds none.
-	// internal/auth reads it off Arca's own grants table and puts it here
-	// before the question goes out, so a caller building a File leaves it
-	// empty.
+	// space: read, write, or manage, absent where the caller holds none. On
+	// a question that names From it is the lower of the rungs held on the
+	// two paths. internal/auth reads it off Arca's own grants table and puts
+	// it here before the question goes out, so a caller building a File
+	// leaves it empty.
 	Grant string
 }
 
@@ -56,7 +69,9 @@ type File struct {
 func (f File) Resource() authz.Resource {
 	return authz.NewResource(KindFile, f.ID, fields(
 		field{"owner", f.Owner}, field{"path", f.Path}, field{"plane", f.Plane},
-		size(f.Size), field{"from", f.From}, field{"grant", f.Grant},
+		size(f.Size), field{"from", f.From},
+		set("recursive", f.Recursive), set("copy", f.Copy),
+		field{"grant", f.Grant},
 	))
 }
 
@@ -122,25 +137,6 @@ func (l Link) Resource() authz.Resource {
 	))
 }
 
-// Workspace is the resource of every workspace.* action: a durable subtree a
-// sandbox attaches to. A create carries no id.
-type Workspace struct {
-	ID    string
-	Owner string
-	Slug  string
-	// Grant is the rung the caller holds on the workspace's own subtree,
-	// workspaces/<slug>, which is the prefix a grant on a workspace covers
-	// (spec 001). It is filled and left empty on the same terms as a file's.
-	Grant string
-}
-
-// Resource renders the workspace as the envelope carries it.
-func (w Workspace) Resource() authz.Resource {
-	return authz.NewResource(KindWorkspace, w.ID, fields(
-		field{"owner", w.Owner}, field{"slug", w.Slug}, field{"grant", w.Grant},
-	))
-}
-
 // Event is the resource of event.read: a space's log. The log is the space's,
 // so the owner is the whole of what the question names.
 type Event struct {
@@ -185,6 +181,15 @@ func size(n *int64) field {
 		return field{}
 	}
 	return field{"size", *n}
+}
+
+// set is a member that is sent as true or not sent at all, so an endpoint
+// that predates it reads the question it always read.
+func set(name string, on bool) field {
+	if !on {
+		return field{}
+	}
+	return field{name, true}
 }
 
 // fields gathers the members a resource carries, dropping the empty ones.

@@ -272,7 +272,7 @@ func (m *memory) RestoreByID(_ context.Context, _ store.Querier, owner, id strin
 }
 
 // ListTrash answers the trashed rows inside the window, newest first.
-func (m *memory) ListTrash(_ context.Context, _ store.Querier, owner string, cursor store.TrashCursor, limit int, since time.Time) ([]store.File, error) {
+func (m *memory) ListTrash(_ context.Context, _ store.Querier, owner string, cursor store.TrashCursor, limit int, since time.Time, omit []string) ([]store.File, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.fault(); err != nil {
@@ -280,7 +280,7 @@ func (m *memory) ListTrash(_ context.Context, _ store.Querier, owner string, cur
 	}
 	var out []store.File
 	for _, f := range m.files {
-		if f.Owner != owner || f.DeletedAt == nil || !f.DeletedAt.After(since) {
+		if f.Owner != owner || f.DeletedAt == nil || !f.DeletedAt.After(since) || store.Omitted(omit, f.Path) {
 			continue
 		}
 		if !cursor.DeletedAt.IsZero() && !f.DeletedAt.Before(cursor.DeletedAt) &&
@@ -298,8 +298,10 @@ func (m *memory) ListTrash(_ context.Context, _ store.Querier, owner string, cur
 	return page(out, limit), nil
 }
 
-// PurgeTrash removes trashed rows and answers them.
-func (m *memory) PurgeTrash(_ context.Context, _ store.Querier, owner, path string) ([]store.File, error) {
+// PurgeTrash removes trashed rows and answers them. A purge of the whole
+// trash leaves an omitted subtree where it is; a purge of one path reads no
+// omission.
+func (m *memory) PurgeTrash(_ context.Context, _ store.Querier, owner, path string, omit []string) ([]store.File, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.fault(); err != nil {
@@ -308,6 +310,9 @@ func (m *memory) PurgeTrash(_ context.Context, _ store.Querier, owner, path stri
 	var out []store.File
 	for k, f := range m.files {
 		if f.Owner != owner || f.DeletedAt == nil || (path != "" && f.Path != path) {
+			continue
+		}
+		if path == "" && store.Omitted(omit, f.Path) {
 			continue
 		}
 		out = append(out, f)
@@ -337,8 +342,9 @@ func (m *memory) Move(_ context.Context, _ store.Querier, owner, from, to string
 	return true, nil
 }
 
-// ListPrefix answers the live rows under a prefix, ordered by path.
-func (m *memory) ListPrefix(_ context.Context, _ store.Querier, owner, prefix, cursor string, limit int) ([]store.File, string, error) {
+// ListPrefix answers the live rows under a prefix, ordered by path, without
+// the subtrees the answer left out.
+func (m *memory) ListPrefix(_ context.Context, _ store.Querier, owner, prefix, cursor string, limit int, omit []string) ([]store.File, string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.fault(); err != nil {
@@ -346,13 +352,106 @@ func (m *memory) ListPrefix(_ context.Context, _ store.Querier, owner, prefix, c
 	}
 	var out []store.File
 	for _, f := range m.files {
-		if f.Owner != owner || f.DeletedAt != nil || !strings.HasPrefix(f.Path, prefix) || f.Path <= cursor {
+		if f.Owner != owner || f.DeletedAt != nil || !strings.HasPrefix(f.Path, prefix) || f.Path <= cursor ||
+			store.Omitted(omit, f.Path) {
 			continue
 		}
 		out = append(out, f)
 	}
 	slices.SortFunc(out, func(a, b store.File) int { return strings.Compare(a.Path, b.Path) })
 	return page(out, limit), "", nil
+}
+
+// inFolder reports whether a row is under a folder and not left out, which
+// is the selection every statement over a folder makes: the folder's own
+// path and a sibling whose name begins with it are outside.
+func inFolder(f store.File, owner, folder string, omit []string) bool {
+	return f.Owner == owner && strings.HasPrefix(f.Path, folder+"/") && !store.Omitted(omit, f.Path)
+}
+
+// StatSubtree counts the live rows under a folder and their bytes.
+func (m *memory) StatSubtree(_ context.Context, _ store.Querier, owner, folder string, omit []string) (store.Subtree, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.fault(); err != nil {
+		return store.Subtree{}, err
+	}
+	var out store.Subtree
+	for _, f := range m.files {
+		if inFolder(f, owner, folder, omit) && f.DeletedAt == nil {
+			out.Files++
+			out.Bytes += f.SizeBytes
+		}
+	}
+	return out, nil
+}
+
+// TrashSubtree trashes every live row under a folder.
+func (m *memory) TrashSubtree(_ context.Context, _ store.Querier, owner, folder string, omit []string) (store.Subtree, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.fault(); err != nil {
+		return store.Subtree{}, err
+	}
+	var out store.Subtree
+	now := time.Now()
+	for k, f := range m.files {
+		if !inFolder(f, owner, folder, omit) || f.DeletedAt != nil {
+			continue
+		}
+		f.DeletedAt = &now
+		m.files[k] = f
+		out.Files++
+		out.Bytes += f.SizeBytes
+	}
+	return out, nil
+}
+
+// DropSubtree removes every row under a folder, live and trashed, with the
+// history of each.
+func (m *memory) DropSubtree(_ context.Context, _ store.Querier, owner, folder string, omit []string) (store.Subtree, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.fault(); err != nil {
+		return store.Subtree{}, err
+	}
+	var out store.Subtree
+	for k, f := range m.files {
+		if !inFolder(f, owner, folder, omit) {
+			continue
+		}
+		delete(m.files, k)
+		out.Files++
+		out.Bytes += f.SizeBytes
+		out.Objects = append(out.Objects, f.ObjectID)
+	}
+	for k, v := range m.versions {
+		if !inFolder(store.File{Owner: v.Owner, Path: v.Path}, owner, folder, omit) {
+			continue
+		}
+		delete(m.versions, k)
+		out.Bytes += v.SizeBytes
+		out.Objects = append(out.Objects, v.ObjectID)
+	}
+	return out, nil
+}
+
+// Unreferenced narrows a set of objects to the ones no row still names.
+func (m *memory) Unreferenced(ctx context.Context, q store.Querier, ids []object.ID) ([]object.ID, error) {
+	if err := m.fault(); err != nil {
+		return nil, err
+	}
+	var out []object.ID
+	for _, id := range ids {
+		referenced, err := m.Referenced(ctx, q, id)
+		if err != nil {
+			return nil, err
+		}
+		if !referenced {
+			out = append(out, id)
+		}
+	}
+	return out, nil
 }
 
 // Capture moves the current content of a path into its history.
@@ -497,7 +596,7 @@ func (m *memory) Remove(_ context.Context, _ store.Querier, subject, owner, path
 
 // ListStars answers a subject's stars joined with live rows, narrowed to
 // the owners when it names any.
-func (m *memory) ListStars(_ context.Context, _ store.Querier, subject string, owners []string, cursor store.StarCursor, limit int) ([]store.Star, error) {
+func (m *memory) ListStars(_ context.Context, _ store.Querier, subject string, owners []string, cursor store.StarCursor, limit int, omit []string) ([]store.Star, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.fault(); err != nil {
@@ -505,7 +604,7 @@ func (m *memory) ListStars(_ context.Context, _ store.Querier, subject string, o
 	}
 	var out []store.Star
 	for _, s := range m.stars {
-		if s.Subject != subject || (len(owners) > 0 && !slices.Contains(owners, s.Owner)) {
+		if s.Subject != subject || (len(owners) > 0 && !slices.Contains(owners, s.Owner)) || store.Omitted(omit, s.Path) {
 			continue
 		}
 		if s.Owner < cursor.Owner || (s.Owner == cursor.Owner && s.Path <= cursor.Path) {
@@ -604,22 +703,29 @@ func (v versionsOf) Move(ctx context.Context, q store.Querier, owner, from, to s
 	return v.MoveVersions(ctx, q, owner, from, to)
 }
 
-func (s starsOf) List(ctx context.Context, q store.Querier, subject string, owners []string, cursor store.StarCursor, limit int) ([]store.Star, error) {
-	return s.ListStars(ctx, q, subject, owners, cursor, limit)
+func (s starsOf) List(ctx context.Context, q store.Querier, subject string, owners []string, cursor store.StarCursor, limit int, omit []string) ([]store.Star, error) {
+	return s.ListStars(ctx, q, subject, owners, cursor, limit, omit)
 }
 
 func (s starsOf) Move(ctx context.Context, q store.Querier, owner, from, to string) (int64, error) {
 	return s.MoveStars(ctx, q, owner, from, to)
 }
 
-// sharesOf is the grants table at the unit tier. Only Move is reached from
-// this package: a move carries a grant on the exact path the object leaves,
-// and the count it answers is what a case reads. The rest of the query set
+// sharesOf is the grants table at the unit tier. Two statements are reached
+// from this package: a move carries a grant on the exact path the object
+// leaves, and a permanent folder delete removes the grants under the folder.
+// What each was asked is what a case reads. The rest of the query set
 // belongs to internal/shares, so the embedded interface is left nil and any
 // other call panics rather than answering something invented.
 type sharesOf struct {
 	store.Shares
-	moved []string
+	moved   []string
+	removed []string
+}
+
+func (s *sharesOf) DeleteUnder(_ context.Context, _ store.Querier, owner, folder string, omit []string) (int64, error) {
+	s.removed = append(s.removed, owner+" "+folder+" "+strings.Join(omit, ","))
+	return 1, nil
 }
 
 func (s *sharesOf) Move(_ context.Context, _ store.Querier, owner, from, to string) (int64, error) {
@@ -702,6 +808,11 @@ type recorder struct {
 	// reach the endpoint at all.
 	refuse error
 	asked  []question
+	// limits, when set, is the limits object every allow carries, as an
+	// authorizer's answer would. limitsFor carries one per caller, which is
+	// how a case gives two subjects two answers to the same question.
+	limits    string
+	limitsFor map[string]string
 }
 
 func (r *recorder) Decide(ctx context.Context, action string, res authz.Resource) (auth.Decision, error) {
@@ -717,10 +828,24 @@ func (r *recorder) record(ctx context.Context, action string, res authz.Resource
 	if r.refuse != nil {
 		return auth.Decision{}, r.refuse
 	}
+	var (
+		d   auth.Decision
+		err error
+	)
 	if lookup {
-		return r.inner.Lookup(ctx, action, res)
+		d, err = r.inner.Lookup(ctx, action, res)
+	} else {
+		d, err = r.inner.Decide(ctx, action, res)
 	}
-	return r.inner.Decide(ctx, action, res)
+	if err != nil {
+		return d, err
+	}
+	if limits, ok := r.limitsFor[auth.CallerFrom(ctx).Subject]; ok {
+		d.Limits = []byte(limits)
+	} else if r.limits != "" {
+		d.Limits = []byte(r.limits)
+	}
+	return d, nil
 }
 
 // actions answers the actions a handler asked, in order.

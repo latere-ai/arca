@@ -315,7 +315,7 @@ func TestStoreAKeysetWalkReturnsEachRowOnceUnderConcurrentInserts(t *testing.T) 
 	seen := map[string]int{}
 	cursor := ""
 	for page := 0; page < 20; page++ {
-		rows, next, err := files.ListPrefix(t.Context(), db.Querier(), owner, "files/walk/", cursor, 5)
+		rows, next, err := files.ListPrefix(t.Context(), db.Querier(), owner, "files/walk/", cursor, 5, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

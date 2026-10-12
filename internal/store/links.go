@@ -51,7 +51,10 @@ func (shares) Live(ctx context.Context, q Querier, id, owner string) (Grant, err
 // ListTokens answers one page of a space's token grants. The token column is
 // read like every other, and the caller drops it: a token is answered once,
 // at creation, and never listed (spec 015).
-func (shares) ListTokens(ctx context.Context, q Querier, owner, cursor string, limit int) ([]Grant, error) {
+//
+// A link whose prefix is at or under one of omit is left out (limits.omit of
+// spec 028).
+func (shares) ListTokens(ctx context.Context, q Querier, owner, cursor string, limit int, omit []string) ([]Grant, error) {
 	if limit <= 0 {
 		return nil, fmt.Errorf("store: list the links of %q: the page holds %d rows", owner, limit)
 	}
@@ -59,8 +62,9 @@ func (shares) ListTokens(ctx context.Context, q Querier, owner, cursor string, l
 		SELECT `+grantColumns+`
 		  FROM shares
 		 WHERE owner = $1 AND `+liveToken+` AND id::text > $2
+		   AND `+notOmitted("path_prefix", 4)+`
 		 ORDER BY id::text
-		 LIMIT $3`, owner, cursor, limit)
+		 LIMIT $3`, owner, cursor, limit, omitted(omit))
 }
 
 // CountLinks answers the live token grants each space named holds.
@@ -109,7 +113,9 @@ func (shares) CountLinks(ctx context.Context, q Querier, owners []string) (map[s
 // The slash in the pattern is what keeps the match on segments: a grant on
 // files/reports lists files/reports and files/reports/q3.pdf and never
 // files/reports-archive.
-func (shares) Subtree(ctx context.Context, q Querier, owner, prefix, cursor string, limit int) ([]File, error) {
+//
+// A path at or under one of omit is left out (limits.omit of spec 028).
+func (shares) Subtree(ctx context.Context, q Querier, owner, prefix, cursor string, limit int, omit []string) ([]File, error) {
 	if limit <= 0 {
 		return nil, fmt.Errorf("store: list %q of %q: the page holds %d rows", prefix, owner, limit)
 	}
@@ -118,8 +124,9 @@ func (shares) Subtree(ctx context.Context, q Querier, owner, prefix, cursor stri
 		  FROM files
 		 WHERE owner = $1 AND (path = $2 OR path LIKE $3 ESCAPE '\')
 		   AND path > $4 AND deleted_at IS NULL
+		   AND `+notOmitted("path", 6)+`
 		 ORDER BY path
-		 LIMIT $5`, owner, prefix, likePrefix(prefix+"/"), cursor, limit)
+		 LIMIT $5`, owner, prefix, likePrefix(prefix+"/"), cursor, limit, omitted(omit))
 	if err != nil {
 		return nil, fmt.Errorf("store: list %q of %q: %w", prefix, owner, err)
 	}

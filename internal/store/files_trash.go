@@ -5,8 +5,12 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // The trash of spec 005. A soft delete leaves the row in place with
@@ -42,11 +46,9 @@ func (files) Restore(ctx context.Context, q Querier, owner, path string, since t
 // names, and answers the row it restored.
 //
 // It is the id-addressed arm of the restore, which the administrative route
-// of spec 012 reaches: that route takes an id rather than a path, because one
-// id names either a trashed object or a soft deleted workspace and the answer
-// says which it was. The condition is the same as Restore's, expressed once
-// per address: the row is the space's, it is trashed, and it is inside the
-// window.
+// of spec 012 reaches: that route takes an id rather than a path. The
+// condition is the same as Restore's, expressed once per address: the row is
+// the space's, it is trashed, and it is inside the window.
 //
 // The restore and the read are one statement. A read followed by a write
 // would let a purge land between them and restore a row that is already
@@ -75,8 +77,9 @@ func (files) RestoreByID(ctx context.Context, q Querier, owner, id string, since
 // not offered to a caller that could not restore it.
 //
 // The page is keyset paginated on the pair the order is by, so an entry
-// trashed during the walk does not shift the page a caller is reading.
-func (files) ListTrash(ctx context.Context, q Querier, owner string, cursor TrashCursor, limit int, since time.Time) ([]File, error) {
+// trashed during the walk does not shift the page a caller is reading. A
+// path at or under one of omit is left out (limits.omit of spec 028).
+func (files) ListTrash(ctx context.Context, q Querier, owner string, cursor TrashCursor, limit int, since time.Time, omit []string) ([]File, error) {
 	if limit <= 0 {
 		return nil, fmt.Errorf("store: list the trash of %q: the page holds %d rows", owner, limit)
 	}
@@ -91,8 +94,9 @@ func (files) ListTrash(ctx context.Context, q Querier, owner string, cursor Tras
 		  FROM files
 		 WHERE owner = $1 AND deleted_at IS NOT NULL AND deleted_at > $2
 		   AND (deleted_at, path) < ($3, $4)
+		   AND `+notOmitted("path", 6)+`
 		 ORDER BY deleted_at DESC, path DESC
-		 LIMIT $5`, owner, since, after, cursor.Path, limit)
+		 LIMIT $5`, owner, since, after, cursor.Path, limit, omitted(omit))
 	if err != nil {
 		return nil, fmt.Errorf("store: list the trash of %q: %w", owner, err)
 	}
@@ -119,11 +123,19 @@ func (files) ListTrash(ctx context.Context, q Querier, owner string, cursor Tras
 // Rows past the window go too. They are the reaper's to collect, and a
 // caller emptying its trash is asking for everything in it to be gone rather
 // than for a subset the retention rule happens to still offer.
-func (files) PurgeTrash(ctx context.Context, q Querier, owner, path string) ([]File, error) {
+//
+// Emptying the trash is an enumeration, so a path at or under one of omit
+// stays where it is (limits.omit of spec 028). A purge of one named path
+// reads no omission: it is a question about that path.
+func (files) PurgeTrash(ctx context.Context, q Querier, owner, path string, omit []string) ([]File, error) {
+	if path != "" {
+		omit = nil
+	}
 	rows, err := q.Query(ctx, `
 		DELETE FROM files
 		 WHERE owner = $1 AND deleted_at IS NOT NULL AND ($2 = '' OR path = $2)
-		RETURNING `+fileColumns, owner, path)
+		   AND `+notOmitted("path", 3)+`
+		RETURNING `+fileColumns, owner, path, omitted(omit))
 	if err != nil {
 		return nil, fmt.Errorf("store: purge the trash of %q: %w", owner, err)
 	}
@@ -141,4 +153,16 @@ func (files) PurgeTrash(ctx context.Context, q Querier, owner, path string) ([]F
 		return nil, fmt.Errorf("store: purge the trash of %q: %w", owner, err)
 	}
 	return purged, nil
+}
+
+// noSuchID maps a string the database refused as not an identifier onto the
+// missing row it names. An id is opaque to a client, so a value that is not
+// one names nothing, and answering not-found is the same answer a wrong id
+// gets; a fault would be a 500 for a request that was merely wrong.
+func noSuchID(err error) error {
+	// SQLSTATE 22P02: the argument is not the type the column holds.
+	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == "22P02" {
+		return pgx.ErrNoRows
+	}
+	return err
 }

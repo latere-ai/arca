@@ -51,14 +51,13 @@ func file(path string) authz.Resource {
 
 // TestAGranteeActsWithinTheLadder is criterion 8 of spec 006 driven against
 // the real lookup: the rung a grant carries is the whole of what its holder
-// may do on the subtree, and no grant reaches the eight actions that are
+// may do on the subtree, and no grant reaches the five actions that are
 // powers over the space.
 func TestAGranteeActsWithinTheLadder(t *testing.T) {
 	share := authorizer.Share{
 		ID: "01J8GRANT", Owner: owner, Path: "files/reports",
 		Grantee: stranger, Permission: "read",
 	}.Resource()
-	workspace := authorizer.Workspace{ID: "01J8WS", Owner: owner, Slug: "build"}.Resource()
 
 	for _, c := range []struct {
 		held   string
@@ -82,15 +81,14 @@ func TestAGranteeActsWithinTheLadder(t *testing.T) {
 		{"manage", authorizer.ActionShareList, share, true},
 		{"manage", authorizer.ActionShareRevoke, share, true},
 
-		// The eight a grant does not reach. Minting a token anyone may read
-		// with, making or removing a workspace, undoing a delete and reading
-		// a space's log are powers over the space and not over a subtree of
-		// it, so the highest rung does not confer them.
+		// The five a grant does not reach. Minting a token anyone may read
+		// with and reading a space's log are powers over the space and not
+		// over a subtree of it, so the highest rung does not confer them.
+		// link.read is the fifth, which the link step answers and no grant
+		// does.
 		{"manage", authorizer.ActionLinkCreate, authorizer.Link{Owner: owner, Path: "files/reports"}.Resource(), false},
 		{"manage", authorizer.ActionLinkRevoke, authorizer.Link{ID: "01J8LINK", Owner: owner, Path: "files/reports"}.Resource(), false},
-		{"manage", authorizer.ActionWorkspaceCreate, workspace, false},
-		{"manage", authorizer.ActionWorkspaceDelete, workspace, false},
-		{"manage", authorizer.ActionWorkspaceRestore, workspace, false},
+		{"manage", authorizer.ActionLinkRead, authorizer.Link{ID: "01J8NOLINK", Owner: owner, Path: "files/reports"}.Resource(), false},
 		{"manage", authorizer.ActionEventRead, authorizer.Event{Owner: owner}.Resource(), false},
 		{"manage", authorizer.ActionSpaceAdmin, authorizer.Space{Owner: owner}.Resource(), false},
 	} {
@@ -104,26 +102,6 @@ func TestAGranteeActsWithinTheLadder(t *testing.T) {
 				t.Errorf("a %s grantee asking %s = %t, want %t", c.held, c.action, got, c.allow)
 			}
 		})
-	}
-}
-
-// TestAGrantOnAWorkspaceIsReadAgainstItsSubtree: a workspace names a slug,
-// and the prefix a grant on it covers is the subtree of the workspaces plane
-// that workspace owns (spec 006).
-func TestAGrantOnAWorkspaceIsReadAgainstItsSubtree(t *testing.T) {
-	tbl := newTable()
-	tbl.put(store.Grant{
-		Owner: owner, PathPrefix: "workspaces/build", GranteeKind: store.GranteeSubject,
-		Grantee: grantee, Permission: "write", CreatedBy: owner,
-	})
-	p := policy(tbl)
-	build := authorizer.Workspace{ID: "01J8WS", Owner: owner, Slug: "build"}.Resource()
-	if !ask(t, p, grantee, authorizer.ActionWorkspaceAttach, build) {
-		t.Error("a write grant on a workspace does not admit an attach")
-	}
-	other := authorizer.Workspace{ID: "01J8WS2", Owner: owner, Slug: "build-archive"}.Resource()
-	if ask(t, p, grantee, authorizer.ActionWorkspaceRead, other) {
-		t.Error("a grant on workspaces/build admits workspaces/build-archive")
 	}
 }
 

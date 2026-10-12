@@ -5,38 +5,35 @@ package object
 
 import "testing"
 
-func TestThePlanesAreTwo(t *testing.T) {
-	for _, p := range []Plane{PlaneFiles, PlaneWorkspaces} {
-		if !p.Valid() {
-			t.Errorf("%q is not valid", p)
-		}
-		if got, want := p.Prefix(), string(p)+"/"; got != want {
-			t.Errorf("Prefix() = %q, want %q", got, want)
-		}
+// TestThePlaneIsFiles is criterion 1 of spec 028: a space is one tree, so
+// the type has one valid value and every other first segment is no plane.
+func TestThePlaneIsFiles(t *testing.T) {
+	if !PlaneFiles.Valid() {
+		t.Errorf("%q is not valid", PlaneFiles)
 	}
-	for _, p := range []Plane{"", "memory", "repos", "agents"} {
+	if got, want := PlaneFiles.Prefix(), "files/"; got != want {
+		t.Errorf("Prefix() = %q, want %q", got, want)
+	}
+	for _, p := range []Plane{"", "memory", "repos", "agents", "Files"} {
 		if p.Valid() {
-			t.Errorf("%q is valid, and the planes are files and workspaces", p)
+			t.Errorf("%q is valid, and the plane is files", p)
 		}
 	}
 }
 
 func TestSplitPathReadsThePlaneAndLeavesTheRestAlone(t *testing.T) {
-	for path, want := range map[string]struct {
-		plane Plane
-		rest  string
-	}{
-		"files/notes/todo.md":      {PlaneFiles, "notes/todo.md"},
-		"files/memory/agent.json":  {PlaneFiles, "memory/agent.json"},
-		"workspaces/build/main.go": {PlaneWorkspaces, "build/main.go"},
-		"files/ ":                  {PlaneFiles, " "},
+	for path, want := range map[string]string{
+		"files/notes/todo.md":       "notes/todo.md",
+		"files/memory/agent.json":   "memory/agent.json",
+		"files/repos/build/main.go": "repos/build/main.go",
+		"files/ ":                   " ",
 	} {
 		plane, rest, err := SplitPath(path)
-		if err != nil || plane != want.plane || rest != want.rest {
+		if err != nil || plane != PlaneFiles || rest != want {
 			t.Errorf("SplitPath(%q) = %q, %q, %v", path, plane, rest, err)
 		}
 	}
-	for _, path := range []string{"", "files", "files/", "repos/x", "/files/x", "memory/a"} {
+	for _, path := range []string{"", "files", "files/", "repos/x", "/files/x", "memory/a", "filesystem/a"} {
 		if plane, rest, err := SplitPath(path); err == nil {
 			t.Errorf("SplitPath(%q) = %q, %q, want an error", path, plane, rest)
 		}

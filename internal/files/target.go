@@ -37,17 +37,16 @@ const MaxSubject = 512
 // stores what it read can send it back (spec 013).
 const meAlias = "me"
 
-// Target resolves the space and the path a request named and answers the
-// workspace liveness rule with them: a path under workspaces/ whose
-// workspace does not exist or is soft deleted is a missing object to
-// everyone, which is spec 009's rule and spec 005 applies it.
+// Target resolves the space and the path a request named. It reads no row:
+// a space is one tree (spec 028), so a path that is one is in it.
 func (s *Service) Target(ctx context.Context, owner, path string) (Target, error) {
 	return s.resolve(ctx, owner, path, ValidatePath)
 }
 
 // Subtree resolves what a listing names, which is a path or a prefix above
-// one. A listing of a whole plane is a legitimate question and a path naming
-// a plane and nothing in it is not, so the two rules are not one function.
+// one. A listing of the whole plane is a legitimate question and a path
+// naming the plane and nothing in it is not, so the two rules are not one
+// function.
 func (s *Service) Subtree(ctx context.Context, owner, prefix string) (Target, error) {
 	return s.resolve(ctx, owner, prefix, ValidatePrefix)
 }
@@ -62,19 +61,7 @@ func (s *Service) resolve(ctx context.Context, owner, path string, valid func(st
 	if err != nil {
 		return Target{}, err
 	}
-	t := Target{Owner: subject, Path: path, Plane: plane}
-	slug := workspaceSlug(path)
-	if plane != object.PlaneWorkspaces || slug == "" {
-		return t, nil
-	}
-	live, err := s.workspaces.Live(ctx, s.db.Querier(), subject, slug)
-	if err != nil {
-		return Target{}, fault(ctx, "read the workspace", err)
-	}
-	if !live {
-		return Target{}, api.Refuse(api.CodeNotFound, "the workspace of %q is not there", path)
-	}
-	return t, nil
+	return Target{Owner: subject, Path: path, Plane: plane}, nil
 }
 
 // owner resolves the space a request addressed: the alias me, or a rendered
@@ -103,9 +90,8 @@ func (s *Service) owner(ctx context.Context, raw string) (string, error) {
 //
 //   - no leading or trailing slash, no empty segment, no . and no ..
 //   - nothing a database column or a log line cannot carry
-//   - the first segment is a plane of spec 001
-//   - under workspaces/ at least three segments, because bytes live inside
-//     a workspace and not beside one
+//   - the first segment is the plane of spec 001, files, and something
+//     follows it
 func ValidatePath(path string) (object.Plane, error) {
 	switch {
 	case path == "":
@@ -123,63 +109,24 @@ func ValidatePath(path string) (object.Plane, error) {
 			return "", api.Refuse(api.CodeInvalidPath, "the path %q names a segment that is not a name", path).About("path")
 		}
 	}
-	plane, rest, err := object.SplitPath(path)
+	plane, _, err := object.SplitPath(path)
 	if err != nil {
 		return "", api.Refuse(api.CodeUnknownPlane,
-			"the path %q is in no plane; a path begins with %q or %q",
-			path, object.PlaneFiles.Prefix(), object.PlaneWorkspaces.Prefix()).About("path")
-	}
-	if plane == object.PlaneWorkspaces && !strings.Contains(rest, "/") {
-		return "", api.Refuse(api.CodeInvalidPath,
-			"the path %q names a workspace and nothing in it; bytes live inside a workspace", path).About("path")
+			"the path %q is in no plane; a path begins with %q",
+			path, object.PlaneFiles.Prefix()).About("path")
 	}
 	return plane, nil
 }
 
 // ValidatePrefix is the rule a listing reads. It is ValidatePath with one
-// row removed: a prefix may name a plane and nothing in it, because a
-// listing of a whole plane is a question and an object at a plane root is
-// not a path.
+// row removed: a prefix may name the plane and nothing in it, because a
+// listing of the whole plane is a question and an object at the plane root
+// is not a path.
 func ValidatePrefix(prefix string) (object.Plane, error) {
 	if plane := object.Plane(prefix); plane.Valid() {
 		return plane, nil
 	}
-	plane, err := ValidatePath(prefix)
-	if err == nil {
-		return plane, nil
-	}
-	// A workspace root is a subtree a listing may name, and the path rule
-	// refuses it because bytes live inside a workspace and not beside one.
-	if p, rest, split := object.SplitPath(prefix); split == nil &&
-		p == object.PlaneWorkspaces && !strings.Contains(rest, "/") && shaped(prefix) {
-		return p, nil
-	}
-	return "", err
-}
-
-// shaped reports whether a prefix holds no segment a path may not hold,
-// which is the half of the path rule a prefix keeps.
-func shaped(prefix string) bool {
-	if strings.HasPrefix(prefix, "/") || strings.HasSuffix(prefix, "/") || !printable(prefix) {
-		return false
-	}
-	for segment := range strings.SplitSeq(prefix, "/") {
-		if segment == "" || segment == "." || segment == ".." {
-			return false
-		}
-	}
-	return true
-}
-
-// workspaceSlug is the workspace a path under workspaces/ belongs to, and ""
-// for a prefix that names the plane and no workspace in it.
-func workspaceSlug(path string) string {
-	_, rest, err := object.SplitPath(path)
-	if err != nil {
-		return ""
-	}
-	slug, _, _ := strings.Cut(rest, "/")
-	return slug
+	return ValidatePath(prefix)
 }
 
 // printable reports whether a value holds only characters a column, a key

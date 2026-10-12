@@ -68,19 +68,6 @@ func TestStoreOverviewCountsWhatEachSpaceHolds(t *testing.T) {
 	adminTrash(t, db, full, "files/notes/old.txt")
 	adminUsage(t, db, full, 350)
 
-	held := wsRow(t, db, full, "build")
-	wsRow(t, db, full, "free")
-	deleted := wsRow(t, db, full, "gone")
-	now := time.Now()
-	took, err := NewWorkspaces().TakeLease(t.Context(), db.Querier(), held.ID, "sbx_1", now, now.Add(time.Hour))
-	if err != nil || !took {
-		t.Fatalf("take the lease: %v, %v", took, err)
-	}
-	if _, err := db.Querier().Exec(t.Context(),
-		`UPDATE workspaces SET deleted_at = now() WHERE id = $1`, deleted.ID); err != nil {
-		t.Fatalf("soft delete the workspace: %v", err)
-	}
-
 	page, err := NewAdmin().Overview(t.Context(), db.Querier(), "", 10)
 	if err != nil {
 		t.Fatalf("the overview failed: %v", err)
@@ -98,43 +85,8 @@ func TestStoreOverviewCountsWhatEachSpaceHolds(t *testing.T) {
 	if row.TrashedBytes != 50 {
 		t.Errorf("the space's trashed bytes are %d, want 50", row.TrashedBytes)
 	}
-	if row.Workspaces != 2 {
-		t.Errorf("the space holds %d live workspaces, want 2", row.Workspaces)
-	}
-	if row.Leases != 1 {
-		t.Errorf("the space holds %d leases, want 1", row.Leases)
-	}
 	if row.LastWriteAt == nil {
 		t.Error("the space names no last write and it holds three paths")
-	}
-}
-
-// TestStoreOverviewCountsNoLapsedLease: a lease past its deadline is not
-// held, so the next attach takes it and the overview may not report one.
-func TestStoreOverviewCountsNoLapsedLease(t *testing.T) {
-	db := tier(t)
-	owner := adminSpace(t, "lapsed")
-	adminFile(t, db, owner, "files/a.txt", 1)
-	ws := wsRow(t, db, owner, "stale")
-	past := time.Now().Add(-2 * time.Hour)
-	took, err := NewWorkspaces().TakeLease(t.Context(), db.Querier(), ws.ID, "sbx_1", past, past.Add(time.Minute))
-	if err != nil || !took {
-		t.Fatalf("take the lease: %v, %v", took, err)
-	}
-
-	page, err := NewAdmin().Overview(t.Context(), db.Querier(), "", 10)
-	if err != nil {
-		t.Fatalf("the overview failed: %v", err)
-	}
-	row, ok := overviewOf(page, owner)
-	if !ok {
-		t.Fatalf("the overview holds %v and not the space", page)
-	}
-	if row.Leases != 0 {
-		t.Errorf("a lapsed lease was counted as held: %d", row.Leases)
-	}
-	if row.Workspaces != 1 {
-		t.Errorf("the space holds %d live workspaces, want 1", row.Workspaces)
 	}
 }
 

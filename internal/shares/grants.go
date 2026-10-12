@@ -193,7 +193,14 @@ func (s *Service) ListGrants(w http.ResponseWriter, r *http.Request) {
 		api.WritePage(w, []Grant{}, "")
 		return
 	}
-	rows, err := s.store.ListSpace(r.Context(), s.db.Querier(), owner, prefix, page.cursor, page.limit+1)
+	// The answer may leave subtrees out of the page (spec 028): a grant
+	// whose prefix is at or under one of them is not listed.
+	omit, err := omitted(decision)
+	if err != nil {
+		api.WriteError(w, r, err)
+		return
+	}
+	rows, err := s.store.ListSpace(r.Context(), s.db.Querier(), owner, prefix, page.cursor, page.limit+1, omit)
 	if err != nil {
 		api.WriteError(w, r, fmt.Errorf("shares: the grants of %q: %w", owner, err))
 		return
@@ -222,7 +229,15 @@ func (s *Service) GrantsWithMe(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, r, api.FromAuth(err))
 		return
 	}
-	rows, err := s.store.ListGrantee(r.Context(), s.db.Querier(), caller, page.cursor, page.limit+1)
+	// The page crosses spaces under this one answer, so a prefix the answer
+	// leaves out (spec 028) leaves out the matching grant of every space on
+	// it.
+	omit, err := omitted(decision)
+	if err != nil {
+		api.WriteError(w, r, err)
+		return
+	}
+	rows, err := s.store.ListGrantee(r.Context(), s.db.Querier(), caller, page.cursor, page.limit+1, omit)
 	if err != nil {
 		api.WriteError(w, r, fmt.Errorf("shares: what is shared with the caller: %w", err))
 		return

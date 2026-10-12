@@ -21,7 +21,7 @@ func overviewRows(spaces ...SpaceOverview) *fakeRows {
 	for _, s := range spaces {
 		rows.scans = append(rows.scans, func(dest ...any) error {
 			return assign(dest, []any{
-				s.Owner, s.Bytes, s.Files, s.TrashedBytes, s.Workspaces, s.Leases, s.LastWriteAt,
+				s.Owner, s.Bytes, s.Files, s.TrashedBytes, s.LastWriteAt,
 			})
 		})
 	}
@@ -32,7 +32,7 @@ func TestOverviewPagesBySubjectAndReadsOneRowPerSpace(t *testing.T) {
 	at := time.Date(2026, 9, 17, 8, 41, 2, 0, time.UTC)
 	q := &fakeQuerier{rows: overviewRows(
 		SpaceOverview{Owner: "https://issuer.example|9ab3", Bytes: 88213004, Files: 214,
-			TrashedBytes: 402118, Workspaces: 2, Leases: 1, LastWriteAt: &at},
+			TrashedBytes: 402118, LastWriteAt: &at},
 		SpaceOverview{Owner: "https://issuer.example|c1d0"},
 	)}
 	page, err := NewAdmin().Overview(t.Context(), q, "https://issuer.example|0000", 3)
@@ -46,7 +46,7 @@ func TestOverviewPagesBySubjectAndReadsOneRowPerSpace(t *testing.T) {
 	if first.Owner != "https://issuer.example|9ab3" || first.Bytes != 88213004 || first.Files != 214 {
 		t.Errorf("the first row is %+v", first)
 	}
-	if first.TrashedBytes != 402118 || first.Workspaces != 2 || first.Leases != 1 {
+	if first.TrashedBytes != 402118 {
 		t.Errorf("the first row's counters are %+v", first)
 	}
 	if first.LastWriteAt == nil || !first.LastWriteAt.Equal(at) {
@@ -63,18 +63,17 @@ func TestOverviewPagesBySubjectAndReadsOneRowPerSpace(t *testing.T) {
 	}
 }
 
-// TestOverviewCountsALeaseOnlyWhileItIsHeld holds the statement to the
-// workspace service's own rule. A lease past its deadline is not held, and
-// counting one would report a state the next attach disagrees with; the
-// service Arca replaces counted every non-null holder and over-reported.
-func TestOverviewCountsALeaseOnlyWhileItIsHeld(t *testing.T) {
-	for _, want := range []string{
-		"writer_holder IS NOT NULL",
-		"writer_expires_at > now()",
-	} {
+// TestOverviewReadsTheTwoTablesThatHoldASpace: a space is one tree
+// (spec 028), so the statement derives the spaces from the ledger and the
+// files and reads no third table.
+func TestOverviewReadsTheTwoTablesThatHoldASpace(t *testing.T) {
+	for _, want := range []string{"FROM space_usage", "FROM files"} {
 		if !strings.Contains(overviewSQL, want) {
-			t.Errorf("the statement does not hold a lease to %q", want)
+			t.Errorf("the statement does not read %q", want)
 		}
+	}
+	if got := strings.Count(overviewSQL, "LEFT JOIN"); got != 2 {
+		t.Errorf("the statement joins %d tables onto the spaces, want the ledger and the files", got)
 	}
 }
 
@@ -93,7 +92,7 @@ func TestOverviewSeparatesLiveBytesFromTrashedBytes(t *testing.T) {
 // TestOverviewLeavesOutASpaceThatHoldsNothing: criterion 6 of spec 012 as
 // the statement carries it.
 func TestOverviewLeavesOutASpaceThatHoldsNothing(t *testing.T) {
-	if !strings.Contains(overviewSQL, "(bytes > 0 OR files > 0 OR trashed_bytes > 0 OR workspaces > 0)") {
+	if !strings.Contains(overviewSQL, "(bytes > 0 OR files > 0 OR trashed_bytes > 0)") {
 		t.Error("the statement does not drop a space whose every counter is zero")
 	}
 	if strings.Contains(overviewSQL, "subjects") {

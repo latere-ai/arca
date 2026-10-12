@@ -162,12 +162,12 @@ func TestTheReaperProcessBootstrapsToo(t *testing.T) {
 	}
 }
 
-// TestAGaugeReadsTheStoreAndNeverHangs: the two gauges of spec 018 that no
-// process keeps a number for are read at scrape time, with no context of
-// their own. Each read gets a bounded one, and a store that will not answer
-// reads as zero rather than as a scrape that waits for it.
+// TestAGaugeReadsTheStoreAndNeverHangs: the gauge of spec 018 that no
+// process keeps a number for is read at scrape time, with no context of its
+// own. Each read gets a bounded one, and a store that will not answer reads
+// as zero rather than as a scrape that waits for it.
 func TestAGaugeReadsTheStoreAndNeverHangs(t *testing.T) {
-	counted := sampling(t.Context(), "arca_leases_held", func(context.Context, time.Time) (int64, error) {
+	counted := sampling(t.Context(), "arca_upload_sessions_open", func(context.Context, time.Time) (int64, error) {
 		return 7, nil
 	})
 	if got := counted(); got != 7 {
@@ -191,7 +191,7 @@ func TestAGaugeReadsTheStoreAndNeverHangs(t *testing.T) {
 		t.Errorf("the gauge's budget is %s, and the spec's is %s", budget, gaugeBudget)
 	}
 
-	unread := sampling(t.Context(), "arca_leases_held", func(context.Context, time.Time) (int64, error) {
+	unread := sampling(t.Context(), "arca_upload_sessions_open", func(context.Context, time.Time) (int64, error) {
 		return 0, errors.New("the database is unreachable")
 	})
 	if got := unread(); got != 0 {
@@ -199,12 +199,12 @@ func TestAGaugeReadsTheStoreAndNeverHangs(t *testing.T) {
 	}
 }
 
-// TestAReplicaWithNoDatabaseStillServesBothStoreGauges: the two gauges whose
-// source is a query are on the endpoint whatever the store answers. This
-// replica's database is unreachable, so each reads zero with a line naming
-// it, and the series exists for a dashboard from the first scrape rather than
-// from the first successful query.
-func TestAReplicaWithNoDatabaseStillServesBothStoreGauges(t *testing.T) {
+// TestAReplicaWithNoDatabaseStillServesTheStoreGauge: the gauge whose source
+// is a query is on the endpoint whatever the store answers. This replica's
+// database is unreachable, so it reads zero with a line naming it, and the
+// series exists for a dashboard from the first scrape rather than from the
+// first successful query.
+func TestAReplicaWithNoDatabaseStillServesTheStoreGauge(t *testing.T) {
 	_, internalURL, _, stop := startServe(t)
 	defer func() {
 		if code := stop(); code != 0 {
@@ -215,7 +215,7 @@ func TestAReplicaWithNoDatabaseStillServesBothStoreGauges(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("GET /metrics = %d", code)
 	}
-	for _, want := range []string{"arca_leases_held 0", "arca_upload_sessions_open 0"} {
+	for _, want := range []string{"arca_upload_sessions_open 0"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("the exposition does not carry %q", want)
 		}

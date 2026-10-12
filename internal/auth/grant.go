@@ -14,7 +14,7 @@ import (
 )
 
 // The grant step of the question (spec 006). Every question about a file or
-// a workspace carries the highest live grant the caller holds on a prefix of
+// an upload carries the highest live grant the caller holds on a prefix of
 // the resource's path, in the caller's favor, resolved here before the
 // question goes out.
 //
@@ -120,11 +120,11 @@ func heldOn(ctx context.Context, grants GrantLookup, owner, subject string, res 
 	return held, nil
 }
 
-// carriesGrant reports whether a kind carries the field. A file, an upload
-// and a workspace name a subtree a grant can cover; a share, a link, an
-// event and a space are powers over a space rather than over a subtree of
-// it, so no grant reaches their actions and a field there would be read as
-// if one did.
+// carriesGrant reports whether a kind carries the field. A file and an
+// upload name a subtree a grant can cover; a share, a link, an event and a
+// space are powers over a space rather than over a subtree of it, so no
+// grant reaches their actions and a field there would be read as if one
+// did.
 //
 // The upload is here because upload.write sits on the write rung's ladder.
 // An object at or below the inline bound reaches the grantee through
@@ -132,7 +132,5 @@ func heldOn(ctx context.Context, grants GrantLookup, owner, subject string, res 
 // would have admitted a grantee's small writes and refused the same
 // grantee's large ones.
 func carriesGrant(kind string) bool {
-	return kind == authorizer.KindFile ||
-		kind == authorizer.KindUpload ||
-		kind == authorizer.KindWorkspace
+	return kind == authorizer.KindFile || kind == authorizer.KindUpload
 }

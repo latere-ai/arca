@@ -29,8 +29,8 @@ import (
 // that differs is a contract the document and the server disagree about.
 func TestErrorTableMatchesSpec013(t *testing.T) {
 	want := errorsOfSpec013(t)
-	if len(want) != 30 {
-		t.Fatalf("spec 013's table names %d codes, want thirty", len(want))
+	if len(want) != 26 {
+		t.Fatalf("spec 013's table names %d codes, want twenty-six", len(want))
 	}
 	if got, expected := Codes(), slices.Sorted(maps.Keys(want)); !slices.Equal(got, expected) {
 		t.Errorf("the package holds the codes\n %v\nthe spec names\n %v", got, expected)

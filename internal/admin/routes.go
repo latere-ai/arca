@@ -42,7 +42,7 @@ var rows = []row{
 		method: http.MethodPost, path: "/v1/admin/spaces/{owner}/restore",
 		action: authorizer.ActionSpaceAdmin, status: http.StatusOK,
 		summary:     "Restore deleted item",
-		description: "Restore one deleted object or workspace of a space.",
+		description: "Restore one trashed object of a space.",
 		answer:      (*Service).restore,
 	},
 }

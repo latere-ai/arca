@@ -33,23 +33,19 @@ import (
 // every member is a count, a size, an identifier the caller already holds,
 // an enumeration, or a path the caller named.
 var detailVocabulary = map[string]string{
-	DetailAdmin:     "the mark of spec 012: neither ownership nor a grant explained the allow",
-	"trashed":       "whether a delete was soft",
-	"version_no":    "which version a prune or a restore named",
-	"size":          "the bytes an object holds",
-	"multipart":     "whether the object arrived through an upload session",
-	"from":          "the path a move came from, which the caller sent",
-	"share_id":      "the identifier of the grant, which its creator holds",
-	"grantee_kind":  "subject, token or public",
-	"permission":    "the rung, read, write or admin",
-	"path_prefix":   "the subtree a grant covers, which the caller sent",
-	"slug":          "the name of a workspace, which the caller chose",
-	"files":         "a count of paths",
-	"bytes":         "a count of bytes",
-	"deleted":       "a count of paths a sync dropped",
-	"attachment_id": "the identifier of an attachment, which its holder holds",
-	"sandbox_id":    "the sandbox a lease is held by, which the caller sent",
-	"mode":          "reader or writer",
+	DetailAdmin:    "the mark of spec 012: neither ownership nor a grant explained the allow",
+	"trashed":      "whether a delete was soft",
+	"version_no":   "which version a prune or a restore named",
+	"size":         "the bytes an object holds",
+	"multipart":    "whether the object arrived through an upload session",
+	"from":         "the path a move or a copy came from, which the caller sent",
+	"recursive":    "whether a delete or a copy named a folder",
+	"share_id":     "the identifier of the grant, which its creator holds",
+	"grantee_kind": "subject, token or public",
+	"permission":   "the rung, read, write or admin",
+	"path_prefix":  "the subtree a grant covers, which the caller sent",
+	"files":        "a count of paths",
+	"bytes":        "a count of bytes",
 }
 
 // builtDetails names the one writer that passes a detail it built rather
@@ -65,10 +61,9 @@ var builtDetails = map[string]string{
 // reapKinds is internal/reaper's Kind vocabulary, which is the key set of
 // the detail above.
 var reapKinds = []string{
-	"orphan_object", "orphan_candidate", "missing_bytes", "workspace_purged",
-	"file_purged", "trash_purged", "share_expired", "event_pruned",
+	"orphan_object", "orphan_candidate", "missing_bytes",
+	"trash_purged", "share_expired", "event_pruned",
 	"star_pruned", "version_pruned", "upload_aborted", "usage_corrected",
-	"lease_expired",
 }
 
 func TestEventDetailIsMetadataOnly(t *testing.T) {

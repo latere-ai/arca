@@ -119,7 +119,7 @@ func TestAListingIsKeysetPaginatedAndCarriesItsCursor(t *testing.T) {
 	second.Path = "files/notes/zebra.md"
 	rows := rowsOf(first, second)
 	q := &fakeQuerier{rows: rows}
-	page, cursor, err := NewFiles().ListPrefix(t.Context(), q, first.Owner, "files/notes/", "", 2)
+	page, cursor, err := NewFiles().ListPrefix(t.Context(), q, first.Owner, "files/notes/", "", 2, nil)
 	if err != nil {
 		t.Fatalf("ListPrefix: %v", err)
 	}
@@ -135,27 +135,27 @@ func TestAListingIsKeysetPaginatedAndCarriesItsCursor(t *testing.T) {
 
 	// A short page is the last one, so it carries no cursor.
 	short := &fakeQuerier{rows: rowsOf(first)}
-	if _, cursor, err := NewFiles().ListPrefix(t.Context(), short, first.Owner, "files/", "", 2); err != nil || cursor != "" {
+	if _, cursor, err := NewFiles().ListPrefix(t.Context(), short, first.Owner, "files/", "", 2, nil); err != nil || cursor != "" {
 		t.Fatalf("a short page answered the cursor %q, %v", cursor, err)
 	}
 }
 
 func TestAListingSurfacesEveryWayItCanFail(t *testing.T) {
-	if _, _, err := NewFiles().ListPrefix(t.Context(), &fakeQuerier{}, "owner", "files/", "", 0); err == nil {
+	if _, _, err := NewFiles().ListPrefix(t.Context(), &fakeQuerier{}, "owner", "files/", "", 0, nil); err == nil {
 		t.Error("a page of no rows was accepted")
 	}
 	broken := &fakeQuerier{queryErr: errors.New("the connection failed")}
-	if _, _, err := NewFiles().ListPrefix(t.Context(), broken, "owner", "files/", "", 10); err == nil {
+	if _, _, err := NewFiles().ListPrefix(t.Context(), broken, "owner", "files/", "", 10, nil); err == nil {
 		t.Error("a connection failure answered a page")
 	}
 	unreadable := &fakeQuerier{rows: &fakeRows{scans: []func(...any) error{
 		func(...any) error { return errors.New("the row is not a file") },
 	}}}
-	if _, _, err := NewFiles().ListPrefix(t.Context(), unreadable, "owner", "files/", "", 10); err == nil {
+	if _, _, err := NewFiles().ListPrefix(t.Context(), unreadable, "owner", "files/", "", 10, nil); err == nil {
 		t.Error("a row that could not be read answered a page")
 	}
 	interrupted := &fakeQuerier{rows: &fakeRows{err: errors.New("the walk was interrupted")}}
-	if _, _, err := NewFiles().ListPrefix(t.Context(), interrupted, "owner", "files/", "", 10); err == nil {
+	if _, _, err := NewFiles().ListPrefix(t.Context(), interrupted, "owner", "files/", "", 10, nil); err == nil {
 		t.Error("an interrupted walk answered a page")
 	}
 }

@@ -37,7 +37,7 @@ import (
 // its behavior.
 type Route struct {
 	// Method and Path are the registration, with the wildcards in the
-	// router's own spelling: "/v1/workspaces/{id}/attach/{aid}/renew".
+	// router's own spelling: "/v1/files/{owner}/{path...}".
 	Method, Path string
 	// Action is the one action of spec 006's vocabulary the route asks
 	// before it acts. A row that asks none is refused: every route behind
@@ -45,8 +45,8 @@ type Route struct {
 	//
 	// Where the action a route asks is chosen per request, this is the row's
 	// action for the document and the test that reads it, and the handler
-	// asks the one the request selected. Spec 013 names two such rows, the
-	// attach and the two that follow the action the attach asked.
+	// asks the one the request selected: a GET on a path asks file.read and
+	// file.list with ?list=1.
 	Action string
 	// Summary is a verb-first navigation label of at most four words.
 	Summary string
@@ -60,10 +60,10 @@ type Route struct {
 
 // reserved are the words of spec 013's fifth grammar rule: a literal that
 // sits beside a wildcard in the same position, wins there, and is therefore
-// not a value that position can carry. materialize is not an owner, links
-// and with-me are not share ids, and deleted is not a workspace id.
+// not a value that position can carry. materialize is not an owner, and
+// links and with-me are not share ids.
 //
-// A fifth shadowing literal is refused by [merge] until it is written into
+// A fourth shadowing literal is refused by [merge] until it is written into
 // that rule. Go's router gives a literal precedence over a wildcard without
 // complaining, so nothing else in this program would say that a new route
 // had just taken a word out of a caller's namespace.
@@ -71,7 +71,6 @@ var reserved = map[string]bool{
 	"materialize": true,
 	"links":       true,
 	"with-me":     true,
-	"deleted":     true,
 }
 
 // shadowing answers the literal segment at the first position where one path

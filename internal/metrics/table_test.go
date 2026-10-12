@@ -239,11 +239,11 @@ func names(rows []row) []string {
 	return out
 }
 
-// TestFindingKindsAreTheSpecsThirteen is the other half of criterion 1 for
-// the one vocabulary spec 018 writes as a paragraph rather than in a cell.
-// The thirteenth member is lease_expired, which spec 010 asked for while
-// building pass 3 and this spec absorbed.
-func TestFindingKindsAreTheSpecsThirteen(t *testing.T) {
+// TestFindingKindsAreTheSpecsTen is the other half of criterion 1 for the
+// one vocabulary spec 018 writes as a paragraph rather than in a cell. It
+// was thirteen until spec 028 retired the two passes whose findings the
+// other three were.
+func TestFindingKindsAreTheSpecsTen(t *testing.T) {
 	data, err := os.ReadFile(spec(t))
 	if err != nil {
 		t.Fatal(err)
@@ -275,11 +275,8 @@ func TestFindingKindsAreTheSpecsThirteen(t *testing.T) {
 	if !slices.Equal(found, FindingKinds()) {
 		t.Errorf("the spec names %v and the table names %v", found, FindingKinds())
 	}
-	if len(FindingKinds()) != 13 {
-		t.Errorf("the vocabulary has %d members, and spec 010 made it thirteen", len(FindingKinds()))
-	}
-	if !slices.Contains(FindingKinds(), "lease_expired") {
-		t.Error("lease_expired is not in the vocabulary")
+	if len(FindingKinds()) != 10 {
+		t.Errorf("the vocabulary has %d members, and spec 028 left ten", len(FindingKinds()))
 	}
 }
 

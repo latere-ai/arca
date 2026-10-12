@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: Arca
   version: "1"
-  description: "Durable storage for people, agents, and sandboxes: files with versions, trash and stars, uploads in parts, shares with a permission ladder and public links, workspaces with a writer lease, and an event log."
+  description: "Durable storage for people, agents, and sandboxes: files with versions, trash and stars, folders deleted and copied in one call, uploads in parts, shares with a permission ladder and public links, and an event log."
 paths:
   /v1/admin/overview:
     get:
@@ -37,7 +37,7 @@ paths:
     post:
       operationId: postV1AdminSpacesByOwnerRestore
       summary: Restore deleted item
-      description: Restore one deleted object or workspace of a space. Asks the authorizer for space.admin before it acts.
+      description: Restore one trashed object of a space. Asks the authorizer for space.admin before it acts.
       parameters:
       - name: owner
         in: path
@@ -101,7 +101,7 @@ paths:
     get:
       operationId: getV1FilesMaterialize
       summary: Get space manifest
-      description: One space as a manifest of presigned URLs. Asks the authorizer for file.list before it acts.
+      description: A folder of one space, named with ?prefix=, as a manifest of presigned URLs. Asks the authorizer for file.list before it acts.
       security:
       - bearer: []
       responses:
@@ -129,8 +129,8 @@ paths:
   /v1/files/{owner}/{path}:
     delete:
       operationId: deleteV1FilesByOwnerByPath
-      summary: Delete file
-      description: Trash the object; ?permanent=1 removes it and ?version=N prunes one version. Asks the authorizer for file.delete before it acts.
+      summary: Delete file or folder
+      description: Trash the object; ?permanent=1 removes it, ?version=N prunes one version, and ?recursive=1 deletes every object under the folder. Asks the authorizer for file.delete before it acts.
       parameters:
       - name: owner
         in: path
@@ -170,7 +170,7 @@ paths:
     get:
       operationId: getV1FilesByOwnerByPath
       summary: Read or list files
-      description: Read one object, its subtree with ?list=1, which carries the space's usage at a plane root, or its versions with ?versions=1. Asks the authorizer for file.read before it acts.
+      description: Read one object, its subtree with ?list=1, which carries the space's usage at the plane root, or its versions with ?versions=1. Asks the authorizer for file.read before it acts.
       parameters:
       - name: owner
         in: path
@@ -249,8 +249,8 @@ paths:
                 $ref: "#/components/schemas/Error"
     post:
       operationId: postV1FilesByOwnerByPath
-      summary: Move or restore file
-      description: Move the object with move_to, or bring a version forward with restore_version. Asks the authorizer for file.write before it acts.
+      summary: Move, copy or restore
+      description: Move the object with move_to, copy it with copy_to, copy a folder with copy_to and recursive, or bring a version forward with restore_version. Asks the authorizer for file.write before it acts.
       parameters:
       - name: owner
         in: path
@@ -916,415 +916,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-  /v1/workspaces:
-    get:
-      operationId: getV1Workspaces
-      summary: List workspaces
-      description: List the workspaces of a space. Asks the authorizer for workspace.list before it acts.
-      security:
-      - bearer: []
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema: {}
-        "401":
-          $ref: "#/components/responses/unauthenticated"
-        "403":
-          $ref: "#/components/responses/forbidden"
-        "404":
-          $ref: "#/components/responses/not_found"
-        "429":
-          $ref: "#/components/responses/rate_limited"
-        "500":
-          $ref: "#/components/responses/internal"
-        "503":
-          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-    post:
-      operationId: postV1Workspaces
-      summary: Create workspace
-      description: Create a workspace in a space. Asks the authorizer for workspace.create before it acts.
-      security:
-      - bearer: []
-      responses:
-        "201":
-          description: Created
-          content:
-            application/json:
-              schema: {}
-        "401":
-          $ref: "#/components/responses/unauthenticated"
-        "403":
-          $ref: "#/components/responses/forbidden"
-        "404":
-          $ref: "#/components/responses/not_found"
-        "429":
-          $ref: "#/components/responses/rate_limited"
-        "500":
-          $ref: "#/components/responses/internal"
-        "503":
-          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-  /v1/workspaces/deleted:
-    get:
-      operationId: getV1WorkspacesDeleted
-      summary: List deleted workspaces
-      description: List the soft deleted workspaces of a space that are still restorable. Asks the authorizer for workspace.list before it acts.
-      security:
-      - bearer: []
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema: {}
-        "401":
-          $ref: "#/components/responses/unauthenticated"
-        "403":
-          $ref: "#/components/responses/forbidden"
-        "404":
-          $ref: "#/components/responses/not_found"
-        "429":
-          $ref: "#/components/responses/rate_limited"
-        "500":
-          $ref: "#/components/responses/internal"
-        "503":
-          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-  /v1/workspaces/{id}:
-    delete:
-      operationId: deleteV1WorkspacesById
-      summary: Delete workspace
-      description: Soft delete a workspace, leaving it restorable. Asks the authorizer for workspace.delete before it acts.
-      parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-      security:
-      - bearer: []
-      responses:
-        "204":
-          description: No Content
-          content:
-            application/json:
-              schema: {}
-        "401":
-          $ref: "#/components/responses/unauthenticated"
-        "403":
-          $ref: "#/components/responses/forbidden"
-        "404":
-          $ref: "#/components/responses/not_found"
-        "429":
-          $ref: "#/components/responses/rate_limited"
-        "500":
-          $ref: "#/components/responses/internal"
-        "503":
-          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-    get:
-      operationId: getV1WorkspacesById
-      summary: Get workspace
-      description: Read one workspace with its lease and the counters of its subtree. Asks the authorizer for workspace.read before it acts.
-      parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-      security:
-      - bearer: []
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema: {}
-        "401":
-          $ref: "#/components/responses/unauthenticated"
-        "403":
-          $ref: "#/components/responses/forbidden"
-        "404":
-          $ref: "#/components/responses/not_found"
-        "429":
-          $ref: "#/components/responses/rate_limited"
-        "500":
-          $ref: "#/components/responses/internal"
-        "503":
-          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-    patch:
-      operationId: patchV1WorkspacesById
-      summary: Rename workspace
-      description: Rename a workspace, which moves its rows and no bucket key. Asks the authorizer for workspace.write before it acts.
-      parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-      security:
-      - bearer: []
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema: {}
-        "401":
-          $ref: "#/components/responses/unauthenticated"
-        "403":
-          $ref: "#/components/responses/forbidden"
-        "404":
-          $ref: "#/components/responses/not_found"
-        "429":
-          $ref: "#/components/responses/rate_limited"
-        "500":
-          $ref: "#/components/responses/internal"
-        "503":
-          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-  /v1/workspaces/{id}/attach:
-    post:
-      operationId: postV1WorkspacesByIdAttach
-      summary: Attach workspace
-      description: Open an attachment, taking the writer lease for a rw mount. Asks the authorizer for workspace.read before it acts.
-      parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-      security:
-      - bearer: []
-      responses:
-        "201":
-          description: Created
-          content:
-            application/json:
-              schema: {}
-        "401":
-          $ref: "#/components/responses/unauthenticated"
-        "403":
-          $ref: "#/components/responses/forbidden"
-        "404":
-          $ref: "#/components/responses/not_found"
-        "429":
-          $ref: "#/components/responses/rate_limited"
-        "500":
-          $ref: "#/components/responses/internal"
-        "503":
-          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-  /v1/workspaces/{id}/attach/{aid}:
-    delete:
-      operationId: deleteV1WorkspacesByIdAttachByAid
-      summary: Release attachment
-      description: Release an attachment and the lease it held. Asks the authorizer for workspace.read before it acts.
-      parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-      - name: aid
-        in: path
-        required: true
-        schema:
-          type: string
-      security:
-      - bearer: []
-      responses:
-        "204":
-          description: No Content
-          content:
-            application/json:
-              schema: {}
-        "401":
-          $ref: "#/components/responses/unauthenticated"
-        "403":
-          $ref: "#/components/responses/forbidden"
-        "404":
-          $ref: "#/components/responses/not_found"
-        "429":
-          $ref: "#/components/responses/rate_limited"
-        "500":
-          $ref: "#/components/responses/internal"
-        "503":
-          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-  /v1/workspaces/{id}/attach/{aid}/renew:
-    post:
-      operationId: postV1WorkspacesByIdAttachByAidRenew
-      summary: Renew attachment
-      description: Push the attachment's deadline forward. Asks the authorizer for workspace.read before it acts.
-      parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-      - name: aid
-        in: path
-        required: true
-        schema:
-          type: string
-      security:
-      - bearer: []
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema: {}
-        "401":
-          $ref: "#/components/responses/unauthenticated"
-        "403":
-          $ref: "#/components/responses/forbidden"
-        "404":
-          $ref: "#/components/responses/not_found"
-        "429":
-          $ref: "#/components/responses/rate_limited"
-        "500":
-          $ref: "#/components/responses/internal"
-        "503":
-          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-  /v1/workspaces/{id}/materialize:
-    get:
-      operationId: getV1WorkspacesByIdMaterialize
-      summary: Get workspace manifest
-      description: The attachment's pinned manifest with a presigned read per file. Asks the authorizer for workspace.read before it acts.
-      parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-      security:
-      - bearer: []
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema: {}
-        "401":
-          $ref: "#/components/responses/unauthenticated"
-        "403":
-          $ref: "#/components/responses/forbidden"
-        "404":
-          $ref: "#/components/responses/not_found"
-        "429":
-          $ref: "#/components/responses/rate_limited"
-        "500":
-          $ref: "#/components/responses/internal"
-        "503":
-          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-  /v1/workspaces/{id}/restore:
-    post:
-      operationId: postV1WorkspacesByIdRestore
-      summary: Restore workspace
-      description: Undo a soft delete. Asks the authorizer for workspace.restore before it acts.
-      parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-      security:
-      - bearer: []
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema: {}
-        "401":
-          $ref: "#/components/responses/unauthenticated"
-        "403":
-          $ref: "#/components/responses/forbidden"
-        "404":
-          $ref: "#/components/responses/not_found"
-        "429":
-          $ref: "#/components/responses/rate_limited"
-        "500":
-          $ref: "#/components/responses/internal"
-        "503":
-          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-  /v1/workspaces/{id}/sync:
-    post:
-      operationId: postV1WorkspacesByIdSync
-      summary: Sync workspace
-      description: Declare the post-state manifest of the subtree; the server reconciles. Asks the authorizer for workspace.sync before it acts.
-      parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-      security:
-      - bearer: []
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema: {}
-        "401":
-          $ref: "#/components/responses/unauthenticated"
-        "403":
-          $ref: "#/components/responses/forbidden"
-        "404":
-          $ref: "#/components/responses/not_found"
-        "429":
-          $ref: "#/components/responses/rate_limited"
-        "500":
-          $ref: "#/components/responses/internal"
-        "503":
-          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
 components:
   securitySchemes:
     bearer:
@@ -1377,12 +968,6 @@ components:
       - entries
       additionalProperties: false
   responses:
-    attachment_gone:
-      description: "410 attachment_gone: This attachment has ended; attach again."
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/Error"
     authorizer_unavailable:
       description: "503 authorizer_unavailable: The permission service is unavailable; retry shortly."
       content:
@@ -1431,12 +1016,6 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
-    lease_not_held:
-      description: "409 lease_not_held: This attachment does not hold the writer lease."
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/Error"
     length_required:
       description: "411 length_required: Send a Content-Length with the body."
       content:
@@ -1445,12 +1024,6 @@ components:
             $ref: "#/components/schemas/Error"
     link_read_only:
       description: "422 link_read_only: A link grants reading and nothing more."
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/Error"
-    manifest_incomplete:
-      description: "409 manifest_incomplete: The manifest names objects that have not been uploaded."
       content:
         application/json:
           schema:
@@ -1509,14 +1082,14 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
-    slug_taken:
-      description: "409 slug_taken: This space already has a workspace with that name."
+    storage_unavailable:
+      description: "503 storage_unavailable: Storage is unavailable right now; retry shortly."
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
-    storage_unavailable:
-      description: "503 storage_unavailable: Storage is unavailable right now; retry shortly."
+    too_many_objects:
+      description: "422 too_many_objects: The folder holds more objects than one copy accepts."
       content:
         application/json:
           schema:
@@ -1547,12 +1120,6 @@ components:
             $ref: "#/components/schemas/Error"
     unsupported_media_type:
       description: "415 unsupported_media_type: Send the body as JSON."
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/Error"
-    writer_held:
-      description: "409 writer_held: Another writer holds this workspace."
       content:
         application/json:
           schema:

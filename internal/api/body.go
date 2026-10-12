@@ -23,10 +23,9 @@ import (
 // table with one fixed sentence.
 
 // MaxBodyBytes bounds a JSON request body. The largest one this surface
-// takes is a workspace sync manifest, one entry per file of the subtree, so
-// the bound is generous rather than tight: a tree of a few hundred thousand
-// files declares its post-state in one call, and a body past this is a
-// client that meant something else.
+// takes is the completion of an upload session, one entry per part, so the
+// bound is generous rather than tight, and a body past this is a client
+// that meant something else.
 const MaxBodyBytes = 64 << 20
 
 // JSONMediaType is the one content type a body route accepts.
@@ -67,17 +66,6 @@ func DecodeBody[T any](r *http.Request) (T, error) {
 		return zero, decodeRefusal(err)
 	}
 	return v, nil
-}
-
-// DecodeOptionalBody reads a JSON body a route does not require. An absent
-// or empty body is the zero value, which is what a renew that asks for the
-// default lease sends. A body that is there is held to every rule above.
-func DecodeOptionalBody[T any](r *http.Request) (T, error) {
-	var v T
-	if r.Body == nil || r.ContentLength == 0 {
-		return v, nil
-	}
-	return DecodeBody[T](r)
 }
 
 // JSONRequest holds a request to the two content negotiation rules of spec

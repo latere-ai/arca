@@ -158,8 +158,8 @@ func TestABucketThatWillNotSignIsAnOutageToo(t *testing.T) {
 // request the caller already had answered.
 func TestBytesNothingCanRemoveAreLeftForTheReaper(t *testing.T) {
 	h := newHarness(t, func(o *Options) { o.References = refused{} })
-	row := h.write(t, "workspaces/build/main.go", "package main")
-	if w := h.call(t, http.MethodDelete, h.object("workspaces/build/main.go"), nil); w.Code != http.StatusNoContent {
+	row := h.write(t, "files/build/main.go", "package main")
+	if w := h.call(t, http.MethodDelete, h.object("files/build/main.go")+"?permanent=1", nil); w.Code != http.StatusNoContent {
 		t.Fatalf("the delete answered %d: %s", w.Code, w.Body)
 	}
 	if _, held := h.objects.Bytes(row.ObjectID.Key("arca/")); !held {
@@ -167,12 +167,12 @@ func TestBytesNothingCanRemoveAreLeftForTheReaper(t *testing.T) {
 	}
 
 	stubborn := newHarness(t)
-	row = stubborn.write(t, "workspaces/build/main.go", "package main")
+	row = stubborn.write(t, "files/build/main.go", "package main")
 	stubborn.bucket.FailNth(blob.MethodDelete, 1, errOutage)
-	if w := stubborn.call(t, http.MethodDelete, stubborn.object("workspaces/build/main.go"), nil); w.Code != http.StatusNoContent {
+	if w := stubborn.call(t, http.MethodDelete, stubborn.object("files/build/main.go")+"?permanent=1", nil); w.Code != http.StatusNoContent {
 		t.Fatalf("the delete answered %d: %s", w.Code, w.Body)
 	}
-	if _, err := stubborn.store.Get(t.Context(), nil, stubborn.owner, "workspaces/build/main.go"); err == nil {
+	if _, err := stubborn.store.Get(t.Context(), nil, stubborn.owner, "files/build/main.go"); err == nil {
 		t.Error("a bucket that would not delete kept the row")
 	}
 	if _, held := stubborn.objects.Bytes(row.ObjectID.Key("arca/")); !held {
@@ -204,10 +204,12 @@ func TestTheHelpersEveryHandlerShares(t *testing.T) {
 		t.Errorf("a body with no length carries the size %v", *got)
 	}
 	// A prefix a listing may name, and one it may not.
-	if _, err := ValidatePrefix("workspaces/build"); err != nil {
-		t.Errorf("a workspace root is not a subtree a listing may name: %v", err)
+	for _, prefix := range []string{"files", "files/build"} {
+		if _, err := ValidatePrefix(prefix); err != nil {
+			t.Errorf("%q is not a subtree a listing may name: %v", prefix, err)
+		}
 	}
-	for _, prefix := range []string{"workspaces/../build", "workspaces/build/", "workspaces/"} {
+	for _, prefix := range []string{"files/../build", "files/build/", "files/", "build"} {
 		if _, err := ValidatePrefix(prefix); err == nil {
 			t.Errorf("%q was accepted as a prefix", prefix)
 		}

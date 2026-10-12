@@ -57,8 +57,8 @@ const (
 	// that carried one would change with every tag and say nothing.
 	DocumentVersion = "1"
 	Description     = "Durable storage for people, agents, and sandboxes: files with versions, " +
-		"trash and stars, uploads in parts, shares with a permission ladder and public links, " +
-		"workspaces with a writer lease, and an event log."
+		"trash and stars, folders deleted and copied in one call, uploads in parts, " +
+		"shares with a permission ladder and public links, and an event log."
 )
 
 // Options is what the node hands the surface. Verifier and Authorizer are

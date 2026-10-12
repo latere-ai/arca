@@ -88,10 +88,10 @@ type VerifierOptions struct {
 // validator holding the list, each issuer answering for its own tokens
 // alone: trusting two issuers does not pool their keys.
 //
-// arcad mints no token. A sandbox that attaches to a workspace presents a
+// arcad mints no token. A program that reads or writes a space presents a
 // token its own issuer minted for the audience arcad verifies; how that
-// token reaches the sandbox is the sandbox runtime's and the platform's,
-// which is rule R4 of the family.
+// token reaches the program is its runtime's and the platform's, which is
+// rule R4 of the family.
 type Verifier struct {
 	audiences []string
 	issuers   []string

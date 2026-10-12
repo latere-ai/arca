@@ -29,11 +29,6 @@ const (
 	CodeNotFound              = "not_found"
 	CodeNotAcceptable         = "not_acceptable"
 	CodePathTaken             = "path_taken"
-	CodeSlugTaken             = "slug_taken"
-	CodeWriterHeld            = "writer_held"
-	CodeLeaseNotHeld          = "lease_not_held"
-	CodeManifestIncomplete    = "manifest_incomplete"
-	CodeAttachmentGone        = "attachment_gone"
 	CodeLengthRequired        = "length_required"
 	CodePreconditionFailed    = "precondition_failed"
 	CodeObjectTooLarge        = "object_too_large"
@@ -41,6 +36,7 @@ const (
 	CodeQuotaExceeded         = "quota_exceeded"
 	CodeUnsupportedMediaType  = "unsupported_media_type"
 	CodeTooManyParts          = "too_many_parts"
+	CodeTooManyObjects        = "too_many_objects"
 	CodeLinkReadOnly          = "link_read_only"
 	CodeRateLimited           = "rate_limited"
 	CodeInternal              = "internal"
@@ -75,11 +71,6 @@ var errorTable = map[string]row{
 	CodeNotFound:              {http.StatusNotFound, "There is no such object."},
 	CodeNotAcceptable:         {http.StatusNotAcceptable, "This endpoint answers in JSON."},
 	CodePathTaken:             {http.StatusConflict, "Something already exists at that path."},
-	CodeSlugTaken:             {http.StatusConflict, "This space already has a workspace with that name."},
-	CodeWriterHeld:            {http.StatusConflict, "Another writer holds this workspace."},
-	CodeLeaseNotHeld:          {http.StatusConflict, "This attachment does not hold the writer lease."},
-	CodeManifestIncomplete:    {http.StatusConflict, "The manifest names objects that have not been uploaded."},
-	CodeAttachmentGone:        {http.StatusGone, "This attachment has ended; attach again."},
 	CodeLengthRequired:        {http.StatusLengthRequired, "Send a Content-Length with the body."},
 	CodePreconditionFailed:    {http.StatusPreconditionFailed, "The object is not in the state the request required."},
 	CodeObjectTooLarge:        {http.StatusRequestEntityTooLarge, "The object is larger than this server accepts."},
@@ -87,6 +78,7 @@ var errorTable = map[string]row{
 	CodeQuotaExceeded:         {http.StatusRequestEntityTooLarge, "This space has no room left."},
 	CodeUnsupportedMediaType:  {http.StatusUnsupportedMediaType, "Send the body as JSON."},
 	CodeTooManyParts:          {http.StatusUnprocessableEntity, "The object needs more parts than this server allows."},
+	CodeTooManyObjects:        {http.StatusUnprocessableEntity, "The folder holds more objects than one copy accepts."},
 	CodeLinkReadOnly:          {http.StatusUnprocessableEntity, "A link grants reading and nothing more."},
 	CodeRateLimited:           {http.StatusTooManyRequests, "Too many requests; wait and retry."},
 	CodeInternal:              {http.StatusInternalServerError, "Something went wrong on this server."},

@@ -47,9 +47,9 @@ func (s *Service) put(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, r, api.FromAuth(err))
 		return
 	}
-	limit, err := LimitOf(d)
+	limits, err := LimitsOf(d)
 	if err != nil {
-		api.WriteError(w, r, fault(ctx, "read the answer's limit", err))
+		api.WriteError(w, r, fault(ctx, "read the answer's limits", err))
 		return
 	}
 
@@ -76,11 +76,11 @@ func (s *Service) put(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out, err := s.Commit(ctx, Write{
-		Owner: t.Owner, Path: t.Path, Plane: t.Plane, Actor: Caller(ctx),
+		Owner: t.Owner, Path: t.Path, Actor: Caller(ctx),
 		Object: id, Size: written.Size, Checksum: written.SHA256,
 		ChecksumKind: object.ChecksumSHA256,
 		ContentType:  contentType(r.Header.Get(api.HeaderContentType)),
-		Pre:          pre, Limit: limit,
+		Pre:          pre, Limit: limits.Quota, NoVersion: limits.NoVersions,
 	})
 	if err != nil {
 		// Nothing points at the key this request wrote, and nothing else
@@ -129,7 +129,8 @@ func (s *Service) acceptsLength(length int64) error {
 	}
 }
 
-// Settle drops the bytes a write superseded and kept no version of. A
+// Settle drops the bytes a write superseded and kept no version of, which is
+// a write whose answer carried limits.versions: false (spec 028). A
 // versioned overwrite keeps them, because a version row now names them.
 //
 // It runs after the commit, so a failure leaves bytes no row points at,

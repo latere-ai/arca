@@ -234,6 +234,10 @@ func specRoutes(t *testing.T) map[string][]string {
 	return out
 }
 
+// surfaceRoutes is the size of spec 013's route table, which is the whole
+// surface under /v1.
+const surfaceRoutes = 29
+
 // TestEveryRouteThisBuildRegistersIsOneOfSpec013sTable is criterion 1 of
 // spec 013 for the whole surface rather than for one package's half of it.
 //
@@ -244,14 +248,15 @@ func specRoutes(t *testing.T) map[string][]string {
 // registers the same union because Routes and Table are two readings of one
 // declaration.
 //
-// The converse — that every row of the table is registered — closed when the
-// last handler landed, and is the second half below: the union holds every
-// row spec 013 names, so criterion 1 of that spec is proved in both
-// directions from the one place every declaration is visible.
+// The converse, that every row of the table is registered, is the second
+// half below: the union holds every row spec 013 names, so criterion 1 of
+// that spec is proved in both directions from the one place every
+// declaration is visible. The table is twenty-nine routes (spec 028), so
+// the build registers twenty-nine and no other.
 func TestEveryRouteThisBuildRegistersIsOneOfSpec013sTable(t *testing.T) {
 	spec := specRoutes(t)
-	if len(spec) < 41 {
-		t.Fatalf("spec 013's tables name %d routes, and the surface is forty-one plus the document", len(spec))
+	if len(spec) != surfaceRoutes {
+		t.Fatalf("spec 013's tables name %d routes, and the surface is %d plus the document", len(spec), surfaceRoutes)
 	}
 	registered := routes()
 	seen := map[string]bool{}
@@ -267,12 +272,14 @@ func TestEveryRouteThisBuildRegistersIsOneOfSpec013sTable(t *testing.T) {
 			continue
 		}
 		// A row whose third column names actions is held to them. The rows
-		// that follow the action their attach asked name none, and the
-		// owning package's own test holds each to the action it puts.
-		if len(actions) > 0 && !slices.Contains(actions, r.Action) {
+		// that name none are the three public link routes, which sit
+		// outside the verifier and ask nothing.
+		switch {
+		case len(actions) > 0 && !slices.Contains(actions, r.Action):
 			t.Errorf("%s asks %q; spec 013's row names %v", key, r.Action, actions)
-		}
-		if len(actions) == 0 && r.Public && r.Action != "" {
+		case len(actions) == 0 && !r.Public:
+			t.Errorf("%s is behind the verifier and spec 013's row names no action for it", key)
+		case len(actions) == 0 && r.Action != "":
 			t.Errorf("%s is outside the verifier and asks %q; the grant the token resolves to is the whole of the authorization", key, r.Action)
 		}
 		if r.Summary == "" {
@@ -290,18 +297,16 @@ func TestEveryRouteThisBuildRegistersIsOneOfSpec013sTable(t *testing.T) {
 // chosenPerRequest are the actions of spec 006's vocabulary no row of spec
 // 013's table declares, because the request chooses them.
 //
-// There is one. POST /v1/workspaces/{id}/attach asks workspace.read for a ro
-// mount and workspace.attach for a rw one, and the renew and the release
-// that follow it ask the action their attach asked; actionOf in
-// internal/workspaces/lease.go is where that is decided, and that package's
-// own tests drive both modes and hold each to its answer. The rows carry the
-// read, which is the action every one of them asks at least, so the attach
-// action reaches no declaration and the count below would be short by one
-// without this list.
-var chosenPerRequest = []string{authorizer.ActionWorkspaceAttach}
+// There is none. Two routes ask an action their request chooses: a GET on a
+// path asks file.list with ?list=1, and a POST on a path asks file.restore
+// with restore_version. Each of those actions is also the declared action of
+// another row, the trash listing and the restore from trash, so the
+// declarations alone cover the vocabulary. An action that only a request
+// could choose is named here, or the count below is short by it.
+var chosenPerRequest = []string{}
 
 // TestEveryActionOfTheVocabularyIsAskedByARoute is criterion 3 of spec 013:
-// the twenty-three actions of spec 006 and the routes of spec 013 cover each
+// the fifteen actions of spec 006 and the routes of spec 013 cover each
 // other, so no action is a permission nothing can exercise and no route asks
 // a question no authorizer was given.
 //

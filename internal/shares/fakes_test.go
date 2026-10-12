@@ -105,22 +105,31 @@ func (t *table) Move(_ context.Context, _ store.Querier, owner, from, to string)
 	return n, nil
 }
 
-func (t *table) ListSpace(_ context.Context, _ store.Querier, owner, prefix, cursor string, limit int) ([]store.Grant, error) {
+func (t *table) ListSpace(_ context.Context, _ store.Querier, owner, prefix, cursor string, limit int, omit []string) ([]store.Grant, error) {
 	return t.page(t.failList, cursor, limit, func(g store.Grant) bool {
-		return g.Owner == owner && g.Status == store.GrantActive && (prefix == "" || g.PathPrefix == prefix)
+		return g.Owner == owner && g.Status == store.GrantActive && (prefix == "" || g.PathPrefix == prefix) &&
+			!store.Omitted(omit, g.PathPrefix)
 	})
 }
 
-func (t *table) ListGrantee(_ context.Context, _ store.Querier, grantee, cursor string, limit int) ([]store.Grant, error) {
+func (t *table) ListGrantee(_ context.Context, _ store.Querier, grantee, cursor string, limit int, omit []string) ([]store.Grant, error) {
 	return t.page(t.failList, cursor, limit, func(g store.Grant) bool {
-		return g.GranteeKind == store.GranteeSubject && g.Grantee == grantee && t.live(g)
+		return g.GranteeKind == store.GranteeSubject && g.Grantee == grantee && t.live(g) &&
+			!store.Omitted(omit, g.PathPrefix)
 	})
 }
 
-func (t *table) ListTokens(_ context.Context, _ store.Querier, owner, cursor string, limit int) ([]store.Grant, error) {
+func (t *table) ListTokens(_ context.Context, _ store.Querier, owner, cursor string, limit int, omit []string) ([]store.Grant, error) {
 	return t.page(t.failList, cursor, limit, func(g store.Grant) bool {
-		return g.Owner == owner && g.GranteeKind != store.GranteeSubject && t.live(g)
+		return g.Owner == owner && g.GranteeKind != store.GranteeSubject && t.live(g) &&
+			!store.Omitted(omit, g.PathPrefix)
 	})
+}
+
+// DeleteUnder is the folder delete's statement, which no route of this
+// package reaches: internal/files runs it, and the store tier proves it.
+func (t *table) DeleteUnder(context.Context, store.Querier, string, string, []string) (int64, error) {
+	return 0, nil
 }
 
 func (t *table) CountLinks(_ context.Context, _ store.Querier, owners []string) (map[string]int64, error) {
@@ -212,7 +221,7 @@ func (t *table) Live(_ context.Context, _ store.Querier, id, owner string) (stor
 	return store.Grant{}, fmt.Errorf("store: read the link: %w", pgx.ErrNoRows)
 }
 
-func (t *table) Subtree(_ context.Context, _ store.Querier, owner, prefix, cursor string, limit int) ([]store.File, error) {
+func (t *table) Subtree(_ context.Context, _ store.Querier, owner, prefix, cursor string, limit int, omit []string) ([]store.File, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.failSubtree != nil {
@@ -221,7 +230,7 @@ func (t *table) Subtree(_ context.Context, _ store.Querier, owner, prefix, curso
 	var out []store.File
 	for _, f := range t.files {
 		covered := f.Path == prefix || strings.HasPrefix(f.Path, prefix+"/")
-		if f.Owner == owner && covered && f.DeletedAt == nil && f.Path > cursor {
+		if f.Owner == owner && covered && f.DeletedAt == nil && f.Path > cursor && !store.Omitted(omit, f.Path) {
 			out = append(out, f)
 		}
 	}

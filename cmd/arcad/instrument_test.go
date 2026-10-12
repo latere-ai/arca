@@ -34,7 +34,6 @@ import (
 	"latere.ai/x/arca/internal/events"
 	"latere.ai/x/arca/internal/files"
 	"latere.ai/x/arca/internal/metrics"
-	"latere.ai/x/arca/internal/store"
 )
 
 // requestDuration is the request histogram the OpenTelemetry HTTP semantic
@@ -328,9 +327,6 @@ func TestABucketCallIsAChildOfItsRequestSpan(t *testing.T) {
 		Decide: identity.Authorizer,
 		Config: config.Config{BucketPrefix: "arca/", InlineBytes: 1 << 10, MaxUploadBytes: 1 << 20},
 		Ledger: fileLedger{log: events.NewLog(), usage: events.NewLedger()},
-		// The liveness rule of spec 009 is read for a workspace path only,
-		// and this put is not one.
-		Workspaces: store.NewWorkspaces(),
 	})
 	surface, err := api.New(api.Options{
 		Verifier: identity.Verifier, Authorizer: identity.Authorizer,

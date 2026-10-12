@@ -4,6 +4,7 @@
 package uploads
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -11,9 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"latere.ai/x/pkg/authz"
 	"latere.ai/x/pkg/authz/stub"
 
 	"latere.ai/x/arca/internal/api"
+	"latere.ai/x/arca/internal/auth"
 	"latere.ai/x/arca/internal/blob"
 	"latere.ai/x/arca/internal/files"
 	"latere.ai/x/arca/internal/store"
@@ -79,7 +82,7 @@ func TestASizeNoRouteServesIsRefusedAndOpensNoMultipart(t *testing.T) {
 		`{"owner":"me","path":"files/a.mp4","size":-1}`:            api.CodeInvalidField,
 		`{"owner":"me","path":"files/a.mp4","size":6000000000}`:    api.CodeObjectTooLarge,
 		`{"owner":"me","path":"nowhere/a.mp4","size":1024}`:        api.CodeUnknownPlane,
-		`{"owner":"me","path":"workspaces/a.mp4","size":1024}`:     api.CodeInvalidPath,
+		`{"owner":"me","path":"files/../a.mp4","size":1024}`:       api.CodeInvalidPath,
 		`{"owner":"me","path":"files/a.mp4","size":1024,"z":true}`: api.CodeUnknownField,
 	} {
 		if got := code(t, h.call(t, http.MethodPost, "/v1/uploads", strings.NewReader(body))); got != want {
@@ -426,5 +429,96 @@ func TestTheDefaultsOfABuildWithNoQuerySetsBound(t *testing.T) {
 	if parts(1) != 1 || parts(PartSize) != 1 || parts(PartSize+1) != 2 {
 		t.Errorf("the part count of one part, one full part and one byte more is %d, %d, %d",
 			parts(1), parts(PartSize), parts(PartSize+1))
+	}
+}
+
+// answering is the Decide seam with a limits object put on every allow, as
+// an authorizer's answer would carry one, which a case changes between two
+// requests of one session.
+type answering struct {
+	files.Decider
+	limits string
+}
+
+func (a *answering) Decide(ctx context.Context, action string, res authz.Resource) (auth.Decision, error) {
+	return a.limited(a.Decider.Decide(ctx, action, res))
+}
+
+func (a *answering) Lookup(ctx context.Context, action string, res authz.Resource) (auth.Decision, error) {
+	return a.limited(a.Decider.Lookup(ctx, action, res))
+}
+
+func (a *answering) limited(d auth.Decision, err error) (auth.Decision, error) {
+	if err == nil && a.limits != "" {
+		d.Limits = []byte(a.limits)
+	}
+	return d, err
+}
+
+// TestACompletionReadsTheLimitOfItsOwnAnswer is criterion 11 of spec 028: a
+// session's completing step asks upload.write itself and reads
+// limits.versions off that answer. What the answer said when the session
+// opened is held nowhere, so it decides nothing at the completion.
+func TestACompletionReadsTheLimitOfItsOwnAnswer(t *testing.T) {
+	for _, c := range []struct {
+		name              string
+		opened, completed string
+		versions          int
+	}{
+		{"the completion's answer keeps none", ``, `{"versions":false}`, 0},
+		{"the open's answer kept none and the completion's says nothing", `{"versions":false}`, ``, 1},
+		{"neither says anything", ``, ``, 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			seam := &answering{}
+			h := newHarness(t, func(o *Options) {
+				seam.Decider = o.Decide
+				o.Decide = seam
+			})
+			first := h.open(t, "files/video/keynote.mp4", 20<<20)
+			replaced := h.sessions(t, first.ID).ObjectID
+			if w := h.finish(t, first, []string{h.upload(t, first, 1, "the first cut")}); w.Code != http.StatusCreated {
+				t.Fatalf("the first completion answered %d: %s", w.Code, w.Body)
+			}
+
+			seam.limits = c.opened
+			second := h.open(t, "files/video/keynote.mp4", 20<<20)
+			seam.limits = c.completed
+			w := h.finish(t, second, []string{h.upload(t, second, 1, "the second cut, longer")})
+			if w.Code != http.StatusOK {
+				t.Fatalf("the second completion answered %d: %s", w.Code, w.Body)
+			}
+			if got := len(h.store.versions); got != c.versions {
+				t.Errorf("the overwrite left %d versions, want %d", got, c.versions)
+			}
+			_, held := h.objects.Bytes(replaced.Key("arca/"))
+			if held != (c.versions == 1) {
+				t.Errorf("the replaced bytes are held=%t with %d versions kept", held, c.versions)
+			}
+			want := int64(len("the second cut, longer"))
+			if c.versions == 1 {
+				want += int64(len("the first cut"))
+			}
+			if got := h.store.usage[h.owner]; got != want {
+				t.Errorf("the space holds %d bytes, want %d", got, want)
+			}
+		})
+	}
+
+	// A limit this server cannot read is no decision at the completion, and
+	// the session stays for the retry.
+	seam := &answering{}
+	h := newHarness(t, func(o *Options) {
+		seam.Decider = o.Decide
+		o.Decide = seam
+	})
+	session := h.open(t, "files/video/keynote.mp4", 20<<20)
+	part := h.upload(t, session, 1, "the first cut")
+	seam.limits = `{"versions":"none"}`
+	if got := code(t, h.finish(t, session, []string{part})); got != api.CodeStorageUnavailable {
+		t.Errorf("a completion under limits that do not decode is %q", got)
+	}
+	if len(h.store.sessions) != 1 || len(h.store.files) != 0 {
+		t.Errorf("a refused completion left %d sessions and %d rows", len(h.store.sessions), len(h.store.files))
 	}
 }

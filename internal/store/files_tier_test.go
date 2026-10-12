@@ -175,7 +175,7 @@ func TestStoreTheTrashIsNewestFirstAndTheWindowIsAPredicate(t *testing.T) {
 	}
 
 	window := time.Now().Add(-720 * time.Hour)
-	page, err := files.ListTrash(t.Context(), db.Querier(), owner, TrashCursor{}, 10, window)
+	page, err := files.ListTrash(t.Context(), db.Querier(), owner, TrashCursor{}, 10, window, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestStoreTheTrashIsNewestFirstAndTheWindowIsAPredicate(t *testing.T) {
 	}
 	// The second page resumes after the first entry and does not repeat it.
 	next, err := files.ListTrash(t.Context(), db.Querier(), owner,
-		TrashCursor{DeletedAt: *page[0].DeletedAt, Path: page[0].Path}, 10, window)
+		TrashCursor{DeletedAt: *page[0].DeletedAt, Path: page[0].Path}, 10, window, nil)
 	if err != nil || len(next) != 1 || next[0].Path != page[1].Path {
 		t.Fatalf("the second page is %v, %v", next, err)
 	}
@@ -203,7 +203,7 @@ func TestStoreTheTrashIsNewestFirstAndTheWindowIsAPredicate(t *testing.T) {
 		t.Fatalf("the restored row is %+v, %v", back, err)
 	}
 
-	purged, err := files.PurgeTrash(t.Context(), db.Querier(), owner, "")
+	purged, err := files.PurgeTrash(t.Context(), db.Querier(), owner, "", nil)
 	if err != nil || len(purged) != 2 {
 		t.Fatalf("PurgeTrash = %d rows, %v", len(purged), err)
 	}
@@ -227,16 +227,16 @@ func TestStoreTheStarListingIsNarrowedToTheOwnersItIsGiven(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	page, err := stars.List(t.Context(), db.Querier(), subject, []string{inside}, StarCursor{}, 1)
+	page, err := stars.List(t.Context(), db.Querier(), subject, []string{inside}, StarCursor{}, 1, nil)
 	if err != nil || len(page) != 1 || page[0].Owner != inside {
 		t.Fatalf("the listing narrowed to one space is %v, %v", page, err)
 	}
-	page, err = stars.List(t.Context(), db.Querier(), subject, []string{"https://issuer.example|none"}, StarCursor{}, 10)
+	page, err = stars.List(t.Context(), db.Querier(), subject, []string{"https://issuer.example|none"}, StarCursor{}, 10, nil)
 	if err != nil || len(page) != 0 {
 		t.Fatalf("the listing narrowed to a space holding no star is %v, %v", page, err)
 	}
 	for name, owners := range map[string][]string{"nil": nil, "empty": {}} {
-		page, err = stars.List(t.Context(), db.Querier(), subject, owners, StarCursor{}, 10)
+		page, err = stars.List(t.Context(), db.Querier(), subject, owners, StarCursor{}, 10, nil)
 		if err != nil || len(page) != 2 {
 			t.Fatalf("the listing given %s owners is %v, %v", name, page, err)
 		}
@@ -261,7 +261,7 @@ func TestStoreAStarFollowsAMoveAndLeavesTheListingWhenItsTargetIsTrashed(t *test
 	if err := stars.Add(t.Context(), db.Querier(), subject, owner, f.Path); err != nil {
 		t.Fatal(err)
 	}
-	page, err := stars.List(t.Context(), db.Querier(), subject, nil, StarCursor{}, 10)
+	page, err := stars.List(t.Context(), db.Querier(), subject, nil, StarCursor{}, 10, nil)
 	if err != nil || len(page) != 1 || page[0].File.Checksum != f.Checksum {
 		t.Fatalf("List = %v, %v", page, err)
 	}
@@ -285,7 +285,7 @@ func TestStoreAStarFollowsAMoveAndLeavesTheListingWhenItsTargetIsTrashed(t *test
 	if ok, err := files.Move(t.Context(), db.Querier(), owner, f.Path, moved.Path); err != nil || !ok {
 		t.Fatalf("Move = %t, %v", ok, err)
 	}
-	page, err = stars.List(t.Context(), db.Querier(), subject, nil, StarCursor{}, 10)
+	page, err = stars.List(t.Context(), db.Querier(), subject, nil, StarCursor{}, 10, nil)
 	if err != nil || len(page) != 1 || page[0].Path != moved.Path {
 		t.Fatalf("the star did not follow the move: %v, %v", page, err)
 	}
@@ -293,7 +293,7 @@ func TestStoreAStarFollowsAMoveAndLeavesTheListingWhenItsTargetIsTrashed(t *test
 	if _, err := files.SoftDelete(t.Context(), db.Querier(), owner, moved.Path); err != nil {
 		t.Fatal(err)
 	}
-	page, err = stars.List(t.Context(), db.Querier(), subject, nil, StarCursor{}, 10)
+	page, err = stars.List(t.Context(), db.Querier(), subject, nil, StarCursor{}, 10, nil)
 	if err != nil || len(page) != 0 {
 		t.Fatalf("a star on a trashed path is still listed: %v, %v", page, err)
 	}

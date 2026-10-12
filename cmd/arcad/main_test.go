@@ -29,7 +29,6 @@ import (
 	"latere.ai/x/arca/authorizer"
 	"latere.ai/x/arca/internal/admin"
 	"latere.ai/x/arca/internal/auth"
-	"latere.ai/x/arca/internal/blob"
 	"latere.ai/x/arca/internal/check"
 	"latere.ai/x/arca/internal/config"
 	"latere.ai/x/arca/internal/events"
@@ -38,7 +37,6 @@ import (
 	"latere.ai/x/arca/internal/reaper"
 	"latere.ai/x/arca/internal/shares"
 	"latere.ai/x/arca/internal/store"
-	"latere.ai/x/arca/internal/workspaces"
 )
 
 // publicBase is ARCA_PUBLIC_URL in a test: the address clients would reach
@@ -796,17 +794,16 @@ func TestReapAsALoopRunsUntilItIsStopped(t *testing.T) {
 	if !strings.Contains(out.String(), "the reconciler runs every 1h0m0s") {
 		t.Fatalf("stdout = %q", out.String())
 	}
-	// A pass that does not run reports nothing, and a findings table with no
-	// row for it reads like a pass that found nothing. This process runs no
-	// lease expiry, and it says so where an operator reads the rest.
-	if !strings.Contains(out.String(), "nine of the ten passes") {
-		t.Errorf("stdout is %q and does not say which pass this process leaves to a replica", out.String())
+	// This process runs every pass a replica runs (spec 028), so it prints
+	// no line naming a pass it leaves to one.
+	if strings.Contains(out.String(), "passes") {
+		t.Errorf("stdout is %q and names passes this process does not run", out.String())
 	}
 }
 
 func TestTheReconcilerIsNotStartedOnAConfigurationItCannotRun(t *testing.T) {
 	var out bytes.Buffer
-	if err := startReaper(t.Context(), config.Config{ReapInterval: time.Minute}, nil, nil, nil, nil, nil, nil, nil, &out); err == nil {
+	if err := startReaper(t.Context(), config.Config{ReapInterval: time.Minute}, nil, nil, nil, nil, nil, &out); err == nil {
 		t.Fatal("a reconciler with no stores was started anyway")
 	}
 }
@@ -829,10 +826,10 @@ func TestOneSequenceReportsWhatItFound(t *testing.T) {
 	}
 }
 
-// The two seams the node binds: the log and the usage counter of spec 010
-// under the workspaces of spec 009, and the lease sweep of spec 009 under
-// the reconciler of spec 010. What each package does behind its seam is its
-// own tests'; what is proved here is the binding.
+// The seams the node binds: the log and the usage counter of spec 010 under
+// the object plane of spec 005 and the grants of spec 008. What each package
+// does behind its seam is its own tests'; what is proved here is the
+// binding.
 
 // recordingLog is the log of spec 010 with the appends kept.
 type recordingLog struct {
@@ -920,83 +917,14 @@ func (*recordingLedger) Spaces(context.Context, store.Querier, string, int) ([]e
 	return nil, nil
 }
 
-// TestEveryActionAWorkspaceAppendsIsOneOfSpec010sVocabulary: the column
-// carries no constraint and the append refuses a word the table does not
-// name, so a word spelled one way in spec 009's package and another in spec
-// 010's would be a refused transaction on a live installation. The five are
-// held to the table here, where the two spellings meet.
-func TestEveryActionAWorkspaceAppendsIsOneOfSpec010sVocabulary(t *testing.T) {
-	for _, action := range []string{
-		workspaces.ActionAttach, workspaces.ActionRelease, workspaces.ActionSync,
-		workspaces.ActionReap, workspaces.ActionRestore,
-	} {
-		if !events.Action(action).Valid() {
-			t.Errorf("a workspace appends %q, which spec 010's vocabulary does not name", action)
-		}
-	}
-}
-
-// TestTheWorkspaceLedgerWritesThroughTheLogAndTheCounter is the binding
-// itself: an event reaches the log as a row of spec 010's shape, and the
-// bytes a sync dropped reach the space's counter.
-func TestTheWorkspaceLedgerWritesThroughTheLogAndTheCounter(t *testing.T) {
-	log, usage := &recordingLog{}, &recordingLedger{}
-	recorder := metrics.Register(nil)
-	bound := ledger{log: log, usage: usage, metrics: recorder}
-
-	event := workspaces.Event{
-		Owner: "https://issuer.example|9ab3", Path: "workspaces/build/",
-		Action: workspaces.ActionSync, Actor: "https://issuer.example|9ab3",
-		Detail: map[string]any{"synced_files": 2},
-	}
-	if err := bound.Append(t.Context(), nil, event); err != nil {
-		t.Fatalf("the append = %v", err)
-	}
-	if len(log.appended) != 1 {
-		t.Fatalf("the log holds %d rows", len(log.appended))
-	}
-	got := log.appended[0]
-	if got.Owner != event.Owner || got.Path != event.Path || got.Actor != event.Actor ||
-		got.Action != events.ActionSync || !reflect.DeepEqual(got.Detail, event.Detail) {
-		t.Errorf("the row is %+v", got)
-	}
-
-	if err := bound.Release(t.Context(), nil, event.Owner, 4096); err != nil {
-		t.Fatalf("the release = %v", err)
-	}
-	if usage.released[event.Owner] != 4096 {
-		t.Errorf("the counter gave back %d bytes", usage.released[event.Owner])
-	}
-	// The row is counted by its action, which is spec 018's arca_events_
-	// appended_total. A row the log refused is not counted below.
-	if got := recorder.EventsAppended.Value(map[string]string{"kind": "sync"}); got != 1 {
-		t.Errorf("the appended row was counted %d times", got)
-	}
-
-	// A failure on either half is the caller's: both run inside the
-	// transaction of the mutation they record, and a number that cannot be
-	// written is a number that stops being current.
-	failure := errors.New("the store said no")
-	broken := ledger{log: &recordingLog{err: failure}, usage: &recordingLedger{err: failure}, metrics: recorder}
-	if err := broken.Append(t.Context(), nil, event); !errors.Is(err, failure) {
-		t.Errorf("a failed append = %v", err)
-	}
-	if got := recorder.EventsAppended.Value(map[string]string{"kind": "sync"}); got != 1 {
-		t.Errorf("a row the log refused was counted; the counter reads %d", got)
-	}
-	if err := broken.Release(t.Context(), nil, event.Owner, 1); !errors.Is(err, failure) {
-		t.Errorf("a failed release = %v", err)
-	}
-}
-
-// TestEveryActionTheFilePlaneAppendsIsOneOfSpec010sVocabulary: the same rule
-// for the four words specs 005 and 007 append. The column carries no
-// constraint, so a word spelled one way in the file plane and another in the
-// log would be a row no consumer can filter for rather than a compile
-// failure here.
+// TestEveryActionTheFilePlaneAppendsIsOneOfSpec010sVocabulary: the five
+// words specs 005 and 007 append are members of the log's table. The column
+// carries no constraint, so a word spelled one way in the file plane and
+// another in the log would be a row no consumer can filter for rather than a
+// compile failure here.
 func TestEveryActionTheFilePlaneAppendsIsOneOfSpec010sVocabulary(t *testing.T) {
 	for _, action := range []string{
-		files.EventPut, files.EventMove, files.EventDelete, files.EventRestore,
+		files.EventPut, files.EventMove, files.EventCopy, files.EventDelete, files.EventRestore,
 	} {
 		if !events.Action(action).Valid() {
 			t.Errorf("the file plane appends %q, which spec 010's vocabulary does not name", action)
@@ -1053,6 +981,36 @@ func TestTheFileLedgerChargesThroughTheCounterAndRecordsThroughTheLog(t *testing
 	// when the row is, so a failure is a warning and never the caller's.
 	fileLedger{log: &recordingLog{err: errors.New("the store said no")}}.
 		Append(t.Context(), nil, event)
+}
+
+// TestARowTheLogTookIsCountedByItsAction: spec 018's
+// arca_events_appended_total counts a row where a mutation becomes one,
+// which is the two ledger bindings of this file, and a row the log refused
+// is not counted.
+func TestARowTheLogTookIsCountedByItsAction(t *testing.T) {
+	const owner = "https://issuer.example|9ab3"
+	recorder := metrics.Register(nil)
+	copied := files.Event{Owner: owner, Path: "files/reports/2026", Action: files.EventCopy, Actor: owner}
+	fileLedger{log: &recordingLog{}, metrics: recorder}.Append(t.Context(), nil, copied)
+	if got := recorder.EventsAppended.Value(map[string]string{"kind": "copy"}); got != 1 {
+		t.Errorf("an appended copy was counted %d times", got)
+	}
+	failure := errors.New("the store said no")
+	fileLedger{log: &recordingLog{err: failure}, metrics: recorder}.Append(t.Context(), nil, copied)
+	if got := recorder.EventsAppended.Value(map[string]string{"kind": "copy"}); got != 1 {
+		t.Errorf("a row the log refused was counted; the counter reads %d", got)
+	}
+
+	granted := shares.Event{Owner: owner, Path: "files/reports", Action: shares.ActionShareCreated, Actor: owner}
+	if _, err := (shareLedger{log: &recordingLog{}, metrics: recorder}).Append(t.Context(), nil, granted); err != nil {
+		t.Fatalf("the append = %v", err)
+	}
+	if _, err := (shareLedger{log: &recordingLog{err: failure}, metrics: recorder}).Append(t.Context(), nil, granted); !errors.Is(err, failure) {
+		t.Fatalf("a failed append = %v", err)
+	}
+	if got := recorder.EventsAppended.Value(map[string]string{"kind": "share_created"}); got != 1 {
+		t.Errorf("one appended grant and one refused read %d", got)
+	}
 }
 
 // TestAChargeTheAnswersLimitDoesNotAdmitIsTheSeamsOwnRefusal: the handler
@@ -1137,8 +1095,8 @@ func TestTheShareLedgerWritesThroughTheLogAndAnswersTheRowsID(t *testing.T) {
 	}
 }
 
-// failingStore is the transaction seam of spec 009 and the querier under it,
-// answering every statement with one failure. It is what proves a call
+// failingStore is a transaction seam and the querier under it, answering
+// every statement with one failure. It is what proves a call
 // reached the store, rather than what the store said.
 type failingStore struct{ err error }
 
@@ -1161,45 +1119,9 @@ type failingRow struct{ fault error }
 
 func (r failingRow) Scan(...any) error { return r.fault }
 
-// TestTheLeaseSweepRunsOnALiveRunAndNeverOnADryOne is the other binding, and
-// the one property a dry run rests on: pass 3 writes on every statement it
-// issues, so a dry run reaches no store at all. The nil service is the
-// proof: a dry sweep that called through would panic on it.
-func TestTheLeaseSweepRunsOnALiveRunAndNeverOnADryOne(t *testing.T) {
-	n, err := leasePass{}.Sweep(t.Context(), nil, time.Now(), true)
-	if n != 0 || err != nil {
-		t.Fatalf("a dry sweep = %d, %v", n, err)
-	}
-
-	failure := errors.New("the store said no")
-	service, err := workspaces.New(workspaces.Options{
-		DB: failingStore{err: failure}, Workspaces: store.NewWorkspaces(),
-		Attachments: store.NewAttachments(), Objects: store.NewWorkspaceObjects(),
-		Bucket:     blob.NewMemory(),
-		Authorizer: auth.NewAuthorizer(&auth.OwnerPolicy{}),
-	})
-	if err != nil {
-		t.Fatalf("the service would not build: %v", err)
-	}
-	recorder := metrics.Register(nil)
-	if _, err := (leasePass{service: service, metrics: recorder}).Sweep(t.Context(), nil, time.Now(), false); !errors.Is(err, failure) {
-		t.Errorf("a live sweep = %v", err)
-	}
-	// A sweep that ended nothing counts nothing: spec 018's
-	// arca_lease_expiries_total is the rate leases are ending at, and a
-	// failed sweep ended none.
-	if got := recorder.LeaseExpiries.Value(nil); got != 0 {
-		t.Errorf("a failed sweep counted %d expiries", got)
-	}
-	recorder.LeaseExpired(2)
-	if got := recorder.LeaseExpiries.Value(nil); got != 2 {
-		t.Errorf("two ended leases read %d", got)
-	}
-}
-
-// The two arms of the restore across owners, as fakes: each answers its own
-// "not mine", a row, or a failure, which are the three answers the adapter
-// decides on.
+// trashArm is the trash of spec 005 as the restore across owners reaches it:
+// it answers "not mine", a row, or a failure, which are the three answers
+// the adapter decides on.
 type trashArm struct {
 	restored store.File
 	err      error
@@ -1211,56 +1133,27 @@ func (a *trashArm) RestoreTrashed(_ context.Context, owner, id string) (store.Fi
 	return a.restored, a.err
 }
 
-type tombstoneArm struct {
-	restored store.Workspace
-	err      error
-	asked    []string
-}
-
-func (a *tombstoneArm) RestoreDeleted(_ context.Context, owner, id string) (store.Workspace, error) {
-	a.asked = append(a.asked, owner+" "+id)
-	return a.restored, a.err
-}
-
-// TestTheRestoreAcrossOwnersTriesTheTrashThenTheTombstones is the binding of
-// spec 012's Restorer. Both ids are database identifiers of the same shape,
-// so an id does not say which table it belongs to and the two arms are tried
-// in order; each answers its own "not mine", and a miss on both is the one
-// refusal the route renders.
-func TestTheRestoreAcrossOwnersTriesTheTrashThenTheTombstones(t *testing.T) {
+// TestTheRestoreAcrossOwnersReachesTheTrash is the binding of spec 012's
+// Restorer: the id is put to the trash of the space the route named, a row
+// it brought back is answered as a file, and an id it does not hold is the
+// one refusal the route renders.
+func TestTheRestoreAcrossOwnersReachesTheTrash(t *testing.T) {
 	space := "https://issuer.example|9ab3"
 	t.Run("a trashed object", func(t *testing.T) {
 		trash := &trashArm{restored: store.File{Path: "files/reports/q3.pdf"}}
-		durable := &tombstoneArm{}
-		back, err := restorer{objects: trash, durable: durable}.Restore(t.Context(), space, "an-id")
+		back, err := restorer{objects: trash}.Restore(t.Context(), space, "an-id")
 		if err != nil {
 			t.Fatalf("Restore: %v", err)
 		}
 		if back.Kind != admin.KindFile || back.ID != "an-id" {
 			t.Fatalf("the answer is %+v", back)
 		}
-		if len(durable.asked) != 0 {
-			t.Errorf("the workspace arm was asked %v after the trash answered", durable.asked)
-		}
-	})
-	t.Run("a deleted workspace", func(t *testing.T) {
-		trash := &trashArm{err: files.ErrNotTrashed}
-		durable := &tombstoneArm{restored: store.Workspace{Slug: "build"}}
-		back, err := restorer{objects: trash, durable: durable}.Restore(t.Context(), space, "an-id")
-		if err != nil {
-			t.Fatalf("Restore: %v", err)
-		}
-		if back.Kind != admin.KindWorkspace {
-			t.Fatalf("the answer is %+v", back)
-		}
 		if len(trash.asked) != 1 || trash.asked[0] != space+" an-id" {
-			t.Errorf("the trash arm was asked %v", trash.asked)
+			t.Errorf("the trash was asked %v", trash.asked)
 		}
 	})
-	t.Run("neither", func(t *testing.T) {
-		trash := &trashArm{err: files.ErrNotTrashed}
-		durable := &tombstoneArm{err: workspaces.ErrNotDeleted}
-		_, err := restorer{objects: trash, durable: durable}.Restore(t.Context(), space, "an-id")
+	t.Run("an id the trash does not hold", func(t *testing.T) {
+		_, err := restorer{objects: &trashArm{err: files.ErrNotTrashed}}.Restore(t.Context(), space, "an-id")
 		if !errors.Is(err, admin.ErrNotRestorable) {
 			t.Fatalf("an id that names nothing answered %v", err)
 		}
@@ -1268,28 +1161,11 @@ func TestTheRestoreAcrossOwnersTriesTheTrashThenTheTombstones(t *testing.T) {
 }
 
 // A store that will not answer is a fault and never a miss. Reading it as
-// one would put the question to the other arm and then render a 404 for a
-// restore that was never attempted.
-func TestTheRestoreAcrossOwnersCarriesAFailureOfEitherArm(t *testing.T) {
-	space := "https://issuer.example|9ab3"
+// one would render a 404 for a restore that was never attempted.
+func TestTheRestoreAcrossOwnersCarriesAFailureOfTheTrash(t *testing.T) {
 	failure := errors.New("the store said no")
-	t.Run("the trash", func(t *testing.T) {
-		durable := &tombstoneArm{}
-		_, err := restorer{objects: &trashArm{err: failure}, durable: durable}.Restore(t.Context(), space, "an-id")
-		if !errors.Is(err, failure) {
-			t.Fatalf("a failed trash restore answered %v", err)
-		}
-		if len(durable.asked) != 0 {
-			t.Errorf("a failure was read as a miss and the workspace arm was asked %v", durable.asked)
-		}
-	})
-	t.Run("the tombstones", func(t *testing.T) {
-		_, err := restorer{
-			objects: &trashArm{err: files.ErrNotTrashed},
-			durable: &tombstoneArm{err: failure},
-		}.Restore(t.Context(), space, "an-id")
-		if !errors.Is(err, failure) {
-			t.Fatalf("a failed workspace restore answered %v", err)
-		}
-	})
+	_, err := restorer{objects: &trashArm{err: failure}}.Restore(t.Context(), "https://issuer.example|9ab3", "an-id")
+	if !errors.Is(err, failure) || errors.Is(err, admin.ErrNotRestorable) {
+		t.Fatalf("a failed trash restore answered %v", err)
+	}
 }

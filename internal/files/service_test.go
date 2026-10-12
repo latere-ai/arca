@@ -4,7 +4,6 @@
 package files
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -286,9 +285,9 @@ func TestAStoreThatCannotAnswerIsAnOutageAndNeverAVerdict(t *testing.T) {
 	}
 }
 
-// TestTheDefaultsOfABuildWhoseLaterSpecsHaveNotLanded: with no ledger, no
-// workspace table and no reference check bound, the surface still serves and
-// refuses nothing for a reason it cannot know.
+// TestTheDefaultsOfABuildWhoseLaterSpecsHaveNotLanded: with no ledger and no
+// reference check bound, the surface still serves and refuses nothing for a
+// reason it cannot know.
 func TestTheDefaultsOfABuildWhoseLaterSpecsHaveNotLanded(t *testing.T) {
 	s := New(Options{DB: newMemory(), Config: configOf(8, 16)})
 	if _, err := s.ledger.Charge(t.Context(), nil, "space", 1<<40, Limit{Bytes: 1, Set: true}); err != nil {
@@ -298,10 +297,6 @@ func TestTheDefaultsOfABuildWhoseLaterSpecsHaveNotLanded(t *testing.T) {
 		t.Errorf("a build that counts nothing refused a release: %v", err)
 	}
 	s.ledger.Append(t.Context(), nil, Event{Action: EventPut})
-	live, err := s.workspaces.Live(t.Context(), nil, "space", "build")
-	if err != nil || !live {
-		t.Errorf("a build with no workspace table answered %t, %v", live, err)
-	}
 	if s.files == nil || s.versions == nil || s.stars == nil || s.references == nil {
 		t.Error("a surface built with no query sets bound none")
 	}
@@ -312,35 +307,6 @@ func TestTheDefaultsOfABuildWhoseLaterSpecsHaveNotLanded(t *testing.T) {
 		s.Ledger() == nil || s.Files() == nil || s.Prefix() != "arca/" || s.Querier() != nil {
 		t.Error("the seams spec 007's package reaches are not the ones it was given")
 	}
-}
-
-// TestAWorkspaceThatIsNotLiveIsAMissingObjectToEveryone: spec 009 owns the
-// table and spec 005 applies its rule, so a path under a workspace that is
-// gone answers as absent whoever asks.
-func TestAWorkspaceThatIsNotLiveIsAMissingObjectToEveryone(t *testing.T) {
-	h := newHarness(t, func(o *Options) { o.Workspaces = deleted{} })
-	w := h.call(t, http.MethodGet, h.object("workspaces/build/main.go"), nil)
-	if got := code(t, w); got != api.CodeNotFound {
-		t.Fatalf("a path under a deleted workspace is %q", got)
-	}
-	broken := newHarness(t, func(o *Options) { o.Workspaces = unreachable{} })
-	if got := code(t, broken.call(t, http.MethodGet, broken.object("workspaces/build/main.go"), nil)); got != api.CodeStorageUnavailable {
-		t.Fatalf("a workspace table that would not answer is %q", got)
-	}
-}
-
-// deleted answers that every workspace is gone.
-type deleted struct{}
-
-func (deleted) Live(context.Context, store.Querier, string, string) (bool, error) {
-	return false, nil
-}
-
-// unreachable answers nothing at all, which is not a verdict.
-type unreachable struct{}
-
-func (unreachable) Live(context.Context, store.Querier, string, string) (bool, error) {
-	return false, errors.New("the database is unreachable")
 }
 
 // TestTheAnswersLimitIsReadOffTheAnswerAndNowhereElse: Arca stores no limit,
@@ -358,15 +324,15 @@ func TestTheAnswersLimitIsReadOffTheAnswerAndNowhereElse(t *testing.T) {
 		"limits that are not one": {limits: `not json`, fails: true},
 	} {
 		t.Run(name, func(t *testing.T) {
-			got, err := LimitOf(auth.Decision{Limits: []byte(c.limits)})
+			got, err := LimitsOf(auth.Decision{Limits: []byte(c.limits)})
 			if c.fails {
 				if err == nil {
 					t.Fatal("limits that are not one were read")
 				}
 				return
 			}
-			if err != nil || got != c.want {
-				t.Fatalf("LimitOf = %+v, %v, want %+v", got, err, c.want)
+			if err != nil || got.Quota != c.want {
+				t.Fatalf("LimitsOf = %+v, %v, want the quota %+v", got, err, c.want)
 			}
 		})
 	}

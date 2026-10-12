@@ -18,9 +18,9 @@ import (
 // the surface.
 func contributed() Route {
 	return Route{
-		Method: http.MethodGet, Path: "/v1/workspaces/{id}",
-		Action: authorizer.ActionWorkspaceRead, Status: http.StatusOK,
-		Summary: "Read one workspace.",
+		Method: http.MethodGet, Path: "/v1/shares/{id}",
+		Action: authorizer.ActionShareRead, Status: http.StatusOK,
+		Summary: "Get grant",
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte(`{"state":"acted"}`))
 		}),
@@ -34,16 +34,16 @@ func TestAContributedRouteIsRegisteredBehindTheVerifierAndDescribed(t *testing.T
 
 	// No bearer: the contributed row meets the verifier like every other
 	// route under /v1, because a contributed row cannot be public.
-	if got := h.do(t, row.Method, "/v1/workspaces/2b7e", ""); got.Code != http.StatusUnauthorized {
+	if got := h.do(t, row.Method, "/v1/shares/2b7e", ""); got.Code != http.StatusUnauthorized {
 		t.Fatalf("an unauthenticated request reached the handler: %d %s", got.Code, got.Body)
 	}
-	got := h.do(t, row.Method, "/v1/workspaces/2b7e", h.bearer())
+	got := h.do(t, row.Method, "/v1/shares/2b7e", h.bearer())
 	if got.Code != http.StatusOK || !strings.Contains(got.Body.String(), "acted") {
 		t.Fatalf("the contributed route = %d %s", got.Code, got.Body)
 	}
 	// The document is built from the same list the mux is, so a route
 	// cannot be registered without being described.
-	if ops := h.document(t).Operations(); !slices.Contains(ops, "GET /v1/workspaces/{id}") {
+	if ops := h.document(t).Operations(); !slices.Contains(ops, "GET /v1/shares/{id}") {
 		t.Errorf("the document describes %v", ops)
 	}
 }
@@ -56,7 +56,7 @@ func TestASetOfRowsThatCouldNotBeASurfaceIsRefusedAtStart(t *testing.T) {
 	}{
 		{"no handler", func(r *Route) { r.Handler = nil }, "has no handler"},
 		{"no action", func(r *Route) { r.Action = "" }, "asks nothing"},
-		{"an action no authorizer answers", func(r *Route) { r.Action = "workspace.frobnicate" }, "does not name"},
+		{"an action no authorizer answers", func(r *Route) { r.Action = "share.frobnicate" }, "does not name"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			row := contributed()
@@ -127,20 +127,17 @@ func shadow(path string) Route {
 // Go's router prefers the more specific pattern and reports no conflict, so
 // a route added with a literal where another row has a wildcard would take
 // that word out of the namespace the wildcard addresses and nothing would
-// say so: a workspace named archived would stop being reachable on the day
-// GET /v1/workspaces/archived was registered. The four words that do this on
+// say so: a grant whose id is archived would stop being reachable on the day
+// GET /v1/shares/archived was registered. The three words that do this on
 // purpose are written into the fifth grammar rule of spec 013 and named
-// here; a fifth fails the start-up, with both rows in the message, until it
+// here; a fourth fails the start-up, with both rows in the message, until it
 // is written into that rule too.
 func TestALiteralThatShadowsAWildcardWithoutARowIsRefusedAtStart(t *testing.T) {
-	t.Run("the four reserved words are not refused", func(t *testing.T) {
+	t.Run("the three reserved words are not refused", func(t *testing.T) {
 		for _, c := range []struct {
 			word  string
 			added []Route
 		}{
-			{"deleted", []Route{
-				shadow("/v1/workspaces/{id}"), shadow("/v1/workspaces/deleted"),
-			}},
 			{"with-me", []Route{
 				shadow("/v1/shares/{id}"), shadow("/v1/shares/with-me"),
 			}},
@@ -159,15 +156,15 @@ func TestALiteralThatShadowsAWildcardWithoutARowIsRefusedAtStart(t *testing.T) {
 		}
 	})
 
-	t.Run("a fifth is refused whichever row arrives first", func(t *testing.T) {
-		wild, literal := shadow("/v1/workspaces/{id}"), shadow("/v1/workspaces/archived")
+	t.Run("a fourth is refused whichever row arrives first", func(t *testing.T) {
+		wild, literal := shadow("/v1/shares/{id}"), shadow("/v1/shares/archived")
 		for _, order := range [][]Route{{wild, literal}, {literal, wild}} {
 			_, err := merge(routeTable, order)
 			if err == nil {
 				t.Fatal("a literal that shadows a wildcard built a surface")
 			}
 			for _, want := range []string{
-				"/v1/workspaces/archived", "/v1/workspaces/{id}", `"archived"`, "reserved",
+				"/v1/shares/archived", "/v1/shares/{id}", `"archived"`, "reserved",
 			} {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("the failure reads %q and does not name %s", err, want)
@@ -192,8 +189,8 @@ func TestALiteralThatShadowsAWildcardWithoutARowIsRefusedAtStart(t *testing.T) {
 			// Different subtrees: the literals differ above the position.
 			{shadow("/v1/trash/{id}"), shadow("/v1/stars/pinned")},
 			// Different methods: the router never chooses between them.
-			{shadow("/v1/workspaces/{id}"), func() Route {
-				r := shadow("/v1/workspaces/archived")
+			{shadow("/v1/shares/{id}"), func() Route {
+				r := shadow("/v1/shares/archived")
 				r.Method = http.MethodDelete
 				return r
 			}()},

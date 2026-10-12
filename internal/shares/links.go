@@ -6,6 +6,7 @@ package shares
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -189,11 +190,19 @@ func (s *Service) ListLinks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res := authorizer.Link{Owner: owner}.Resource()
-	if _, err := s.authorizer.Decide(r.Context(), authorizer.ActionLinkRead, res); err != nil {
+	decision, err := s.authorizer.Decide(r.Context(), authorizer.ActionLinkRead, res)
+	if err != nil {
 		api.WriteError(w, r, api.FromAuth(err))
 		return
 	}
-	rows, err := s.store.ListTokens(r.Context(), s.db.Querier(), owner, page.cursor, page.limit+1)
+	// The answer may leave subtrees out of the page (spec 028): a link
+	// whose prefix is at or under one of them is not listed.
+	omit, err := omitted(decision)
+	if err != nil {
+		api.WriteError(w, r, err)
+		return
+	}
+	rows, err := s.store.ListTokens(r.Context(), s.db.Querier(), owner, page.cursor, page.limit+1, omit)
 	if err != nil {
 		api.WriteError(w, r, fmt.Errorf("shares: the links of %q: %w", owner, err))
 		return
@@ -299,7 +308,7 @@ type meta struct {
 // LinkMeta answers GET /v1/shares/links/{token}/meta.
 func (s *Service) LinkMeta(w http.ResponseWriter, r *http.Request) {
 	noReferrer(w)
-	link, err := s.redeem(r, "")
+	link, _, err := s.redeem(r, "")
 	if err != nil {
 		api.WriteError(w, r, err)
 		return
@@ -329,12 +338,19 @@ func (s *Service) LinkList(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, r, err)
 		return
 	}
-	link, err := s.redeem(r, "")
+	link, decision, err := s.redeem(r, "")
 	if err != nil {
 		api.WriteError(w, r, err)
 		return
 	}
-	rows, err := s.store.Subtree(r.Context(), s.db.Querier(), link.Owner, link.PathPrefix, page.cursor, page.limit+1)
+	// The answer to link.read may leave subtrees out of the listing
+	// (spec 028).
+	omit, err := omitted(decision)
+	if err != nil {
+		api.WriteError(w, r, err)
+		return
+	}
+	rows, err := s.store.Subtree(r.Context(), s.db.Querier(), link.Owner, link.PathPrefix, page.cursor, page.limit+1, omit)
 	if err != nil {
 		api.WriteError(w, r, fmt.Errorf("shares: the subtree of a link: %w", err))
 		return
@@ -366,7 +382,7 @@ func (s *Service) LinkFile(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, r, notFound())
 		return
 	}
-	link, err := s.redeem(r, path)
+	link, _, err := s.redeem(r, path)
 	if err != nil {
 		api.WriteError(w, r, err)
 		return
@@ -392,38 +408,54 @@ func (s *Service) LinkFile(w http.ResponseWriter, r *http.Request) {
 //
 // A deny is a not-found rather than a refusal, so an operator that turned
 // public reading off is indistinguishable from a token that never existed.
-func (s *Service) redeem(r *http.Request, path string) (store.Grant, error) {
+//
+// It answers the decision beside the link, because the listing reads the
+// answer's limits off it.
+func (s *Service) redeem(r *http.Request, path string) (store.Grant, auth.Decision, error) {
 	token := r.PathValue("token")
 	if token == "" {
-		return store.Grant{}, notFound()
+		return store.Grant{}, auth.Decision{}, notFound()
 	}
 	link, err := s.store.ByToken(r.Context(), s.db.Querier(), token)
 	switch {
 	case missing(err):
-		return store.Grant{}, notFound()
+		return store.Grant{}, auth.Decision{}, notFound()
 	case err != nil:
-		return store.Grant{}, fmt.Errorf("shares: resolve a link token: %w", err)
+		return store.Grant{}, auth.Decision{}, fmt.Errorf("shares: resolve a link token: %w", err)
 	}
 	asked := link.PathPrefix
 	if path != "" {
 		if !covers(link.PathPrefix, path) {
-			return store.Grant{}, notFound()
+			return store.Grant{}, auth.Decision{}, notFound()
 		}
 		asked = path
 	}
 	res := authorizer.Link{ID: link.ID, Owner: link.Owner, Path: asked}.Resource()
-	if _, err := s.authorizer.Lookup(r.Context(), authorizer.ActionLinkRead, res); err != nil {
+	decision, err := s.authorizer.Lookup(r.Context(), authorizer.ActionLinkRead, res)
+	if err != nil {
 		refusal := api.FromAuth(err)
 		if refusal.Code == api.CodeNotFound {
 			// A deny answers exactly what an unknown token answers, developer
 			// detail included. The endpoint's reason is worth reading on every
 			// other route, but here it would say that this token resolved,
 			// which is the one fact these three routes withhold.
-			return store.Grant{}, notFound()
+			return store.Grant{}, auth.Decision{}, notFound()
 		}
-		return store.Grant{}, refusal
+		return store.Grant{}, auth.Decision{}, refusal
 	}
-	return link, nil
+	return link, decision, nil
+}
+
+// omitted reads limits.omit off the answer a listing was admitted by: the
+// subtrees it leaves out (spec 028). Limits this server cannot read are no
+// decision, which is the answer a byte limit it cannot read gets on a write.
+func omitted(d auth.Decision) ([]string, error) {
+	limits, err := auth.ReadLimits(d.Limits)
+	if err != nil {
+		slog.Error("shares: read the answer's limits", "error", err)
+		return nil, api.Refuse(api.CodeStorageUnavailable, "could not read the answer's limits")
+	}
+	return limits.Omit, nil
 }
 
 // noReferrer keeps the token out of the next request a browser makes. The

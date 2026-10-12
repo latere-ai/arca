@@ -105,18 +105,17 @@ func TestALabelOutsideItsVocabularyIsNotRecorded(t *testing.T) {
 // exposition that says something happened.
 func TestZeroAndNegativeAreNotRecorded(t *testing.T) {
 	s := Register(nil)
-	s.In("sync", 0)
-	s.Out("materialize", -1)
-	s.LeaseExpired(0)
+	s.In("part", 0)
+	s.Out("inline", -1)
 	s.Finding(reaper.KindTrashPurged, reaper.Found, 0)
-	if got := s.BytesIn.Value(map[string]string{"kind": "sync"}); got != 0 {
+	if got := s.BytesIn.Value(map[string]string{"kind": "part"}); got != 0 {
 		t.Errorf("bytes in reads %d", got)
 	}
-	if got := s.BytesOut.Value(map[string]string{"kind": "materialize"}); got != 0 {
+	if got := s.BytesOut.Value(map[string]string{"kind": "inline"}); got != 0 {
 		t.Errorf("bytes out reads %d", got)
 	}
-	if got := s.LeaseExpiries.Value(nil); got != 0 {
-		t.Errorf("lease expiries reads %d", got)
+	if got := s.ReaperFindings.Value(map[string]string{"kind": "trash_purged", "action": "found"}); got != 0 {
+		t.Errorf("trash_purged found reads %d", got)
 	}
 }
 
@@ -124,12 +123,11 @@ func TestZeroAndNegativeAreNotRecorded(t *testing.T) {
 // surface once and reads back the series its row names.
 func TestTheRecordingSurfaceWritesWhereTheTableSaysIt(t *testing.T) {
 	s := Register(nil)
-	s.In("sync", 1024)
-	s.Out("materialize", 2048)
+	s.In("part", 1024)
+	s.Out("inline", 2048)
 	s.Presigned("get", "download")
 	s.Presigned("put", "part")
-	s.LeaseExpired(3)
-	s.EventAppended("sync")
+	s.EventAppended("copy")
 	s.LimitRejected()
 	s.TokenRejected("expired")
 	s.TokenRejected("a reason the shared table added later")
@@ -146,12 +144,11 @@ func TestTheRecordingSurfaceWritesWhereTheTableSaysIt(t *testing.T) {
 		read   uint64
 		expect uint64
 	}{
-		{"bytes in", s.BytesIn.Value(map[string]string{"kind": "sync"}), 1024},
-		{"bytes out", s.BytesOut.Value(map[string]string{"kind": "materialize"}), 2048},
+		{"bytes in", s.BytesIn.Value(map[string]string{"kind": "part"}), 1024},
+		{"bytes out", s.BytesOut.Value(map[string]string{"kind": "inline"}), 2048},
 		{"presigned download", s.PresignedURLs.Value(map[string]string{"method": "get", "kind": "download"}), 1},
 		{"presigned part", s.PresignedURLs.Value(map[string]string{"method": "put", "kind": "part"}), 1},
-		{"lease expiries", s.LeaseExpiries.Value(nil), 3},
-		{"events appended", s.EventsAppended.Value(map[string]string{"kind": "sync"}), 1},
+		{"events appended", s.EventsAppended.Value(map[string]string{"kind": "copy"}), 1},
 		{"limit rejections", s.LimitRejections.Value(nil), 1},
 		{"expired token", s.TokensRejected.Value(map[string]string{"reason": "expired"}), 1},
 		{"unknown reason as malformed", s.TokensRejected.Value(map[string]string{"reason": "malformed"}), 1},
@@ -237,7 +234,7 @@ func TestARunRecordsItsOutcomeAndDuration(t *testing.T) {
 	s.Run(true, 2*time.Second)
 	s.Run(false, 30*time.Second)
 	s.Finding(reaper.KindMissingBytes, reaper.Found, 2)
-	s.Finding(reaper.KindLeaseExpired, reaper.Repaired, 1)
+	s.Finding(reaper.KindUploadAborted, reaper.Repaired, 1)
 	if got := s.ReaperRuns.Value(map[string]string{"outcome": "ok"}); got != 1 {
 		t.Errorf("%d runs succeeded", got)
 	}
@@ -250,8 +247,8 @@ func TestARunRecordsItsOutcomeAndDuration(t *testing.T) {
 	if got := s.ReaperFindings.Value(map[string]string{"kind": "missing_bytes", "action": "found"}); got != 2 {
 		t.Errorf("missing_bytes found reads %d", got)
 	}
-	if got := s.ReaperFindings.Value(map[string]string{"kind": "lease_expired", "action": "repaired"}); got != 1 {
-		t.Errorf("lease_expired repaired reads %d", got)
+	if got := s.ReaperFindings.Value(map[string]string{"kind": "upload_aborted", "action": "repaired"}); got != 1 {
+		t.Errorf("upload_aborted repaired reads %d", got)
 	}
 }
 
@@ -408,7 +405,6 @@ func TestAGaugeValueOutsideItsVocabularyPanics(t *testing.T) {
 func TestAnUnboundGaugeReadsZero(t *testing.T) {
 	text := expose(t, nil)
 	for _, want := range []string{
-		`arca_leases_held 0`,
 		`arca_upload_sessions_open 0`,
 		`arca_db_conns{state="in_use"} 0`,
 		`arca_stored_bytes{plane="files"} 0`,
@@ -419,8 +415,8 @@ func TestAnUnboundGaugeReadsZero(t *testing.T) {
 	}
 	// An unlabelled gauge with a source reports it.
 	s := Register(nil)
-	s.LeasesHeld.Bind(func() float64 { return 7 })
-	if got := s.LeasesHeld.collect(); len(got) != 1 || got[0].Value != 7 {
+	s.SessionsOpen(func() float64 { return 7 })
+	if got := s.UploadSessionsOpen.collect(); len(got) != 1 || got[0].Value != 7 {
 		t.Errorf("the bound gauge reports %v", got)
 	}
 }

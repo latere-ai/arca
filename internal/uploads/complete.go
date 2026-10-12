@@ -49,7 +49,7 @@ func (s *Service) complete(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, r, err)
 		return
 	}
-	held, limit, err := s.session(r)
+	held, limits, err := s.session(r)
 	if err != nil {
 		api.WriteError(w, r, err)
 		return
@@ -101,10 +101,11 @@ func (s *Service) complete(w http.ResponseWriter, r *http.Request) {
 	// checksum is the store's composite label and not a digest of the bytes,
 	// which the row says with its kind.
 	out, err := s.content.Commit(ctx, files.Write{
-		Owner: held.Owner, Path: held.Path, Plane: plane(held.Path), Actor: files.Caller(ctx),
+		Owner: held.Owner, Path: held.Path, Actor: files.Caller(ctx),
 		Object: held.ObjectID, Size: stored.Size,
 		Checksum: stored.ETag, ChecksumKind: object.ChecksumETag,
-		ContentType: held.ContentType, Pre: pre, Limit: limit,
+		ContentType: held.ContentType, Pre: pre,
+		Limit: limits.Quota, NoVersion: limits.NoVersions,
 		Charged: held.DeclaredSize,
 		Also: func(ctx context.Context, q store.Querier) error {
 			if _, err := s.sessions.Delete(ctx, q, held.ID); err != nil {
@@ -221,11 +222,4 @@ func (s *Service) drop(ctx context.Context, key string) {
 	if err := s.content.Bucket().Delete(dropping, key); err != nil {
 		slog.WarnContext(dropping, "uploads: remove an assembled object no row names", "error", err)
 	}
-}
-
-// plane is the plane a session's path is rooted in, which the path rule
-// settled when the session opened.
-func plane(path string) object.Plane {
-	p, _, _ := object.SplitPath(path)
-	return p
 }

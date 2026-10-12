@@ -145,24 +145,36 @@ and its authorizer answers for the people who may act in it.
 
 `authorizer/` exports the vocabulary as a `latere.ai/x/pkg/authz`
 `Vocabulary` with labels, and a test holds the package's table equal
-to this one. Twenty-three actions over seven kinds.
+to this one. Fifteen actions over six kinds.
+
+**Amended 2026-10-12 ([[028-one-tree]]).** The kind `Workspace` and its
+eight `workspace.*` actions are removed with the plane they acted on, a
+`File` gains `recursive` and `copy`, and `plane` is always `files`. The
+table was twenty-three actions over seven kinds before.
 
 | Kind | Actions | Resource fields |
 |---|---|---|
-| `File` | `file.read`, `file.write`, `file.delete`, `file.list`, `file.restore` | `id` (absent on a write that creates and on a restore from trash), `owner`, `path`, `plane` (`files` or `workspaces`), `size` (absent on a listing and on a restore from trash), `grant` (absent where the caller holds none) |
+| `File` | `file.read`, `file.write`, `file.delete`, `file.list`, `file.restore` | `id` (absent on a write that creates, on a restore from trash and on a question about a folder), `owner`, `path`, `plane` (always `files`), `size` (absent on a listing, on a restore from trash and on a folder delete; on a copy the sum of the bytes to be written), `recursive` (present and true on a folder delete and a folder copy, absent otherwise), `copy` (present and true on a copy, absent otherwise), `grant` (absent where the caller holds none) |
 | `Upload` | `upload.write` | `owner`, `path`, `size`, `grant` (absent where the caller holds none) |
 | `Share` | `share.create`, `share.read`, `share.list`, `share.revoke` | `id`, `owner`, `path`, `grantee`, `permission` |
 | `Link` | `link.create`, `link.read`, `link.revoke` | `id`, `owner`, `path` |
-| `Workspace` | `workspace.create`, `workspace.read`, `workspace.write`, `workspace.delete`, `workspace.list`, `workspace.attach`, `workspace.sync`, `workspace.restore` | `id`, `owner`, `slug`, `grant` (absent where the caller holds none) |
 | `Event` | `event.read` | `owner` |
 | `Space` | `space.admin` | `owner` (absent on the overview across spaces) |
 
 Rules of the table:
 
-- `file.write` covers put, move, star, and a conditional write; the
-  resource's `path` is the target and, on a move, `from` carries the
-  source. `plane` is `files` or `workspaces` and nothing else
-  ([[001-architecture]]).
+- `file.write` covers put, move, copy, star, and a conditional write;
+  the resource's `path` is the target and, on a move and on a copy,
+  `from` carries the source. A question that carries `from` without
+  `copy` is a move. `plane` is `files` and nothing else
+  ([[001-architecture]]); the member stays so an endpoint that reads it
+  keeps answering.
+- `recursive` says that `path`, and `from` where there is one, name a
+  folder and everything under it. An endpoint that does not know the
+  member answers a folder delete as a delete of one path and a folder
+  copy as a move, which is never wider than what was asked; an endpoint
+  that manages folders of its own reads it, because a delete of a folder
+  is a delete of every folder under it ([[028-one-tree]]).
 - `file.read` covers get, head, and a version's read; `file.list`
   covers a directory page, a version list, and the trash listing;
   `file.restore` is the one action that brings an object back from
@@ -186,7 +198,7 @@ Rules of the table:
   `authz.Restrict`; an action the grants do not name is a deny with
   reason `grant`, indistinguishable on the wire from any other deny.
 
-A `File` and a `Workspace` carry `grant`: the highest live grant the
+A `File` and an `Upload` carry `grant`: the highest live grant the
 caller holds on a prefix of the resource's path in the caller's favor,
 `read`, `write` or `manage`, absent where they hold none and absent on a
 question about the caller's own space, because ownership is not a grant
@@ -216,7 +228,7 @@ rung, so both modes read one answer about the two paths.
 The member is spelled `grant` on the wire and nowhere else, and that
 spelling is the whole of the pairing between this core and an endpoint:
 Arca renders it from `authorizer.File.Grant` and
-`authorizer.Workspace.Grant`, and an endpoint reads
+`authorizer.Upload.Grant`, and an endpoint reads
 `resource.grant` off the envelope. No test spans the two, because they
 are two modules; what holds them together is this row of the table, so a
 rename here is a rename of the contract.
@@ -264,6 +276,10 @@ is not a grant.
 | unavailable | anything but a 200 with `allow`: 503 `authorizer_unavailable`, never an allow |
 | deny | 403 `forbidden` with the reason in the developer detail; a deny at lookup is 404 `not_found`, indistinguishable from a missing object |
 | `limits.quota_bytes` | the space's byte limit for the answer's `ttl`; without it a space has no limit, because Arca stores none ([[010-events-and-reaper]]) |
+| `limits.versions` | read on the answer to `file.write`, `upload.write` and `file.restore`. `false`: the write this answer admits keeps no version of the content it replaces. Absent or `true`: versions as [[005-files]] keeps them ([[028-one-tree]]) |
+| `limits.trash` | read on the answer to `file.delete`. `false`: the delete this answer admits is permanent, as `?permanent=1` is. Absent or `true`: the trash of [[005-files]] ([[028-one-tree]]) |
+| `limits.omit` | read on the answer to a question that enumerates. A list of path prefixes of the space: the enumeration leaves out every path at or under one of them. It shapes no question about one object ([[028-one-tree]]) |
+| a limit that does not decode | a `limits` object or a member of it that is not the type its row gives, and an `omit` entry that is not a path under `files/`, is no decision: 503 `storage_unavailable` with nothing written, the answer a `quota_bytes` that is not a number already gets |
 | `filter` | on a `list` action, the owners and labels the page is narrowed to |
 | probe | the shared contract's reserved resource id, `authz.ProbeID`, of kind `Space`, which every authorizer denies for every subject; `arcad check` asks it and refuses an endpoint that allows. The id is the family's one value and not a word of Arca's own, so one check command reads one answer from every endpoint of the family; `authorizer.Probe` builds the resource |
 
@@ -289,19 +305,16 @@ flowchart TD
 ```
 
 The ladder a grant is read against is [[008-shares-and-links]]'s:
-`read` admits `file.read`, `file.list`, `workspace.read`,
-`workspace.list`; `write` adds `file.write`, `file.delete`,
-`file.restore`, `upload.write`, `workspace.write`, `workspace.attach`,
-`workspace.sync`; `manage` adds `share.create`, `share.read`,
-`share.list`, `share.revoke` on the granted subtree.
+`read` admits `file.read`, `file.list`; `write` adds `file.write`,
+`file.delete`, `file.restore`, `upload.write`; `manage` adds
+`share.create`, `share.read`, `share.list`, `share.revoke` on the
+granted subtree.
 
-No grant reaches the remaining eight, which are the owner's or an
-administrator's: `space.admin`, `workspace.create`, `workspace.delete`,
-`workspace.restore`, `event.read`, `link.create`, `link.read`,
-`link.revoke`. Making a workspace, removing one, undoing a delete,
-reading a space's log, and minting or revoking a token anyone may read
-with are powers over the space and not over a subtree of it, so a grant
-on a subtree does not confer them. `link.read` sits on that list and is
+No grant reaches the remaining five, which are the owner's or an
+administrator's: `space.admin`, `event.read`, `link.create`,
+`link.read`, `link.revoke`. Reading a space's log and minting or
+revoking a token anyone may read with are powers over the space and not
+over a subtree of it, so a grant on a subtree does not confer them. `link.read` sits on that list and is
 still the one action an anonymous caller reaches, because the link step
 of the flowchart answers it and no grant does.
 
@@ -313,11 +326,6 @@ ask the actions they always ask ([[012-administration]]). This policy
 admits the action for a subject in `ARCA_ADMIN_SUBJECTS` and denies it to
 everyone else, the space's own owner included, so the flowchart's first
 step is the only one that answers it.
-
-A grant names a path prefix, and a workspace names a slug rather than a
-path, so the prefix a grant on a workspace is read against is
-`workspaces/<slug>`, the subtree of the workspaces plane
-([[001-architecture]]) that workspace owns.
 
 The owner policy applies `authz.Restrict` last, so a narrowed personal
 key is narrowed here too.
@@ -355,7 +363,7 @@ and the owner policy is not consulted.
 | 10 | `arcad check` refuses an authorizer that allows the probe resource | `internal/check` test against the stub |
 | 11 | `pkg/authz/conformance` passes against the owner policy | `internal/auth` test |
 | 12 | No Go file outside `internal/auth` names `org_id`, `roles`, or `principal_type` | the `identity` gate's `claims` rule |
-| 13 | Every question about a file or a workspace that names a path carries the caller's rung as `grant`, absent where they hold none and absent on the caller's own space, in both modes, and a grants table that cannot answer is `authorizer_unavailable` | `internal/auth` grant test |
+| 13 | Every question about a file or an upload that names a path carries the caller's rung as `grant`, absent where they hold none and absent on the caller's own space, in both modes, and a grants table that cannot answer is `authorizer_unavailable` | `internal/auth` grant test |
 | 14 | Under an external authorizer that admits the ladder's actions of `resource.grant`, a grantee reads a shared object and a caller with no grant on it reads a missing one | `test/conformance` `case006Grantee` |
 | 15 | A question that names a `from` carries the lower of the caller's rungs on `path` and on `from`, and the owner policy decides on that rung | `internal/auth` `TestAGrantMustCoverBothEnds`; `internal/files` `TestAMoveNeedsAGrantOnBothEnds` |
 
@@ -411,6 +419,15 @@ What proves each criterion:
 
 Coverage of the owning packages: `authorizer` 100.0% of statements,
 `internal/auth` 90.6%.
+
+**Amended 2026-10-12 by [[028-one-tree]].** The vocabulary is fifteen
+actions over six kinds: the kind `Workspace`, its eight actions, its
+resource type and the `workspaces/<slug>` reading of `grantPath` are
+gone, and no grant reaches five actions where it reached eight. `File`
+renders `recursive` and `copy`, and `internal/auth` reads the answer's
+limits whole in `limits.go`: `quota_bytes`, `versions`, `trash` and
+`omit`. The text above this paragraph is the record of 2026-09-19 and
+names what was built then.
 
 What a later reader needs:
 

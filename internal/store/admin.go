@@ -37,13 +37,6 @@ type SpaceOverview struct {
 	// TrashedBytes is the part of the usage that trashed paths hold, which
 	// is what a reaper run would recover.
 	TrashedBytes int64
-	// Workspaces is the live workspaces of the space, the soft deleted ones
-	// excluded.
-	Workspaces int64
-	// Leases is the workspaces of the space a writer holds right now. A
-	// lease past its deadline is not held: the next attach takes it, so
-	// counting it would report a state the next request disagrees with.
-	Leases int64
 	// LastWriteAt is when a path of the space last changed, nil for a space
 	// that holds no path at all.
 	LastWriteAt *time.Time
@@ -67,25 +60,20 @@ func NewAdmin() Admin { return admin{} }
 
 // overviewSQL is the one statement the overview reads.
 //
-// The inner select derives the spaces from the three tables that hold
+// The inner select derives the spaces from the two tables that hold
 // something, then joins each table's counters onto them; the outer select
-// drops a space whose counters are all zero and pages by the subject. The
-// lease predicate is the workspace service's own rule, expressed once here
-// so a lapsed lease is not counted as a held one.
+// drops a space whose counters are all zero and pages by the subject.
 const overviewSQL = `
-SELECT owner, bytes, files, trashed_bytes, workspaces, leases, last_write_at
+SELECT owner, bytes, files, trashed_bytes, last_write_at
   FROM (
 	SELECT s.owner                        AS owner,
 	       COALESCE(u.bytes, 0)           AS bytes,
 	       COALESCE(f.live, 0)            AS files,
 	       COALESCE(f.trashed_bytes, 0)   AS trashed_bytes,
-	       COALESCE(w.live, 0)            AS workspaces,
-	       COALESCE(w.leases, 0)          AS leases,
 	       f.last_write_at                AS last_write_at
 	  FROM (
 	          SELECT owner FROM space_usage WHERE bytes > 0
 	    UNION SELECT owner FROM files
-	    UNION SELECT owner FROM workspaces WHERE deleted_at IS NULL
 	  ) s
 	  LEFT JOIN space_usage u ON u.owner = s.owner
 	  LEFT JOIN (
@@ -95,17 +83,9 @@ SELECT owner, bytes, files, trashed_bytes, workspaces, leases, last_write_at
 	           MAX(updated_at) AS last_write_at
 	      FROM files GROUP BY owner
 	  ) f ON f.owner = s.owner
-	  LEFT JOIN (
-	    SELECT owner,
-	           COUNT(*) FILTER (WHERE deleted_at IS NULL) AS live,
-	           COUNT(*) FILTER (WHERE deleted_at IS NULL
-	                              AND writer_holder IS NOT NULL
-	                              AND writer_expires_at > now()) AS leases
-	      FROM workspaces GROUP BY owner
-	  ) w ON w.owner = s.owner
   ) space
  WHERE owner > $1
-   AND (bytes > 0 OR files > 0 OR trashed_bytes > 0 OR workspaces > 0)
+   AND (bytes > 0 OR files > 0 OR trashed_bytes > 0)
  ORDER BY owner
  LIMIT $2`
 
@@ -123,8 +103,7 @@ func (admin) Overview(ctx context.Context, q Querier, cursor string, limit int) 
 	page := make([]SpaceOverview, 0, limit)
 	for rows.Next() {
 		var s SpaceOverview
-		if err := rows.Scan(&s.Owner, &s.Bytes, &s.Files, &s.TrashedBytes,
-			&s.Workspaces, &s.Leases, &s.LastWriteAt); err != nil {
+		if err := rows.Scan(&s.Owner, &s.Bytes, &s.Files, &s.TrashedBytes, &s.LastWriteAt); err != nil {
 			return nil, fmt.Errorf("store: read the administrative overview: %w", err)
 		}
 		page = append(page, s)

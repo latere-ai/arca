@@ -8,7 +8,11 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -85,9 +89,9 @@ func (i *installation) run(t *testing.T) Findings {
 
 func TestTheFindingKindsAreClosed(t *testing.T) {
 	want := []Kind{
-		"orphan_object", "orphan_candidate", "missing_bytes", "workspace_purged",
-		"file_purged", "trash_purged", "share_expired", "event_pruned",
-		"star_pruned", "version_pruned", "upload_aborted", "usage_corrected", "lease_expired",
+		"orphan_object", "orphan_candidate", "missing_bytes",
+		"trash_purged", "share_expired", "event_pruned",
+		"star_pruned", "version_pruned", "upload_aborted", "usage_corrected",
 	}
 	if got := Kinds(); !slices.Equal(got, want) {
 		t.Fatalf("the vocabulary is %v", got)
@@ -491,14 +495,13 @@ func TestPassTenReportsAStoreThatWillNotAnswer(t *testing.T) {
 func TestTheSeamsRunWhenTheyAreGivenAndNotOtherwise(t *testing.T) {
 	counts := map[string]*countingPass{}
 	i := an(t, func(o *Options) {
-		for _, name := range []string{"leases", "sessions", "tombstones", "grants"} {
+		for _, name := range []string{"sessions", "grants"} {
 			counts[name] = &countingPass{found: 2}
 		}
-		o.Leases, o.Sessions = counts["leases"], counts["sessions"]
-		o.Tombstones, o.Grants = counts["tombstones"], counts["grants"]
+		o.Sessions, o.Grants = counts["sessions"], counts["grants"]
 	})
 	f := i.run(t)
-	for _, kind := range []Kind{KindLeaseExpired, KindUploadAborted, KindWorkspacePurged, KindShareExpired} {
+	for _, kind := range []Kind{KindUploadAborted, KindShareExpired} {
 		if f.Count(kind, Repaired) != 2 {
 			t.Fatalf("%s reported %v", kind, f.Rows())
 		}
@@ -510,7 +513,7 @@ func TestTheSeamsRunWhenTheyAreGivenAndNotOtherwise(t *testing.T) {
 	}
 	// A pass the reconciler was not given does not run and reports nothing.
 	bare := an(t, nil).run(t)
-	for _, kind := range []Kind{KindLeaseExpired, KindUploadAborted, KindWorkspacePurged, KindShareExpired} {
+	for _, kind := range []Kind{KindUploadAborted, KindShareExpired} {
 		if bare.Total(kind) != 0 {
 			t.Fatalf("a pass that was not given reported %v", bare.Rows())
 		}
@@ -520,7 +523,7 @@ func TestTheSeamsRunWhenTheyAreGivenAndNotOtherwise(t *testing.T) {
 func TestAPassThatFailsDoesNotStopTheRest(t *testing.T) {
 	failing := errors.New("the table is not there")
 	i := an(t, func(o *Options) {
-		o.Leases = &countingPass{err: failing}
+		o.Sessions = &countingPass{err: failing}
 		o.Grants = &countingPass{err: failing}
 	})
 	i.world.usage[aSpace] = 4096
@@ -529,7 +532,7 @@ func TestAPassThatFailsDoesNotStopTheRest(t *testing.T) {
 	if err == nil {
 		t.Fatal("a run with two failed passes reported success")
 	}
-	for _, name := range []string{"expired leases", "grant hygiene"} {
+	for _, name := range []string{"expired uploads", "grant hygiene"} {
 		if !strings.Contains(err.Error(), name) {
 			t.Fatalf("the run reported %v, which does not name %s", err, name)
 		}
@@ -715,4 +718,61 @@ func (m *recordingMetrics) Usage(bytes int64) { m.usage = append(m.usage, bytes)
 func (m *recordingMetrics) Run(ok bool, _ time.Duration) {
 	m.runs++
 	m.ok = ok
+}
+
+// passRow matches one row of spec 010's pass table: the number and the name.
+var passRow = regexp.MustCompile(`^\| (\d+) \| ([a-z ]+) \|`)
+
+// TestThePassesAreTheTableOfSpec010 is criterion 22 of spec 028: the passes
+// the reconciler runs are the rows of spec 010's pass table that are not
+// retired, with the numbers the spec gives them and in its order. A retired
+// row keeps its number, so no later pass takes it.
+func TestThePassesAreTheTableOfSpec010(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "specs", "010-events-and-reaper.md"))
+	if err != nil {
+		t.Fatalf("spec 010: %v", err)
+	}
+	type row struct {
+		number int
+		name   string
+	}
+	var want []row
+	retired := 0
+	inTable := false
+	for line := range strings.Lines(string(raw)) {
+		line = strings.TrimSpace(line)
+		if !inTable {
+			inTable = strings.HasPrefix(line, "| # | Pass | Finds | Does |")
+			continue
+		}
+		if !strings.HasPrefix(line, "|") {
+			break
+		}
+		m := passRow.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		number, err := strconv.Atoi(m[1])
+		if err != nil {
+			t.Fatalf("spec 010's pass table holds the number %q", m[1])
+		}
+		if m[2] == "retired" {
+			retired++
+			continue
+		}
+		want = append(want, row{number, m[2]})
+	}
+	if !inTable {
+		t.Fatal("spec 010 has no pass table")
+	}
+	var got []row
+	for _, p := range an(t, nil).passes() {
+		got = append(got, row{p.number, p.name})
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("the reconciler runs %v; spec 010's table names %v", got, want)
+	}
+	if len(got) != 8 || retired != 2 {
+		t.Errorf("the reconciler runs %d passes with %d retired; spec 028 leaves eight and retires two", len(got), retired)
+	}
 }

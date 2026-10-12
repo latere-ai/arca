@@ -21,8 +21,8 @@ import (
 // spec does not is a row nobody decided on.
 func TestVocabularyMatchesSpec006(t *testing.T) {
 	want := actionsOfSpec006(t)
-	if len(want) != 23 {
-		t.Fatalf("spec 006's table names %d actions, want the twenty-three: %v", len(want), want)
+	if len(want) != 15 {
+		t.Fatalf("spec 006's table names %d actions, want the fifteen: %v", len(want), want)
 	}
 	if got := Vocabulary().Actions; !slices.Equal(got, want) {
 		t.Errorf("the vocabulary drifted from spec 006:\n got %v\nwant %v", got, want)
@@ -37,12 +37,12 @@ func TestVocabularyMatchesSpec006(t *testing.T) {
 	}
 }
 
-// TestTheSevenKindsAreSpec006s: the table's kinds are the seven of the spec,
-// in its order, and each one is named by at least one action.
-func TestTheSevenKindsAreSpec006s(t *testing.T) {
-	want := []string{KindFile, KindUpload, KindShare, KindLink, KindWorkspace, KindEvent, KindSpace}
+// TestTheSixKindsAreSpec006s: the table's kinds are the six of the spec, in
+// its order, and each one is named by at least one action.
+func TestTheSixKindsAreSpec006s(t *testing.T) {
+	want := []string{KindFile, KindUpload, KindShare, KindLink, KindEvent, KindSpace}
 	if got := Vocabulary().Kinds(); !slices.Equal(got, want) {
-		t.Errorf("the vocabulary names the kinds %v; spec 006's seven are %v", got, want)
+		t.Errorf("the vocabulary names the kinds %v; spec 006's six are %v", got, want)
 	}
 	spec := map[string]bool{}
 	for _, a := range actionsOfSpec006(t) {
@@ -69,8 +69,8 @@ func TestUnknownActionIsUnknown(t *testing.T) {
 }
 
 // TestRetiredActionsAreGone: the six actions of the service Arca replaces
-// that spec 019 removes are not in the table. The vocabulary shrank from
-// twenty-nine to twenty-three, and a stale constant is how an endpoint keeps
+// that spec 019 removes are not in the table, and neither is any action of
+// the kind spec 028 removes. A stale constant is how an endpoint keeps
 // deciding a question nothing asks.
 func TestRetiredActionsAreGone(t *testing.T) {
 	for _, action := range []string{
@@ -79,6 +79,11 @@ func TestRetiredActionsAreGone(t *testing.T) {
 	} {
 		if Known(action) {
 			t.Errorf("%s is retired by spec 019 and the vocabulary still names it", action)
+		}
+	}
+	for _, action := range Actions() {
+		if kind := Kind(action); !slices.Contains([]string{KindFile, KindUpload, KindShare, KindLink, KindEvent, KindSpace}, kind) {
+			t.Errorf("%s acts on %s, a kind spec 028 removed", action, kind)
 		}
 	}
 }
@@ -101,8 +106,8 @@ func TestVocabularyIsWellFormed(t *testing.T) {
 
 // TestListActionsAreNamedList: every action whose answer is a page is named
 // with the .list suffix the shared contract reads, and no other action
-// carries that suffix. The three pages of spec 013 are a subtree, a space's
-// grants, and a space's workspaces.
+// carries that suffix. The two pages of spec 013 are a subtree and a space's
+// grants.
 func TestListActionsAreNamedList(t *testing.T) {
 	var lists []string
 	for _, a := range table {
@@ -114,7 +119,7 @@ func TestListActionsAreNamedList(t *testing.T) {
 			t.Errorf("%s reads as a list action and does not end in .list", a.Name)
 		}
 	}
-	want := []string{ActionFileList, ActionShareList, ActionWorkspaceList}
+	want := []string{ActionFileList, ActionShareList}
 	if !slices.Equal(lists, want) {
 		t.Errorf("the list actions are %v, want %v", lists, want)
 	}
@@ -146,7 +151,7 @@ func TestEveryKindReadsAsAHeading(t *testing.T) {
 	v := Vocabulary()
 	want := map[string]string{
 		KindFile: "Files", KindUpload: "Uploads", KindShare: "Shares", KindLink: "Links",
-		KindWorkspace: "Workspaces", KindEvent: "Events", KindSpace: "Spaces",
+		KindEvent: "Events", KindSpace: "Spaces",
 	}
 	kinds := v.Kinds()
 	if len(kinds) != len(want) {

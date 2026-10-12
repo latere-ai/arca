@@ -3,11 +3,10 @@
 
 //go:build tiers
 
-// The store tier of the queries the seams of spec 010's passes 6 and 7 read,
-// and of the two queries spec 012's bindings added: the id-addressed restore
-// of a trashed object, the tombstone page and its conditional purge, the
-// subtree drop that ends a workspace, the link count of the overview, and the
-// grant hygiene of pass 7.
+// The store tier of the queries the seam of spec 010's pass 7 reads, and of
+// the queries spec 012's bindings and spec 028's folder delete added: the
+// id-addressed restore of a trashed object, the subtree drop that ends a
+// folder, the link count of the overview, and the grant hygiene of pass 7.
 //
 // What it proves is what a fake cannot: that the predicates mean over real
 // rows what their Go halves say they mean, that a subtree delete takes the
@@ -16,11 +15,18 @@
 package store
 
 import (
+	"slices"
 	"testing"
 	"time"
 
 	"latere.ai/x/arca/object"
 )
+
+// aSpaceOf is a subject of this run's own, so two cases never share a space.
+func aSpaceOf(t *testing.T) string {
+	t.Helper()
+	return "https://issuer.example|" + string(object.NewID())
+}
 
 // reaperFile writes one live path of a space and answers the row.
 func reaperFile(t *testing.T, db *DB, owner, path string, size int64) File {
@@ -58,7 +64,7 @@ func reaperTrash(t *testing.T, db *DB, owner, path string, at time.Time) {
 func TestStoreRestoringByIDIsScopedToTheSpaceAndTheWindow(t *testing.T) {
 	db := tier(t)
 	files := NewFiles()
-	owner, stranger := wsSpace(t), wsSpace(t)
+	owner, stranger := aSpaceOf(t), aSpaceOf(t)
 	window := time.Now().Add(-720 * time.Hour)
 
 	row := reaperFile(t, db, owner, "files/reports/q3.pdf", 100)
@@ -100,68 +106,18 @@ func TestStoreRestoringByIDIsScopedToTheSpaceAndTheWindow(t *testing.T) {
 	}
 }
 
-// TestStoreTheTombstonePageAndItsPurgeAgreeOnWhatIsPastTheWindow is pass 6's
-// working set and its conditional end. A tombstone inside the window is
-// nobody's, and a restore that lands between the two matches the delete out.
-func TestStoreTheTombstonePageAndItsPurgeAgreeOnWhatIsPastTheWindow(t *testing.T) {
-	db := tier(t)
-	workspaces := NewWorkspaces()
-	owner := wsSpace(t)
-	cutoff := time.Now().Add(-720 * time.Hour)
-
-	past := wsRow(t, db, owner, "past")
-	recent := wsRow(t, db, owner, "recent")
-	wsRow(t, db, owner, "live")
-	for id, at := range map[string]time.Time{
-		past.ID:   time.Now().Add(-800 * time.Hour),
-		recent.ID: time.Now(),
-	} {
-		if _, err := db.Querier().Exec(t.Context(),
-			`UPDATE workspaces SET deleted_at = $2 WHERE id = $1`, id, at); err != nil {
-			t.Fatalf("soft delete %q: %v", id, err)
-		}
-	}
-
-	page, err := workspaces.Tombstones(t.Context(), db.Querier(), cutoff, 100)
-	if err != nil {
-		t.Fatalf("Tombstones: %v", err)
-	}
-	if len(page) != 1 || page[0].ID != past.ID {
-		t.Fatalf("the page holds %v, want the one past the window", page)
-	}
-
-	// A restore lands before the purge, so the conditional delete matches no
-	// row and the workspace somebody just brought back stays.
-	if ok, err := workspaces.Restore(t.Context(), db.Querier(), past.ID); err != nil || !ok {
-		t.Fatalf("the restore = %t, %v", ok, err)
-	}
-	if ended, err := workspaces.Purge(t.Context(), db.Querier(), past.ID); err != nil || ended {
-		t.Fatalf("the purge of a restored tombstone = %t, %v", ended, err)
-	}
-	if _, err := workspaces.Get(t.Context(), db.Querier(), past.ID); err != nil {
-		t.Fatalf("the restored workspace is gone: %v", err)
-	}
-
-	if _, err := db.Querier().Exec(t.Context(),
-		`UPDATE workspaces SET deleted_at = now() WHERE id = $1`, past.ID); err != nil {
-		t.Fatalf("soft delete again: %v", err)
-	}
-	if ended, err := workspaces.Purge(t.Context(), db.Querier(), past.ID); err != nil || !ended {
-		t.Fatalf("the purge = %t, %v", ended, err)
-	}
-	if _, err := workspaces.Get(t.Context(), db.Querier(), past.ID); err == nil {
-		t.Error("the purge left the workspace row")
-	}
-}
-
-// TestStoreDroppingASubtreeTakesTheTrashAndTheHistoryWithIt: a purge ends a
-// subtree, so a trashed row goes too, and the superseded contents go with
-// it, because the ledger counts both tables and bytes left charged to a
-// space that holds nothing is drift pass 10 would have to correct.
+// TestStoreDroppingASubtreeTakesTheTrashAndTheHistoryWithIt: a permanent
+// folder delete ends a subtree, so a trashed row goes too, and the
+// superseded contents go with it, because the ledger counts both tables and
+// bytes left charged to a space that holds nothing is drift pass 10 would
+// have to correct. The folder's own path and a sibling whose name begins
+// with it are outside the subtree.
 func TestStoreDroppingASubtreeTakesTheTrashAndTheHistoryWithIt(t *testing.T) {
 	db := tier(t)
-	owner := wsSpace(t)
-	root := "workspaces/build/"
+	owner := aSpaceOf(t)
+	root := "files/build/"
+	reaperFile(t, db, owner, "files/build", 1)
+	reaperFile(t, db, owner, "files/build-archive/x", 2)
 
 	live := reaperFile(t, db, owner, root+"src/main.go", 2814)
 	reaperFile(t, db, owner, root+"src/old.go", 100)
@@ -176,13 +132,25 @@ func TestStoreDroppingASubtreeTakesTheTrashAndTheHistoryWithIt(t *testing.T) {
 		t.Fatalf("write the history: %v", err)
 	}
 
-	freed, bytes, err := NewWorkspaceObjects().DropSubtree(t.Context(), db.Querier(), owner, root)
+	gone, err := NewFiles().DropSubtree(t.Context(), db.Querier(), owner, "files/build", nil)
 	if err != nil {
 		t.Fatalf("DropSubtree: %v", err)
 	}
 	// Two file rows and one version, and the bytes of all three.
-	if len(freed) != 3 || bytes != 2954 {
-		t.Fatalf("the drop answered %d objects and %d bytes, want 3 and 2954", len(freed), bytes)
+	if len(gone.Objects) != 3 || gone.Files != 2 || gone.Bytes != 2954 {
+		t.Fatalf("the drop answered %d objects, %d rows and %d bytes, want 3, 2 and 2954",
+			len(gone.Objects), gone.Files, gone.Bytes)
+	}
+	// The batched reference check agrees with what is left: the dropped
+	// objects are named by nothing, and an object a live row still names is.
+	free, err := NewFiles().Unreferenced(t.Context(), db.Querier(), append(gone.Objects, outside.ObjectID))
+	if err != nil || len(free) != 3 || slices.Contains(free, outside.ObjectID) {
+		t.Fatalf("Unreferenced = %v, %v, want the three dropped objects", free, err)
+	}
+	for _, path := range []string{"files/build", "files/build-archive/x"} {
+		if _, err := NewFiles().Get(t.Context(), db.Querier(), owner, path); err != nil {
+			t.Errorf("the drop took %q, which is not under the folder: %v", path, err)
+		}
 	}
 	if _, err := NewFiles().Get(t.Context(), db.Querier(), owner, live.Path); err == nil {
 		t.Error("the drop left a live row under the root")
@@ -206,7 +174,7 @@ func TestStoreDroppingASubtreeTakesTheTrashAndTheHistoryWithIt(t *testing.T) {
 func TestStoreTheLinkCountIsTheLinkListingCounted(t *testing.T) {
 	db := tier(t)
 	shares := NewShares()
-	owner, quiet := wsSpace(t), wsSpace(t)
+	owner, quiet := aSpaceOf(t), aSpaceOf(t)
 	gone := time.Now().Add(-time.Hour)
 
 	// A grant is created active, so the revoked row is written and then
@@ -240,7 +208,7 @@ func TestStoreTheLinkCountIsTheLinkListingCounted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CountLinks: %v", err)
 	}
-	listed, err := shares.ListTokens(t.Context(), db.Querier(), owner, "", 100)
+	listed, err := shares.ListTokens(t.Context(), db.Querier(), owner, "", 100, nil)
 	if err != nil {
 		t.Fatalf("ListTokens: %v", err)
 	}
@@ -258,7 +226,7 @@ func TestStoreTheLinkCountIsTheLinkListingCounted(t *testing.T) {
 func TestStoreTheGrantSweepTakesOnlyWhatExpiredAWholeWindowAgo(t *testing.T) {
 	db := tier(t)
 	shares := NewShares()
-	owner := wsSpace(t)
+	owner := aSpaceOf(t)
 	long := time.Now().Add(-800 * time.Hour)
 	recently := time.Now().Add(-time.Hour)
 
@@ -298,7 +266,7 @@ func TestStoreTheGrantSweepTakesOnlyWhatExpiredAWholeWindowAgo(t *testing.T) {
 	if counted != 1 || gone != 1 {
 		t.Fatalf("the count is %d and the purge took %d, want 1 of each", counted, gone)
 	}
-	left, err := shares.ListSpace(t.Context(), db.Querier(), owner, "", "", 100)
+	left, err := shares.ListSpace(t.Context(), db.Querier(), owner, "", "", 100, nil)
 	if err != nil {
 		t.Fatalf("ListSpace: %v", err)
 	}

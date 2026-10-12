@@ -14,7 +14,7 @@ import (
 	"latere.ai/x/arca/internal/api"
 )
 
-func TestADeleteUnderFilesIsSoftAndOneUnderWorkspacesIsHard(t *testing.T) {
+func TestADeleteIsSoftAndKeepsTheBytes(t *testing.T) {
 	h := newHarness(t)
 	row := h.seed(t, "files/plan.md", "first")
 	if w := h.call(t, http.MethodDelete, h.object("files/plan.md"), nil); w.Code != http.StatusNoContent {
@@ -31,17 +31,6 @@ func TestADeleteUnderFilesIsSoftAndOneUnderWorkspacesIsHard(t *testing.T) {
 	}
 	if _, ok := h.objects.Bytes(row.ObjectID.Key("arca/")); !ok {
 		t.Error("a trash removed the bytes")
-	}
-
-	under := h.write(t, "workspaces/build/main.go", "package main")
-	if w := h.call(t, http.MethodDelete, h.object("workspaces/build/main.go"), nil); w.Code != http.StatusNoContent {
-		t.Fatalf("a delete under the workspaces plane answered %d: %s", w.Code, w.Body)
-	}
-	if _, err := h.store.Get(t.Context(), nil, h.owner, "workspaces/build/main.go"); err == nil {
-		t.Error("a delete under the workspaces plane left a row")
-	}
-	if _, ok := h.objects.Bytes(under.ObjectID.Key("arca/")); ok {
-		t.Error("a delete under the workspaces plane left the bytes")
 	}
 }
 
@@ -272,8 +261,8 @@ func TestRestoringATrashedObjectByItsIDBringsThePathBack(t *testing.T) {
 }
 
 // An id of another space, one that names nothing, one past the retention
-// window, and a string that is not an id at all are one answer, so the node's
-// adapter tries the workspace arm next and the route renders one refusal.
+// window, and a string that is not an id at all are one answer, which the
+// node's adapter renders as the one refusal of the administrative restore.
 func TestRestoringATrashedObjectRefusesWhatTheSpaceCannotBringBack(t *testing.T) {
 	h := newHarness(t)
 	h.seed(t, "files/plan.md", "first")
@@ -303,7 +292,7 @@ func TestRestoringATrashedObjectRefusesWhatTheSpaceCannotBringBack(t *testing.T)
 }
 
 // A store that will not answer is a fault and not a missing object: the
-// adapter above must not read it as "try the workspace arm".
+// adapter above must not read it as an id that names nothing.
 func TestRestoringATrashedObjectCarriesAStoreFailure(t *testing.T) {
 	h := newHarness(t)
 	h.store.failAll = errOutage

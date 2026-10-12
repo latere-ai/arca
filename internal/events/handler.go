@@ -14,6 +14,7 @@ import (
 	"latere.ai/x/pkg/authz"
 	"latere.ai/x/pkg/httpjson"
 
+	"latere.ai/x/arca/internal/auth"
 	"latere.ai/x/arca/internal/store"
 )
 
@@ -144,6 +145,16 @@ func Handler(log Log, q store.Querier, g Guard, refuse Refuser) http.Handler {
 			writePage(w, Page{})
 			return
 		}
+		// The answer may leave subtrees out of the page (spec 028). Limits
+		// this server cannot read are no decision, as a byte limit it cannot
+		// read is to a write.
+		limits, err := auth.ReadLimits(decision.Limits)
+		if err != nil {
+			refuse(w, r, &Error{Code: codeStorageUnavailable,
+				Detail: "could not read the answer's limits"})
+			return
+		}
+		query.Omit = limits.Omit
 
 		page, err := log.Tail(r.Context(), q, query)
 		if err != nil {

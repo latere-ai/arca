@@ -86,14 +86,14 @@ func TestListTokensPagesTheLinksOfOneSpace(t *testing.T) {
 	shares := NewShares()
 	link := aLink("https://issuer.example|alice", "files/reports", "t0ken")
 	q := &fakeQuerier{rows: grantRowsOf(link)}
-	page, err := shares.ListTokens(t.Context(), q, link.Owner, "01J8A", 25)
+	page, err := shares.ListTokens(t.Context(), q, link.Owner, "01J8A", 25, nil)
 	if err != nil || len(page) != 1 {
 		t.Fatalf("ListTokens = %+v, %v", page, err)
 	}
 	if args := q.args[0]; args[0] != link.Owner || args[1] != "01J8A" || args[2] != 25 {
 		t.Errorf("ListTokens bound %v", args)
 	}
-	if _, err := shares.ListTokens(t.Context(), q, link.Owner, "", 0); err == nil {
+	if _, err := shares.ListTokens(t.Context(), q, link.Owner, "", 0, nil); err == nil {
 		t.Error("a page of no rows answered no error")
 	}
 }
@@ -102,7 +102,7 @@ func TestSubtreeMatchesOnSegments(t *testing.T) {
 	shares := NewShares()
 	owner := "https://issuer.example|alice"
 	q := &fakeQuerier{rows: rowsOf(aFileRow(owner, "files/reports/q3.pdf"))}
-	page, err := shares.Subtree(t.Context(), q, owner, "files/reports", "", 10)
+	page, err := shares.Subtree(t.Context(), q, owner, "files/reports", "", 10, nil)
 	if err != nil || len(page) != 1 {
 		t.Fatalf("Subtree = %+v, %v", page, err)
 	}
@@ -113,19 +113,19 @@ func TestSubtreeMatchesOnSegments(t *testing.T) {
 	if !strings.Contains(q.statements[0], "deleted_at IS NULL") {
 		t.Errorf("Subtree lists what is trashed: %q", q.statements[0])
 	}
-	if _, err := shares.Subtree(t.Context(), q, owner, "files/reports", "", 0); err == nil {
+	if _, err := shares.Subtree(t.Context(), q, owner, "files/reports", "", 0, nil); err == nil {
 		t.Error("a page of no rows answered no error")
 	}
 	boom := errors.New("the connection went away")
-	if _, err := shares.Subtree(t.Context(), &fakeQuerier{queryErr: boom}, owner, "files", "", 10); !errors.Is(err, boom) {
+	if _, err := shares.Subtree(t.Context(), &fakeQuerier{queryErr: boom}, owner, "files", "", 10, nil); !errors.Is(err, boom) {
 		t.Errorf("a failed query = %v", err)
 	}
 	scanning := &fakeRows{scans: []func(...any) error{func(...any) error { return boom }}}
-	if _, err := shares.Subtree(t.Context(), &fakeQuerier{rows: scanning}, owner, "files", "", 10); !errors.Is(err, boom) {
+	if _, err := shares.Subtree(t.Context(), &fakeQuerier{rows: scanning}, owner, "files", "", 10, nil); !errors.Is(err, boom) {
 		t.Errorf("a failed scan = %v", err)
 	}
 	walking := &fakeRows{err: boom}
-	if _, err := shares.Subtree(t.Context(), &fakeQuerier{rows: walking}, owner, "files", "", 10); !errors.Is(err, boom) {
+	if _, err := shares.Subtree(t.Context(), &fakeQuerier{rows: walking}, owner, "files", "", 10, nil); !errors.Is(err, boom) {
 		t.Errorf("a failed walk = %v", err)
 	}
 	if !walking.closed {

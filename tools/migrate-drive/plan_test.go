@@ -335,8 +335,10 @@ func TestTheLogIsCopiedWithItsIDsAndItsSequenceIsSet(t *testing.T) {
 	if got := events[2].args[3]; got != "quota_exceeded" {
 		t.Errorf("the action is %q, want quota_exceeded", got)
 	}
-	if got := r.Report.Table("events").Noted["actions outside Arca's vocabulary"]; got != 1 {
-		t.Errorf("actions outside the vocabulary: %d, want 1", got)
+	// quota_exceeded was never Arca's, and sync left the vocabulary with the
+	// plane spec 028 removed.
+	if got := r.Report.Table("events").Noted["actions outside Arca's vocabulary"]; got != 2 {
+		t.Errorf("actions outside the vocabulary: %d, want 2", got)
 	}
 	if len(f.wrote("setval")) != 1 {
 		t.Error("the sequence is not set past the copied ids")

@@ -14,7 +14,7 @@ depends_on:
 affects: [internal/metrics/, internal/config/, internal/api/, internal/blob/, internal/store/, internal/auth/, internal/events/, internal/files/, internal/uploads/, internal/workspaces/, internal/reaper/, cmd/arcad/, tools/rules/, deploy/base/prometheusrule.yaml, .github/workflows/verify.yml]
 effort: medium
 created: 2026-09-18
-updated: 2026-09-20
+updated: 2026-10-12
 author: changkun
 ---
 
@@ -38,6 +38,19 @@ nothing is added ad hoc. The SDK is the family's, through
 leaves the process until an operator sets an endpoint.
 
 ## Current state
+
+**Amended 2026-10-12 by [[028-one-tree]].** A space is one tree, so what
+this spec recorded for the second plane is gone: the metrics
+`arca_lease_expiries_total` and `arca_leases_held`, the `kind` values
+`sync` of `arca_bytes_in_total` and `materialize` of
+`arca_bytes_out_total`, the value `workspaces` of the `plane` label, and
+the finding kinds `workspace_purged`, `file_purged` and `lease_expired`.
+The finding vocabulary is ten members. `arca_events_appended_total` is
+recorded where a mutation of the object plane or a grant becomes a row
+of the log, which is `cmd/arcad`'s two ledger bindings; it was recorded
+for the removed plane's rows alone before. The tables and the vocabulary
+paragraph of the Design are amended in place, and the text of this
+section below this paragraph is the record of 2026-09-19.
 
 Built and in the tree on 2026-09-18, for everything the packages of phases 1
 to 5 can record, and wired through on 2026-09-19 to the two planes that were
@@ -256,8 +269,7 @@ handover below already follows.
 ### Metrics
 
 Labels come from closed vocabularies, with no exception. No label
-carries a path, an object name, a principal's subject, a workspace
-slug, or a token. `route` is the
+carries a path, an object name, a principal's subject, or a token. `route` is the
 `http.ServeMux` pattern, taken from a context value a middleware behind
 the mux fills, because the route template is not known before the mux
 matches. Every histogram names its bounds. A labeled counter is
@@ -269,21 +281,19 @@ vocabularies, so a series exists before the first event.
 | `arca_requests_total` | counter | `route`, `status_class` (`2xx` to `5xx`), `code` (the error code of [[013-api]], `ok` when there is none) | 013 |
 | `arca_request_duration_seconds` | histogram, 5 ms to 10 s, 12 bounds | `route` | 013 |
 | `arca_requests_in_flight` | gauge | | 013 |
-| `arca_bytes_in_total` | counter | `kind` (`inline`, `part`, `sync`) | [[005-files]], [[007-uploads]], [[009-workspaces]] |
-| `arca_bytes_out_total` | counter | `kind` (`inline`, `materialize`) | 005, 009 |
+| `arca_bytes_in_total` | counter | `kind` (`inline`, `part`) | [[005-files]], [[007-uploads]] |
+| `arca_bytes_out_total` | counter | `kind` (`inline`) | 005 |
 | `arca_presigned_urls_total` | counter | `method` (`get`, `put`), `kind` (`download`, `part`) | [[003-object-store]], 007 |
 | `arca_upload_sessions_total` | counter | `outcome` (`created`, `completed`, `aborted`, `expired`) | 007 |
 | `arca_upload_sessions_open` | gauge | | 007 |
 | `arca_upload_parts_total` | counter | `outcome` (`presigned`, `completed`, `missing`) | 007 |
 | `arca_space_usage_bytes` | histogram, 1 MiB to 1 TiB, 12 bounds | | [[010-events-and-reaper]] |
 | `arca_spaces_by_usage` | gauge | `band` (`1g`, `10g`, `100g`) | 010 |
-| `arca_stored_bytes` | gauge | `plane` (`files`, `workspaces`) | 010 |
+| `arca_stored_bytes` | gauge | `plane` (`files`) | 010 |
 | `arca_limit_rejections_total` | counter | | 010 |
 | `arca_reaper_runs_total` | counter | `outcome` (`ok`, `error`) | 010 |
 | `arca_reaper_duration_seconds` | histogram, 1 s to 30 min, 12 bounds | | 010 |
 | `arca_reaper_findings_total` | counter | `kind`, `action` (`found`, `repaired`, `deferred`) | 010 |
-| `arca_lease_expiries_total` | counter | | 009 |
-| `arca_leases_held` | gauge | | 009 |
 | `arca_events_appended_total` | counter | `kind` (the event kinds of [[010-events-and-reaper]]) | 010 |
 | `arca_bucket_ops_total` | counter | `op` (`get`, `put`, `head`, `delete`, `list`, `presign`, `multipart_create`, `multipart_complete`, `multipart_abort`), `result` (`ok`, `not_found`, `exists`, `error`) | 003 |
 | `arca_bucket_op_seconds` | histogram, 5 ms to 10 s, 12 bounds | `op` | 003 |
@@ -296,27 +306,18 @@ vocabularies, so a series exists before the first event.
 `arca_reaper_findings_total`'s `kind` is a closed vocabulary, one
 member per thing the reconciler of
 [[010-events-and-reaper]] can find: `orphan_object`,
-`orphan_candidate`, `missing_bytes`, `workspace_purged`,
-`file_purged`, `trash_purged`, `share_expired`, `event_pruned`,
-`star_pruned`, `version_pruned`, `upload_aborted`, `usage_corrected`,
-`lease_expired`.
+`orphan_candidate`, `missing_bytes`, `trash_purged`, `share_expired`,
+`event_pruned`, `star_pruned`, `version_pruned`, `upload_aborted`,
+`usage_corrected`.
 `usage_corrected` is pass 10's finding, a space whose ledger row
 disagreed with the rows holding its bytes, and a healthy installation
 reports none. `missing_bytes` is
 the finding of invariant 2, a row whose object the bucket does not
 hold, and it is the one a human always reads.
 
-`lease_expired` is the thirteenth member and pass 3's finding: an
-attachment past its expiry whose writer lease the pass cleared. The
-first draft of this table left it out, because
-`arca_lease_expiries_total` counts the same event, and
-[[010-events-and-reaper]] asked for it while building that pass. A pass
-whose findings no run reports is a pass an operator cannot see run at
-all, and a run whose table names twelve kinds while the reconciler
-sweeps thirteen reads as a pass that found nothing. The two are not a
-duplicate: the counter is the rate a platform alerts on, and the finding
-is the row of the run's own table, beside the twelve others, that says
-the pass ran.
+The vocabulary is ten members. It was thirteen until [[028-one-tree]]
+retired passes 3 and 6 of [[010-events-and-reaper]]: `workspace_purged`
+and `file_purged` were pass 6's, and `lease_expired` was pass 3's.
 
 **Usage is sampled per space and published in aggregate.** The reaper
 reads the ledger once per run and, for every space, observes its bytes
@@ -471,7 +472,7 @@ they were narrowed from are carried by
 | # | Criterion | Proved by |
 |---|---|---|
 | 1 | Right after start-up, with nothing recorded, `/metrics` carries every name in the table and a zero series for every closed vocabulary | `TestMetricsTable` in `internal/metrics`, reading this file through `runtime.Caller` |
-| 2 | Every label of every series comes from a closed vocabulary, and no label value of a request is a path, an object name, a subject or a workspace slug, including a path no route registers | `TestMetricsTable`, `TestARequestIsCountedByItsRouteAndItsStatus`, `TestAPathNoRouteRegistersIsCountedUnderOneBoundedLabel`, `TestTheRequestLineCarriesTheIdsAndNothingSecret`. The sweep over a whole conformance run is [[025-observability-follow-ups]] |
+| 2 | Every label of every series comes from a closed vocabulary, and no label value of a request is a path, an object name or a subject, including a path no route registers | `TestMetricsTable`, `TestARequestIsCountedByItsRouteAndItsStatus`, `TestAPathNoRouteRegistersIsCountedUnderOneBoundedLabel`, `TestTheRequestLineCarriesTheIdsAndNothingSecret`. The sweep over a whole conformance run is [[025-observability-follow-ups]] |
 | 3 | A reaper run over a fixture of spaces at known sizes yields the right histogram, and each band counts every space at or above it, and adds no series as the space count grows | `TestUsageSamplingIsAggregate` over two fixtures of different sizes |
 | 4 | `/metrics` is on the internal listener and not on the public one, `arcad reap` opens no listener, and both roles bootstrap the exporter, so a configured endpoint carries the spans and log records of either | `TestMetricsListenerOnly`, `TestTheReaperProcessBootstrapsToo`, `TestAnInjectedEndpointReachesTheExporter`. The reap process's counters over OTLP is [[025-observability-follow-ups]] |
 | 5 | Carried whole by [[025-observability-follow-ups]] in these words. What shipped is one span, `bucket.<op>` at the decorator over `blob.Store`, with no request span above it and no test over either | nothing here; the criterion is proved where it is carried |

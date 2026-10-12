@@ -15,14 +15,13 @@ import (
 )
 
 // Write is one content landing at one path: what a put streamed through the
-// server, or what a session of spec 007 assembled in the bucket. The bytes
-// are already written when a Write is committed, at a key nothing else
-// references, so the transaction below is metadata alone.
+// server, what a session of spec 007 assembled in the bucket, or what a copy
+// of spec 028 copied inside it. The bytes are already written when a Write
+// is committed, at a key nothing else references, so the transaction below
+// is metadata alone.
 type Write struct {
-	// Owner is the space, Path the path, and Plane the plane it is rooted
-	// in.
+	// Owner is the space and Path the path.
 	Owner, Path string
-	Plane       object.Plane
 	// Actor is the subject writing, recorded as the creator of a path that
 	// did not exist.
 	Actor string
@@ -38,6 +37,12 @@ type Write struct {
 	Pre api.Precondition
 	// Limit is the allowance the authorizer's answer carried.
 	Limit Limit
+	// NoVersion is limits.versions: false on the answer that admitted this
+	// write: the content it replaces is not kept as a version, the space is
+	// charged the difference in size, and the caller drops the replaced
+	// bytes after the commit (spec 028). Versions the path already has are
+	// untouched.
+	NoVersion bool
 	// Charged is what the space has already paid for this content, which is
 	// the declared size of an upload session of spec 007. The transaction
 	// charges the difference, so a session that opened and completed is
@@ -82,75 +87,84 @@ type Result struct {
 func (s *Service) Commit(ctx context.Context, w Write) (Result, error) {
 	var out Result
 	err := s.db.Tx(ctx, func(q store.Querier) error {
-		current, err := s.files.GetForUpdate(ctx, q, w.Owner, w.Path)
-		switch {
-		case err == nil:
-			out.Replaced = current
-		case errors.Is(err, pgx.ErrNoRows):
-		default:
-			return fault(ctx, "read the path", err)
-		}
-		held := current.ID != ""
-		live := held && current.DeletedAt == nil
-		out.Created = !live
-
-		// A trashed row holds no readable content, so a precondition is
-		// read against the live checksum and against nothing otherwise:
-		// If-Match on a trashed path names a state no reader could have
-		// seen, and If-None-Match: * finds nothing and revives it.
-		stored := ""
-		if live {
-			stored = current.Checksum
-		}
-		if !w.Pre.Allows(stored) {
-			return refusePrecondition(w.Pre, stored)
-		}
-
-		// Only the files plane keeps versions. The workspaces plane is the
-		// sync protocol's, which would read a version as a file it did not
-		// write (spec 009).
-		out.Versioned = w.Plane == object.PlaneFiles && held
-		if out.Versioned {
-			if _, err := s.versions.Capture(ctx, q, w.Owner, w.Path, ifMatchOf(w.Pre)); err != nil {
-				return fault(ctx, "capture the version", err)
-			}
-		}
-
-		row := store.File{
-			Owner: w.Owner, Path: w.Path, ObjectID: w.Object, CreatedBy: w.Actor,
-			ContentType: w.ContentType, SizeBytes: w.Size,
-			Checksum: w.Checksum, ChecksumKind: w.ChecksumKind,
-		}
-		if err := s.apply(ctx, q, row, w.Pre, stored); err != nil {
-			return err
-		}
-
-		// A versioned overwrite grows the space by the whole new size,
-		// because the replaced object survives as a version. A write that
-		// keeps no second copy nets out what it replaced.
-		replaced := int64(0)
-		if held && !out.Versioned {
-			replaced = current.SizeBytes
-		}
-		if _, err := s.charge(ctx, q, w.Owner, w.Size-replaced-w.Charged, w.Limit); err != nil {
-			return err
-		}
-		if w.Also != nil {
-			if err := w.Also(ctx, q); err != nil {
-				return err
-			}
-		}
-
-		written, err := s.files.Get(ctx, q, w.Owner, w.Path)
-		if err != nil {
-			return fault(ctx, "read the path back", err)
-		}
-		out.File = written
-		return nil
+		var err error
+		out, err = s.commit(ctx, q, w)
+		return err
 	})
 	if err != nil {
 		return Result{}, Committed(ctx, err)
 	}
+	return out, nil
+}
+
+// commit is the body of Commit inside a transaction the caller holds, which
+// is how a folder copy writes every destination row in one commit through
+// the same statements a put writes one with.
+func (s *Service) commit(ctx context.Context, q store.Querier, w Write) (Result, error) {
+	var out Result
+	current, err := s.files.GetForUpdate(ctx, q, w.Owner, w.Path)
+	switch {
+	case err == nil:
+		out.Replaced = current
+	case errors.Is(err, pgx.ErrNoRows):
+	default:
+		return Result{}, fault(ctx, "read the path", err)
+	}
+	held := current.ID != ""
+	live := held && current.DeletedAt == nil
+	out.Created = !live
+
+	// A trashed row holds no readable content, so a precondition is read
+	// against the live checksum and against nothing otherwise: If-Match on
+	// a trashed path names a state no reader could have seen, and
+	// If-None-Match: * finds nothing and revives it.
+	stored := ""
+	if live {
+		stored = current.Checksum
+	}
+	if !w.Pre.Allows(stored) {
+		return Result{}, refusePrecondition(w.Pre, stored)
+	}
+
+	// A write keeps the content it replaces as a version unless the answer
+	// that admitted it said otherwise (spec 028).
+	out.Versioned = held && !w.NoVersion
+	if out.Versioned {
+		if _, err := s.versions.Capture(ctx, q, w.Owner, w.Path, ifMatchOf(w.Pre)); err != nil {
+			return Result{}, fault(ctx, "capture the version", err)
+		}
+	}
+
+	row := store.File{
+		Owner: w.Owner, Path: w.Path, ObjectID: w.Object, CreatedBy: w.Actor,
+		ContentType: w.ContentType, SizeBytes: w.Size,
+		Checksum: w.Checksum, ChecksumKind: w.ChecksumKind,
+	}
+	if err := s.apply(ctx, q, row, w.Pre, stored); err != nil {
+		return Result{}, err
+	}
+
+	// A versioned overwrite grows the space by the whole new size, because
+	// the replaced object survives as a version. A write that keeps no
+	// second copy nets out what it replaced.
+	replaced := int64(0)
+	if held && !out.Versioned {
+		replaced = current.SizeBytes
+	}
+	if _, err := s.charge(ctx, q, w.Owner, w.Size-replaced-w.Charged, w.Limit); err != nil {
+		return Result{}, err
+	}
+	if w.Also != nil {
+		if err := w.Also(ctx, q); err != nil {
+			return Result{}, err
+		}
+	}
+
+	written, err := s.files.Get(ctx, q, w.Owner, w.Path)
+	if err != nil {
+		return Result{}, fault(ctx, "read the path back", err)
+	}
+	out.File = written
 	return out, nil
 }
 

@@ -26,7 +26,6 @@ func TestARestoreBringsBackWhatTheIdNames(t *testing.T) {
 		id   string
 	}{
 		{kind: KindFile, id: "01J8R4A"},
-		{kind: KindWorkspace, id: "01J8R4B"},
 	} {
 		t.Run(tc.kind, func(t *testing.T) {
 			seam := &fakeRestorer{back: Restored{ID: tc.id, Kind: tc.kind}}
@@ -128,7 +127,7 @@ func TestARestoreReportsASeamThatFailed(t *testing.T) {
 func TestARestoreRefusesABodyItCannotRead(t *testing.T) {
 	seam := &fakeRestorer{}
 	h := newHarness(t, withRestorer(seam))
-	got := h.do(t, http.MethodPost, restorePath("https://other.example|c1d0"), map[string]any{"workspace_id": "01J8R4A"})
+	got := h.do(t, http.MethodPost, restorePath("https://other.example|c1d0"), map[string]any{"object_id": "01J8R4A"})
 	if got.code != http.StatusBadRequest {
 		t.Fatalf("a body with an unknown field answered %d: %s", got.code, got.body)
 	}

@@ -48,7 +48,13 @@ func (s *Service) listTrash(w http.ResponseWriter, r *http.Request) {
 		api.WritePage(w, []Trashed{}, "")
 		return
 	}
-	rows, err := s.files.ListTrash(ctx, s.db.Querier(), owner, cursor, limit+1, s.window())
+	// The answer may leave subtrees out of the page (spec 028).
+	limits, err := LimitsOf(d)
+	if err != nil {
+		api.WriteError(w, r, fault(ctx, "read the answer's limits", err))
+		return
+	}
+	rows, err := s.files.ListTrash(ctx, s.db.Querier(), owner, cursor, limit+1, s.window(), limits.Omit)
 	if err != nil {
 		api.WriteError(w, r, fault(ctx, "list the trash", err))
 		return
@@ -135,9 +141,8 @@ var ErrNotTrashed = errors.New("files: no trashed object of that space carries t
 // the arm the restore across owners of spec 012 reaches for [KindFile].
 //
 // It takes an id where the route above takes a path, because the
-// administrative restore takes one id that names either a trashed object or
-// a soft deleted workspace and answers which it was. The condition is the
-// trash's own: the row is the space's, it is trashed, and it is inside
+// administrative restore names what it brings back by id. The condition is
+// the trash's own: the row is the space's, it is trashed, and it is inside
 // ARCA_TRASH_RETENTION.
 //
 // It asks nothing. The caller asked space.admin before it reached here, and
@@ -166,6 +171,10 @@ type purged struct {
 // purgeTrash removes trashed entries now, one path with ?path= and the whole
 // trash without one. Rows go before bytes, and a version of a purged path
 // goes with it: a purge is the end of the line.
+//
+// Emptying the whole trash is an enumeration, so a subtree the answer's
+// limits.omit names stays in the trash and out of the count (spec 028). A
+// purge of one named path is a question about that path and reads none.
 func (s *Service) purgeTrash(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	owner, err := s.owner(ctx, r.URL.Query().Get("owner"))
@@ -183,15 +192,21 @@ func (s *Service) purgeTrash(w http.ResponseWriter, r *http.Request) {
 		}
 		resource = authorizer.File{Owner: owner, Path: path, Plane: string(plane)}
 	}
-	if _, err := s.Ask(ctx, owner, authorizer.ActionFileDelete, resource.Resource()); err != nil {
+	d, err := s.Ask(ctx, owner, authorizer.ActionFileDelete, resource.Resource())
+	if err != nil {
 		api.WriteError(w, r, api.FromAuth(err))
+		return
+	}
+	limits, err := LimitsOf(d)
+	if err != nil {
+		api.WriteError(w, r, fault(ctx, "read the answer's limits", err))
 		return
 	}
 
 	var gone []object.ID
 	var count int
 	err = s.db.Tx(ctx, func(q store.Querier) error {
-		rows, err := s.files.PurgeTrash(ctx, q, owner, path)
+		rows, err := s.files.PurgeTrash(ctx, q, owner, path, limits.Omit)
 		if err != nil {
 			return fault(ctx, "empty the trash", err)
 		}

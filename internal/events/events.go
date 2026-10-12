@@ -38,27 +38,24 @@ import (
 // to the conformance rows of spec 017, and it is not a migration.
 type Action string
 
-// The eleven actions. The spec that appends each is in its comment.
+// The nine actions. The spec that appends each is in its comment.
 const (
 	// ActionPut is an object written, by a put or by a completed upload
 	// session (specs 005 and 007).
 	ActionPut Action = "put"
 	// ActionMove is a path renamed (spec 005).
 	ActionMove Action = "move"
+	// ActionCopy is an object or a folder copied to another path of the
+	// space, with the source in the detail (spec 028).
+	ActionCopy Action = "copy"
 	// ActionDelete is an object trashed or removed (spec 005).
 	ActionDelete Action = "delete"
 	// ActionRestore is an object brought back from trash or a version
-	// brought forward (specs 005 and 009).
+	// brought forward (spec 005).
 	ActionRestore Action = "restore"
-	// ActionPurge is a trashed object or a tombstone leaving for good, which
-	// is the last thing said about it (this spec's reaper).
+	// ActionPurge is a trashed object leaving for good, which is the last
+	// thing said about it (this spec's reaper).
 	ActionPurge Action = "purge"
-	// ActionAttach is an attachment opened on a workspace (spec 009).
-	ActionAttach Action = "attach"
-	// ActionRelease is an attachment given up (spec 009).
-	ActionRelease Action = "release"
-	// ActionSync is a workspace's post-state declared (spec 009).
-	ActionSync Action = "sync"
 	// ActionReap is a reconciliation pass that changed something in the
 	// space (this spec's reaper).
 	ActionReap Action = "reap"
@@ -71,9 +68,8 @@ const (
 
 // actions is the vocabulary in the order spec 010 lists it.
 var actions = []Action{
-	ActionPut, ActionMove, ActionDelete, ActionRestore, ActionPurge,
-	ActionAttach, ActionRelease, ActionSync, ActionReap,
-	ActionShareCreated, ActionShareRevoked,
+	ActionPut, ActionMove, ActionCopy, ActionDelete, ActionRestore, ActionPurge,
+	ActionReap, ActionShareCreated, ActionShareRevoked,
 }
 
 // Actions answers the closed vocabulary, in the order spec 010 lists it. The
@@ -106,7 +102,7 @@ type Event struct {
 	Actor string
 	// Detail is the finer grain a consumer reads when the action is not
 	// enough: the size of a put, the kind of a share. It is the reason the
-	// vocabulary can stay at eleven members.
+	// vocabulary can stay at nine members.
 	Detail map[string]any
 	// At is when the row was written.
 	At time.Time
@@ -148,6 +144,10 @@ type Query struct {
 	Cursor int64
 	// Limit is how many rows the page holds at most.
 	Limit int
+	// Omit is the subtrees the answer left out (limits.omit of spec 028). A
+	// row whose path, or whose detail's from, is at or under one of them is
+	// not on any page, and a cursor moves past it like any other row.
+	Omit []string
 }
 
 // Page is one page of the tail.
@@ -202,16 +202,32 @@ func (l eventLog) Note(ctx context.Context, q store.Querier, e Event) {
 // The page reads one row beyond the limit and drops it, so the cursor is
 // present when a further page exists and absent on the last page, which is
 // the only has-more signal a consumer has (spec 013).
+//
+// The omission is in the statement, so a page is never short for a row the
+// answer left out and the cursor of a page is the id of a row the caller
+// read: the next page starts after it and passes over every omitted row in
+// between. Both ends of a move and of a copy are read, the destination as
+// the row's path and the source as the detail's from.
 func (eventLog) Tail(ctx context.Context, q store.Querier, t Query) (Page, error) {
 	if t.Limit <= 0 {
 		return Page{}, fmt.Errorf("events: tail %q: the page holds %d rows", t.Owner, t.Limit)
+	}
+	omit := t.Omit
+	if omit == nil {
+		omit = []string{}
 	}
 	rows, err := q.Query(ctx, `
 		SELECT `+eventColumns+`
 		  FROM events
 		 WHERE owner = $1 AND id > $2
+		   AND NOT EXISTS (
+		    SELECT 1 FROM unnest($4::text[]) AS omitted(prefix)
+		     WHERE path = omitted.prefix
+		        OR starts_with(path, omitted.prefix || '/')
+		        OR detail->>'from' = omitted.prefix
+		        OR starts_with(detail->>'from', omitted.prefix || '/'))
 		 ORDER BY id
-		 LIMIT $3`, t.Owner, t.Cursor, t.Limit+1)
+		 LIMIT $3`, t.Owner, t.Cursor, t.Limit+1, omit)
 	if err != nil {
 		return Page{}, fmt.Errorf("events: tail %q: %w", t.Owner, err)
 	}

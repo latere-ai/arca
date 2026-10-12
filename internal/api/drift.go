@@ -36,13 +36,13 @@ type Drift string
 const (
 	// DriftNone is the server as spec 013 fixes it.
 	DriftNone Drift = ""
-	// DriftPaths accepts a fifth path prefix that is not a plane, so a
-	// grant or an object is admitted under a plane this server does not
-	// serve. The paths group catches it.
+	// DriftPaths accepts a path prefix that is not the plane, so a grant or
+	// an object is admitted under a plane this server does not serve. The
+	// paths group catches it.
 	DriftPaths Drift = "paths"
 	// DriftCodes answers 404 where spec 013's table fixes 409, so a caller
-	// that would have learned the slug was taken learns the space is not
-	// there. The errors and workspaces groups catch it.
+	// that would have learned a path was taken learns there is nothing
+	// there. The errors and files groups catch it.
 	DriftCodes Drift = "codes"
 	// DriftETag answers a fresh validator instead of the object's checksum,
 	// so a move looks like a rewrite and a conditional request compares
@@ -85,10 +85,10 @@ func SetDrift(d Drift) { drift = d }
 // logs and for the tests that assert the seam is off.
 func CurrentDrift() Drift { return drift }
 
-// PlaneServed reports whether a path is rooted in a plane this build serves.
-// It is the one place that question is answered, so a package above the
-// frame asks rather than reading the two prefixes of spec 001 for itself,
-// and the two planes stay one fact rather than one per caller.
+// PlaneServed reports whether a path is rooted in the plane this build
+// serves. It is the one place that question is answered, so a package above
+// the frame asks rather than reading the prefix of spec 001 for itself, and
+// the plane stays one fact rather than one per caller.
 func PlaneServed(path string) bool {
 	if object.Plane(path).Valid() {
 		return true
@@ -96,7 +96,7 @@ func PlaneServed(path string) bool {
 	if _, _, err := object.SplitPath(path); err == nil {
 		return true
 	}
-	// The drift: a fifth prefix is taken for a plane, which admits a path
+	// The drift: another prefix is taken for a plane, which admits a path
 	// under a plane this server does not serve.
 	return drift == DriftPaths && strings.Contains(path, "/")
 }
@@ -105,7 +105,7 @@ func PlaneServed(path string) bool {
 // everywhere but under DriftCodes, where the one row spec 013 fixes at 409
 // goes out at 404.
 func driftedCode(code string) string {
-	if drift == DriftCodes && code == CodeSlugTaken {
+	if drift == DriftCodes && code == CodePathTaken {
 		return CodeNotFound
 	}
 	return code

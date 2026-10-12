@@ -46,7 +46,7 @@ type Stars interface {
 	// List answers one page of a subject's stars joined with the live rows
 	// they point at, ordered by space and path. Owners narrows the page to
 	// stars on those spaces; empty narrows nothing.
-	List(ctx context.Context, q Querier, subject string, owners []string, cursor StarCursor, limit int) ([]Star, error)
+	List(ctx context.Context, q Querier, subject string, owners []string, cursor StarCursor, limit int, omit []string) ([]Star, error)
 	// Move carries a path's stars to a new path, inside the transaction that
 	// moves the file, so a bookmark follows what it bookmarked.
 	Move(ctx context.Context, q Querier, owner, from, to string) (int64, error)
@@ -85,7 +85,11 @@ func (stars) Remove(ctx context.Context, q Querier, subject, owner, path string)
 // returns, so a page is never short because a star outside the owners
 // sorted into it. A nil slice binds as NULL, which the coalesce reads as
 // the empty list that narrows nothing.
-func (stars) List(ctx context.Context, q Querier, subject string, owners []string, cursor StarCursor, limit int) ([]Star, error) {
+//
+// A star whose path is at or under one of omit is left out (limits.omit of
+// spec 028). The listing crosses spaces under one answer, so a prefix is
+// read against the path of every star on the page, whichever space it is in.
+func (stars) List(ctx context.Context, q Querier, subject string, owners []string, cursor StarCursor, limit int, omit []string) ([]Star, error) {
 	if limit <= 0 {
 		return nil, fmt.Errorf("store: list the stars of %q: the page holds %d rows", subject, limit)
 	}
@@ -96,8 +100,9 @@ func (stars) List(ctx context.Context, q Querier, subject string, owners []strin
 		  JOIN files f ON f.owner = s.owner AND f.path = s.path AND f.deleted_at IS NULL
 		 WHERE s.subject = $1 AND (s.owner, s.path) > ($2, $3)
 		   AND (coalesce(cardinality($5::text[]), 0) = 0 OR s.owner = ANY($5::text[]))
+		   AND `+notOmitted("s.path", 6)+`
 		 ORDER BY s.owner, s.path
-		 LIMIT $4`, subject, cursor.Owner, cursor.Path, limit, owners)
+		 LIMIT $4`, subject, cursor.Owner, cursor.Path, limit, owners, omitted(omit))
 	if err != nil {
 		return nil, fmt.Errorf("store: list the stars of %q: %w", subject, err)
 	}

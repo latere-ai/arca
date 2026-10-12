@@ -6,7 +6,6 @@ package auth
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"latere.ai/x/pkg/authz"
 
@@ -58,9 +57,7 @@ func rung(p Permission) int {
 // ladder is spec 006's reading of the share ladder: the lowest rung a grant
 // must reach for each action. An action absent here is reachable by no
 // grant, which is the owner's or an administrator's alone: space.admin,
-// workspace.create and workspace.delete, which spec 006 names, and
-// workspace.restore, event.read and the three link.* actions, which follow
-// from the same rule, since undoing a delete, reading a space's log and
+// event.read and the three link.* actions, since reading a space's log and
 // minting or revoking a public token are powers over the space rather than
 // over a subtree of it.
 var ladder = map[string]Permission{
@@ -70,12 +67,6 @@ var ladder = map[string]Permission{
 	authorizer.ActionFileDelete:  PermissionWrite,
 	authorizer.ActionFileRestore: PermissionWrite,
 	authorizer.ActionUploadWrite: PermissionWrite,
-
-	authorizer.ActionWorkspaceRead:   PermissionRead,
-	authorizer.ActionWorkspaceList:   PermissionRead,
-	authorizer.ActionWorkspaceWrite:  PermissionWrite,
-	authorizer.ActionWorkspaceAttach: PermissionWrite,
-	authorizer.ActionWorkspaceSync:   PermissionWrite,
 
 	authorizer.ActionShareCreate: PermissionManage,
 	authorizer.ActionShareRead:   PermissionManage,
@@ -199,7 +190,7 @@ func (p *OwnerPolicy) decide(ctx context.Context, req authz.Request) (authz.Deci
 		return authz.Decision{Reason: ReasonUnknownAction}, nil
 	}
 	frame := authz.Policy{Admins: p.Admins}
-	switch d := frame.Decide(req, object(req.Action, req.Resource)); {
+	switch d := frame.Decide(req, objectOf(req.Action, req.Resource)); {
 	case d.Allow:
 		return d, nil
 	case d.Reason == authz.ReasonProbe:
@@ -262,21 +253,11 @@ func (p *OwnerPolicy) linked(ctx context.Context, req authz.Request) (bool, erro
 	return live, nil
 }
 
-// grantPath is the path a grant is read against. Every resource but a
-// workspace names one; a workspace names its slug, and its subtree is the
-// workspaces plane under that slug (spec 001), which is the prefix a grant
-// on it covers.
-func grantPath(res authz.Resource) string {
-	if res.Kind == authorizer.KindWorkspace {
-		if slug := res.String("slug"); slug != "" {
-			return "workspaces/" + strings.Trim(slug, "/")
-		}
-		return ""
-	}
-	return res.String("path")
-}
+// grantPath is the path a grant is read against, which every resource a
+// grant reaches names as its path.
+func grantPath(res authz.Resource) string { return res.String("path") }
 
-// object is what arcad found when it looked the resource up, read off the
+// objectOf is what arcad found when it looked the resource up, read off the
 // resource it built. Every question about a space carries its owner, so an
 // object with no owner is one no space claims, which only the administrative
 // overview across spaces asks about.
@@ -284,13 +265,13 @@ func grantPath(res authz.Resource) string {
 // space.admin is the one action the owner rung does not reach. Administration
 // is a capability and not ownership: a space's owner is not an administrator
 // of its own space, and the routes under /v1/admin read across other people's
-// spaces and restore across owners, which the owner's own routes of specs 005
-// and 009 do without asking this action (spec 012). The frame admits an owner
+// spaces and restore across owners, which the owner's own routes of spec 005
+// do without asking this action (spec 012). The frame admits an owner
 // for every action it is handed an owned object for, so this action is handed
 // none and the administrator list decides it alone. The probe is unaffected:
 // the frame refuses the reserved id before it reads the object, so no listed
 // subject reaches past it.
-func object(action string, res authz.Resource) authz.Object {
+func objectOf(action string, res authz.Resource) authz.Object {
 	if action == authorizer.ActionSpaceAdmin {
 		return authz.Object{}
 	}

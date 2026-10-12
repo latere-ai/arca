@@ -144,7 +144,7 @@ func TestListSpacePagesTheGrantsOfOneSpace(t *testing.T) {
 	first := aGrant("https://issuer.example|alice", "files/reports", carol, "read")
 	first.ID = "01J8A"
 	q := &fakeQuerier{rows: grantRowsOf(first)}
-	page, err := shares.ListSpace(t.Context(), q, first.Owner, "files/reports", "01J89", 10)
+	page, err := shares.ListSpace(t.Context(), q, first.Owner, "files/reports", "01J89", 10, nil)
 	if err != nil {
 		t.Fatalf("ListSpace: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestListSpacePagesTheGrantsOfOneSpace(t *testing.T) {
 		!strings.Contains(q.statements[0], "id::text > $4") {
 		t.Errorf("the statement orders and resumes differently: %q", q.statements[0])
 	}
-	if _, err := shares.ListSpace(t.Context(), q, first.Owner, "", "", 0); err == nil {
+	if _, err := shares.ListSpace(t.Context(), q, first.Owner, "", "", 0, nil); err == nil {
 		t.Error("a page of no rows answered no error")
 	}
 }
@@ -171,7 +171,7 @@ func TestListGranteeReadsTheGranteeIndexAndNothingElse(t *testing.T) {
 	g := aGrant("https://issuer.example|alice", "files/reports", carol, "write")
 	g.ID = "01J8B"
 	q := &fakeQuerier{rows: grantRowsOf(g)}
-	page, err := shares.ListGrantee(t.Context(), q, carol, "", 100)
+	page, err := shares.ListGrantee(t.Context(), q, carol, "", 100, nil)
 	if err != nil || len(page) != 1 {
 		t.Fatalf("ListGrantee = %+v, %v", page, err)
 	}
@@ -183,7 +183,7 @@ func TestListGranteeReadsTheGranteeIndexAndNothingElse(t *testing.T) {
 	if !strings.Contains(q.statements[0], "expires_at IS NULL OR expires_at > now()") {
 		t.Errorf("the statement does not filter the expiry: %q", q.statements[0])
 	}
-	if _, err := shares.ListGrantee(t.Context(), q, carol, "", 0); err == nil {
+	if _, err := shares.ListGrantee(t.Context(), q, carol, "", 0, nil); err == nil {
 		t.Error("a page of no rows answered no error")
 	}
 }
@@ -225,15 +225,15 @@ func TestAPageOfGrantsSurfacesEveryFailure(t *testing.T) {
 	shares := NewShares()
 	owner := "https://issuer.example|alice"
 	boom := errors.New("the connection went away")
-	if _, err := shares.ListSpace(t.Context(), &fakeQuerier{queryErr: boom}, owner, "", "", 10); !errors.Is(err, boom) {
+	if _, err := shares.ListSpace(t.Context(), &fakeQuerier{queryErr: boom}, owner, "", "", 10, nil); !errors.Is(err, boom) {
 		t.Errorf("a failed query = %v", err)
 	}
 	scanning := &fakeRows{scans: []func(...any) error{func(...any) error { return boom }}}
-	if _, err := shares.ListSpace(t.Context(), &fakeQuerier{rows: scanning}, owner, "", "", 10); !errors.Is(err, boom) {
+	if _, err := shares.ListSpace(t.Context(), &fakeQuerier{rows: scanning}, owner, "", "", 10, nil); !errors.Is(err, boom) {
 		t.Errorf("a failed scan = %v", err)
 	}
 	walking := &fakeRows{err: boom}
-	if _, err := shares.ListSpace(t.Context(), &fakeQuerier{rows: walking}, owner, "", "", 10); !errors.Is(err, boom) {
+	if _, err := shares.ListSpace(t.Context(), &fakeQuerier{rows: walking}, owner, "", "", 10, nil); !errors.Is(err, boom) {
 		t.Errorf("a failed walk = %v", err)
 	}
 	if !walking.closed {

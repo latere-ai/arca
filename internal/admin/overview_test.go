@@ -4,14 +4,16 @@
 package admin
 
 import (
+	"maps"
 	"net/http"
+	"slices"
 	"testing"
 	"time"
 
 	"latere.ai/x/arca/internal/store"
 )
 
-// GET /v1/admin/overview through the surface: the seven counters, the
+// GET /v1/admin/overview through the surface: the five counters, the
 // envelope, the page, and what a failure answers.
 
 // aMoment is the fixed clock the rows below carry, so a rendered timestamp
@@ -27,11 +29,11 @@ func spaces(owners ...string) []store.SpaceOverview {
 	return out
 }
 
-func TestTheOverviewAnswersSevenCountersPerSpace(t *testing.T) {
+func TestTheOverviewAnswersFiveCountersPerSpace(t *testing.T) {
 	h := newHarness(t)
 	h.spaces.page = []store.SpaceOverview{{
 		Owner: "https://issuer.example|9ab3", Files: 214, Bytes: 88213004,
-		TrashedBytes: 402118, Workspaces: 2, Leases: 1, LastWriteAt: &aMoment,
+		TrashedBytes: 402118, LastWriteAt: &aMoment,
 	}}
 	h.links.counts = map[string]int64{"https://issuer.example|9ab3": 3}
 
@@ -47,13 +49,12 @@ func TestTheOverviewAnswersSevenCountersPerSpace(t *testing.T) {
 	row := p.Entries[0]
 	want := Space{
 		Owner: "https://issuer.example|9ab3", Files: 214, Bytes: 88213004,
-		TrashedBytes: 402118, Workspaces: 2, Leases: 1, Links: 3, LastWriteAt: &aMoment,
+		TrashedBytes: 402118, Links: 3, LastWriteAt: &aMoment,
 	}
 	if row.Owner != want.Owner || row.Files != want.Files || row.Bytes != want.Bytes {
 		t.Errorf("the row is %+v, want %+v", row, want)
 	}
-	if row.TrashedBytes != want.TrashedBytes || row.Workspaces != want.Workspaces ||
-		row.Leases != want.Leases || row.Links != want.Links {
+	if row.TrashedBytes != want.TrashedBytes || row.Links != want.Links {
 		t.Errorf("the row's counters are %+v, want %+v", row, want)
 	}
 	if row.LastWriteAt == nil || !row.LastWriteAt.Equal(aMoment) {
@@ -61,6 +62,16 @@ func TestTheOverviewAnswersSevenCountersPerSpace(t *testing.T) {
 	}
 	if p.NextCursor != "" {
 		t.Errorf("a page with nothing after it answered the cursor %q", p.NextCursor)
+	}
+	// The row is these six members and no other (spec 028): a space is one
+	// tree, so there is no second kind of thing to count in it.
+	var raw struct {
+		Entries []map[string]any `json:"entries"`
+	}
+	got.decode(t, &raw)
+	members := slices.Sorted(maps.Keys(raw.Entries[0]))
+	if want := []string{"bytes", "files", "last_write_at", "links", "owner", "trashed_bytes"}; !slices.Equal(members, want) {
+		t.Errorf("a row carries the members %v, want %v", members, want)
 	}
 	if len(h.links.asked) != 1 || h.links.asked[0] != want.Owner {
 		t.Errorf("the link count was asked about %v, want the page's owners", h.links.asked)

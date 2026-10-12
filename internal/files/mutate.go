@@ -13,33 +13,52 @@ import (
 	"latere.ai/x/arca/authorizer"
 	"latere.ai/x/arca/internal/api"
 	"latere.ai/x/arca/internal/store"
-	"latere.ai/x/arca/object"
 )
 
-// body is what a POST on an object carries: exactly one of the two, because
-// a move and a restore are two operations and a request that named both
-// named neither.
+// body is what a POST on a path carries: exactly one of move_to,
+// restore_version and copy_to, because a move, a restore and a copy are
+// three operations and a request that named two named none. recursive goes
+// with copy_to alone: a move stays one object (spec 028).
 type body struct {
 	MoveTo         string `json:"move_to"`
 	RestoreVersion int    `json:"restore_version"`
+	CopyTo         string `json:"copy_to"`
+	Recursive      bool   `json:"recursive"`
 }
 
-// post is the one verb route on an object: a move, or a version brought
-// forward. Versions ride the file routes because the path pattern swallows
-// any suffix a dedicated route would need, and a file legitimately named
-// restore has to stay reachable.
+// post is the one verb route on a path: a move, a version brought forward,
+// or a copy. They ride the file routes because the path pattern swallows any
+// suffix a dedicated route would need, and a file legitimately named restore
+// or copy has to stay reachable.
 func (s *Service) post(w http.ResponseWriter, r *http.Request) {
 	in, err := api.DecodeBody[body](r)
 	if err != nil {
 		api.WriteError(w, r, err)
 		return
 	}
+	var named []string
+	if in.MoveTo != "" {
+		named = append(named, "move_to")
+	}
+	if in.RestoreVersion != 0 {
+		named = append(named, "restore_version")
+	}
+	if in.CopyTo != "" {
+		named = append(named, "copy_to")
+	}
 	switch {
-	case in.MoveTo != "" && in.RestoreVersion != 0:
+	case len(named) > 1:
 		api.WriteError(w, r, api.Refuse(api.CodeExclusiveFields,
-			"move_to renames a path and restore_version brings one forward").About("move_to", "restore_version"))
+			"move_to renames a path, restore_version brings a version forward and copy_to copies; a request names one").About(named...))
+	case in.Recursive && in.CopyTo == "":
+		api.WriteError(w, r, api.Refuse(api.CodeInvalidField,
+			"recursive goes with copy_to; a move and a restore act on one object").About("recursive"))
 	case in.MoveTo != "":
 		s.move(w, r, in.MoveTo)
+	case in.CopyTo != "" && in.Recursive:
+		s.copyFolder(w, r, in.CopyTo)
+	case in.CopyTo != "":
+		s.copyObject(w, r, in.CopyTo)
 	case in.RestoreVersion > 0:
 		s.restoreVersion(w, r, in.RestoreVersion)
 	case in.RestoreVersion < 0:
@@ -47,7 +66,7 @@ func (s *Service) post(w http.ResponseWriter, r *http.Request) {
 			"restore_version is %d; a version is a whole number from 1 upward", in.RestoreVersion).About("restore_version"))
 	default:
 		api.WriteError(w, r, api.Refuse(api.CodeMissingField,
-			"the body names neither move_to nor restore_version").About("move_to", "restore_version"))
+			"the body names none of move_to, restore_version and copy_to").About("move_to", "restore_version", "copy_to"))
 	}
 }
 
@@ -55,9 +74,9 @@ func (s *Service) post(w http.ResponseWriter, r *http.Request) {
 // calls against the bucket, which is criterion 7 of spec 001.
 //
 // It asks one question, with the destination as the resource's path and the
-// source as its from, so the authorizer sees both ends of the move at once:
-// a move out of a subtree the caller may write into one it may not is a copy
-// with extra steps.
+// source as its from, so the authorizer sees both ends of the move at once
+// and the rung the question carries is the one the caller holds on both
+// (spec 006).
 func (s *Service) move(w http.ResponseWriter, r *http.Request, to string) {
 	ctx := r.Context()
 	from, err := s.Target(ctx, r.PathValue("owner"), r.PathValue("path"))
@@ -70,17 +89,7 @@ func (s *Service) move(w http.ResponseWriter, r *http.Request, to string) {
 		api.WriteError(w, r, err)
 		return
 	}
-	switch {
-	case from.Plane != object.PlaneFiles:
-		api.WriteError(w, r, api.Refuse(api.CodeInvalidPath,
-			"a path under %s belongs to the sync protocol, which reads a move as a delete and a create",
-			object.PlaneWorkspaces.Prefix()).About("path"))
-		return
-	case dest.Plane != from.Plane:
-		api.WriteError(w, r, api.Refuse(api.CodeInvalidPath,
-			"move_to is in the plane %q and the path is in %q", dest.Plane, from.Plane).About("move_to"))
-		return
-	case dest.Path == from.Path:
+	if dest.Path == from.Path {
 		api.WriteError(w, r, api.Refuse(api.CodeInvalidField,
 			"move_to is the path the object already has").About("move_to"))
 		return
@@ -149,6 +158,10 @@ func (s *Service) move(w http.ResponseWriter, r *http.Request, to string) {
 //
 // The ledger is untouched. What the space holds is unchanged: one content
 // left the history and another joined it.
+//
+// Under an answer that carries limits.versions: false the content the
+// version replaces is not captured: it is dropped, its bytes are given back
+// to the space, and they leave the bucket after the commit (spec 028).
 func (s *Service) restoreVersion(w http.ResponseWriter, r *http.Request, n int) {
 	ctx := r.Context()
 	t, err := s.Target(ctx, r.PathValue("owner"), r.PathValue("path"))
@@ -156,26 +169,31 @@ func (s *Service) restoreVersion(w http.ResponseWriter, r *http.Request, n int) 
 		api.WriteError(w, r, err)
 		return
 	}
-	if t.Plane != object.PlaneFiles {
-		api.WriteError(w, r, api.Refuse(api.CodeInvalidPath,
-			"a path under %s keeps no versions", object.PlaneWorkspaces.Prefix()).About("path"))
-		return
-	}
 	row, err := s.live(ctx, t)
 	if err != nil {
 		api.WriteError(w, r, err)
 		return
 	}
-	if _, err := s.Ask(ctx, t.Owner, authorizer.ActionFileRestore, authorizer.File{
+	d, err := s.Ask(ctx, t.Owner, authorizer.ActionFileRestore, authorizer.File{
 		ID: row.ID, Owner: t.Owner, Path: t.Path, Plane: string(t.Plane),
-	}.Resource()); err != nil {
+	}.Resource())
+	if err != nil {
 		api.WriteError(w, r, s.Refused(err, "there is no object at %q", t.Path))
 		return
 	}
+	limits, err := LimitsOf(d)
+	if err != nil {
+		api.WriteError(w, r, fault(ctx, "read the answer's limits", err))
+		return
+	}
 
-	var restored store.File
+	var (
+		restored store.File
+		dropped  store.File
+	)
 	err = s.db.Tx(ctx, func(q store.Querier) error {
-		if _, err := s.files.GetForUpdate(ctx, q, t.Owner, t.Path); err != nil {
+		current, err := s.files.GetForUpdate(ctx, q, t.Owner, t.Path)
+		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return api.Refuse(api.CodeNotFound, "there is no object at %q", t.Path)
 			}
@@ -188,7 +206,12 @@ func (s *Service) restoreVersion(w http.ResponseWriter, r *http.Request, n int) 
 		if err != nil {
 			return fault(ctx, "read the version", err)
 		}
-		if _, err := s.versions.Capture(ctx, q, t.Owner, t.Path, ""); err != nil {
+		if limits.NoVersions {
+			if _, err := s.ledger.Release(ctx, q, t.Owner, current.SizeBytes); err != nil {
+				return fault(ctx, "record what the space holds", err)
+			}
+			dropped = current
+		} else if _, err := s.versions.Capture(ctx, q, t.Owner, t.Path, ""); err != nil {
 			return fault(ctx, "capture the version", err)
 		}
 		if err := s.files.Upsert(ctx, q, store.File{
@@ -210,6 +233,9 @@ func (s *Service) restoreVersion(w http.ResponseWriter, r *http.Request, n int) 
 	if err != nil {
 		api.WriteError(w, r, Committed(ctx, err))
 		return
+	}
+	if dropped.ID != "" && dropped.ObjectID != restored.ObjectID {
+		s.dropUnreferenced(ctx, dropped.ObjectID)
 	}
 	s.ledger.Append(ctx, s.db.Querier(), Event{
 		Owner: t.Owner, Path: t.Path, Action: EventRestore, Actor: Caller(ctx),

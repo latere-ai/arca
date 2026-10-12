@@ -13,14 +13,15 @@ import (
 // cleanPrefix reads the subtree a grant covers off a request.
 //
 // A prefix is a plane rooted path with no trailing slash, and a grant on one
-// covers that path and everything under it. The whole of a plane is a prefix
-// too, because a space's owner may hand out the plane; nothing shallower
-// exists, since a path in no plane is a path this server does not serve.
+// covers that path and everything under it. The whole of the plane is a
+// prefix too, because a space's owner may hand out the plane; nothing
+// shallower exists, since a path outside the plane is a path this server
+// does not serve.
 //
 // The refusals are spec 013's: a path that is not one this server accepts is
-// invalid_path, and one that begins with something that is not a plane is
+// invalid_path, and one that begins with something that is not the plane is
 // unknown_plane. The two are told apart because an operator reading the
-// second learns that the planes are two and which.
+// second learns what a path begins with.
 func cleanPrefix(raw string) (string, error) {
 	prefix := strings.TrimSuffix(raw, "/")
 	if prefix == "" {
@@ -29,14 +30,14 @@ func cleanPrefix(raw string) (string, error) {
 	if err := usablePath(prefix); err != nil {
 		return "", err
 	}
-	// A plane on its own is the whole of it, and anything deeper is read for
-	// the plane it is rooted in. Which prefixes are planes is the frame's
-	// answer rather than this package's own reading of spec 001, so the two
-	// planes stay one fact for every package above the frame.
+	// The plane on its own is the whole of it, and anything deeper is read
+	// for the plane it is rooted in. Which prefix is the plane is the
+	// frame's answer rather than this package's own reading of spec 001, so
+	// the plane stays one fact for every package above the frame.
 	if !api.PlaneServed(prefix) {
 		return "", api.Refuse(api.CodeUnknownPlane,
-			"a path begins with %q or %q, and %q begins with neither",
-			object.PlaneFiles.Prefix(), object.PlaneWorkspaces.Prefix(), prefix).About("path_prefix")
+			"a path begins with %q, and %q does not",
+			object.PlaneFiles.Prefix(), prefix).About("path_prefix")
 	}
 	return prefix, nil
 }

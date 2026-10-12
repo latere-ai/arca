@@ -9,7 +9,7 @@ depends_on:
 affects: [authorizer/, internal/events/, internal/reaper/, internal/api/, cmd/arcad/, docs/]
 effort: large
 created: 2026-09-18
-updated: 2026-09-19
+updated: 2026-10-12
 author: changkun
 ---
 
@@ -345,17 +345,18 @@ without a database constraint, so the closure is a table in
 |---|---|
 | `put` | [[005-files]], [[007-uploads]] |
 | `move` | [[005-files]] |
+| `copy` | [[005-files]], the copy of [[028-one-tree]] |
 | `delete` | [[005-files]] |
-| `restore` | [[005-files]], [[009-workspaces]] |
+| `restore` | [[005-files]] |
 | `purge` | this spec's reaper |
-| `attach` | [[009-workspaces]] |
-| `release` | [[009-workspaces]] |
-| `sync` | [[009-workspaces]] |
 | `reap` | this spec's reaper |
 | `share_created` | [[008-shares-and-links]] |
 | `share_revoked` | [[008-shares-and-links]] |
 
-Eleven actions. Adding one is a change to that table and to the
+Nine actions. **Amended 2026-10-12 ([[028-one-tree]]):** `attach`,
+`release` and `sync` left the table with the plane that appended them,
+and `copy` joined it. A row already in a log under one of the three
+stays until log retention removes it. Adding one is a change to that table and to the
 conformance rows of [[017-conformance-suite]], and it is not a migration.
 A consumer that wants finer grain than an action reads `detail`, which is
 why a link share appends `share_created` with its kind in the detail
@@ -384,6 +385,13 @@ a caller to see only part of a space's log answers the `event.read`
 question with a `filter` and the handler narrows its own query
 ([[006-identity]]); Arca applies no scoping of its own.
 
+An answer's `limits.omit` leaves subtrees out of the tail
+([[028-one-tree]]): an event whose `path`, or whose `detail.from`, is at
+or under an omitted prefix is on no page. The omission is in the query,
+so a page is as full as the rows the caller may read allow, and
+`next_cursor` is the id of a row the caller read: the next page starts
+after it and passes over every omitted row in between.
+
 This log is the whole integration point for a consumer that wants to
 know what happened. It is a tail and not an archive: the reaper prunes
 rows older than thirty days, administrative events included, so an
@@ -402,10 +410,10 @@ what each failure leaves behind.
 |---|---|---|---|
 | 1 | orphan bytes | a key under `ARCA_BUCKET_PREFIX` that no `files`, `file_versions`, or `upload_sessions` row references | deletes it, once it has been a candidate for longer than the grace window |
 | 2 | orphan rows | a row whose key the bucket does not hold | reports it; never deletes |
-| 3 | expired leases | an `active` attachment past `expires_at` | marks it `reaped` and clears the writer lease it held ([[009-workspaces]]) |
+| 3 | retired | retired 2026-10-12 by [[028-one-tree]] with the lease it expired; the number is not reused | |
 | 4 | expired uploads | an upload session idle past its TTL | aborts the multipart, then deletes the row ([[007-uploads]]) |
 | 5 | trash | a trashed object past `ARCA_TRASH_RETENTION` | deletes the rows, then the keys |
-| 6 | tombstones | a workspace soft deleted past `ARCA_TRASH_RETENTION` | deletes the subtree's rows, then its keys, then the row |
+| 6 | retired | retired 2026-10-12 by [[028-one-tree]] with the record it purged; the number is not reused. What a soft deleted workspace held is trashed objects, which pass 5 purges | |
 | 7 | grant hygiene | a grant expired long ago | deletes it ([[008-shares-and-links]]) |
 | 8 | stale stars | a star whose path has no live `files` row | deletes it ([[005-files]]) |
 | 9 | log retention | an event older than thirty days | deletes it |
@@ -441,8 +449,8 @@ work the installation did.
 
 Each pass counts what it found and what it changed, appends a `reap`
 event when it changed anything in a space, and reports through the
-metrics of [[018-observability]]. A `purge` event marks a tombstone or a
-trashed object leaving for good, which is the last thing said about it.
+metrics of [[018-observability]]. A `purge` event marks a trashed object
+leaving for good, which is the last thing said about it.
 
 **Where it runs.** The loop runs inside `serve` on every replica, every
 `ARCA_REAP_INTERVAL`. An installation that wants it off the API replicas
@@ -453,17 +461,12 @@ runs the same passes on the same interval and takes `-dry-run`, which
 logs every finding and changes nothing; `-once` runs one pass sequence
 and exits, which is the CronJob shape.
 
-Pass 3 is the one exception, and it is a hole in that arrangement today.
-Its sweep is a method of [[009-workspaces]]' service, which refuses to
-build without the authorizer its handlers decide through, and `arcad
-reap` registers no handler and starts no verifier; so the process runs
-nine of the ten passes and says which one it does not run on its start-up
-line. Pass 4 is not an exception, although its sweep is [[007-uploads]]'
-in the same way: that sweep puts no question of the authorizer, so the
-service it is a method of builds wherever the two stores are reachable
-and `arcad reap` carries it. An installation that moves the reconciler off the API replicas
-therefore leaves `ARCA_REAP_INTERVAL` non-zero on one replica, or the
-service grows a constructor for the pass alone.
+`arcad reap` runs every pass a replica runs. Pass 4's sweep is
+[[007-uploads]]' and pass 7's is [[008-shares-and-links]]', and neither
+puts a question of the authorizer, so each builds wherever the two stores
+are reachable. Until [[028-one-tree]] retired it, pass 3 was the one
+`arcad reap` could not run, because its sweep was a method of a service
+that refused to build without an authorizer.
 
 Concurrency needs no lease. Two replicas running pass 5 at the same
 moment both issue a conditional delete and the second matches no rows.
@@ -485,10 +488,9 @@ loses and is recomputed on the next run instead of erasing the charge.
 
 Owner addressing changes from `(owner_type, owner_id)` to the subject
 `<issuer>|<sub>`, and the event's `actor_id` becomes the subject
-`actor`. The nightly interval becomes `ARCA_REAP_INTERVAL`, and the
-workspace purge window and the trash window, two constants in the
-predecessor, become the one `ARCA_TRASH_RETENTION` that
-[[002-repository-scaffold]] already carries.
+`actor`. The nightly interval becomes `ARCA_REAP_INTERVAL`, and the two
+purge windows of the predecessor, two constants there, become the one
+`ARCA_TRASH_RETENTION` that [[002-repository-scaffold]] already carries.
 
 Left behind with the hosted service: the stored limit, its two routes,
 and the two defaults beside it, one for a person and one for an
@@ -536,16 +538,25 @@ restore, which read this spec's numbers but are their own surface
 | 12 | A delete that fails after the row is gone leaves no visible object, and pass 1 reaps the bytes | criterion 6 of the same |
 | 13 | An incomplete multipart's key is never reaped while its session row lives | store-tier test against MinIO |
 | 14 | A row whose key the bucket does not hold is reported and not deleted | `internal/reaper` test |
-| 15 | An expired lease is cleared and its attachment marked reaped | e2e with [[009-workspaces]] |
-| 16 | Trash and tombstones past `ARCA_TRASH_RETENTION` are purged from both stores, lower the ledger, and appear as `purge` events | e2e |
+| 15 | Retired 2026-10-12 by [[028-one-tree]] with pass 3. It read: an expired lease is cleared and its attachment marked reaped | none |
+| 16 | Trash past `ARCA_TRASH_RETENTION` is purged from both stores, lowers the ledger, and appears as `purge` events. The tombstone half is retired with pass 6 | e2e |
 | 16b | A star whose target was purged is deleted by pass 8, and a star on a trashed but restorable target is kept | store-tier test with [[005-files]] |
 | 17 | A ledger row altered by hand is corrected by pass 10 and reported as a finding, and a healthy run corrects nothing | `TestLedgerReconciles` in `internal/reaper`, against Postgres |
 | 18 | Every pass is idempotent, and two reapers running together produce the same end state as one | a test that runs the sequence twice and concurrently |
-| 19 | `-dry-run` changes nothing in either store, and reports the same findings for every pass whose statements this package owns. Pass 3 is the one exception and under-reports: its sweep is [[009-workspaces]]', every statement it issues is a write, so a dry run does not call it and counts nothing for it | `TestDryRunReportsWhatARunWouldChange` in `internal/reaper`, one fixture run dry and live with the found counts held equal |
+| 19 | `-dry-run` changes nothing in either store, and reports the same findings for every pass. The exception this row named, pass 3, is retired | `TestDryRunReportsWhatARunWouldChange` in `internal/reaper`, one fixture run dry and live with the found counts held equal |
 | 20 | `ARCA_REAP_INTERVAL` of `0` leaves `serve` with no reaper loop, and `arcad reap -once` runs one sequence and exits 0 | `cmd/arcad` test |
 
 
 ## Outcome
+
+**Amended 2026-10-12 by [[028-one-tree]].** The event table is nine
+actions and the reconciler runs eight passes: 3 and 6 are retired and
+their numbers kept unused, the finding kinds `workspace_purged`,
+`file_purged` and `lease_expired` are gone, and `arcad reap` runs every
+pass a replica runs. `internal/reaper` `TestThePassesAreTheTableOfSpec010`
+holds the reconciler's passes to the table above. The tail honors an
+answer's `limits.omit`. The text below this paragraph and the Current
+state section are the record of 2026-09-19 and name what was built then.
 
 Complete on 2026-09-19. Three jobs in two packages. `internal/events` holds
 the ledger, the closed action table, the append and the cursor tail;

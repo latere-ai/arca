@@ -50,7 +50,7 @@ func TestTheTrashListingIsNewestFirstAndResumesOnThePairItOrdersBy(t *testing.T)
 	newest := aTrashedFile("files/b.md", time.Hour)
 	older := aTrashedFile("files/a.md", 2*time.Hour)
 	first := &fakeQuerier{rows: rowsOf(newest, older)}
-	page, err := NewFiles().ListTrash(t.Context(), first, "space", TrashCursor{}, 10, time.Now().Add(-720*time.Hour))
+	page, err := NewFiles().ListTrash(t.Context(), first, "space", TrashCursor{}, 10, time.Now().Add(-720*time.Hour), nil)
 	if err != nil {
 		t.Fatalf("ListTrash: %v", err)
 	}
@@ -68,26 +68,26 @@ func TestTheTrashListingIsNewestFirstAndResumesOnThePairItOrdersBy(t *testing.T)
 
 	next := &fakeQuerier{rows: rowsOf(older)}
 	cursor := TrashCursor{DeletedAt: *newest.DeletedAt, Path: newest.Path}
-	if _, err := NewFiles().ListTrash(t.Context(), next, "space", cursor, 10, time.Time{}); err != nil {
+	if _, err := NewFiles().ListTrash(t.Context(), next, "space", cursor, 10, time.Time{}, nil); err != nil {
 		t.Fatalf("the second page: %v", err)
 	}
 	if next.args[0][2] != cursor.DeletedAt || next.args[0][3] != cursor.Path {
 		t.Fatalf("the second page bound %v", next.args[0])
 	}
 
-	if _, err := NewFiles().ListTrash(t.Context(), first, "space", TrashCursor{}, 0, time.Time{}); err == nil {
+	if _, err := NewFiles().ListTrash(t.Context(), first, "space", TrashCursor{}, 0, time.Time{}, nil); err == nil {
 		t.Fatal("a page of no rows was accepted")
 	}
 	broken := &fakeQuerier{queryErr: errFault}
-	if _, err := NewFiles().ListTrash(t.Context(), broken, "space", TrashCursor{}, 10, time.Time{}); err == nil {
+	if _, err := NewFiles().ListTrash(t.Context(), broken, "space", TrashCursor{}, 10, time.Time{}, nil); err == nil {
 		t.Fatal("a failed listing reported success")
 	}
 	torn := &fakeQuerier{rows: &fakeRows{scans: []func(...any) error{failing(errFault).scan}}}
-	if _, err := NewFiles().ListTrash(t.Context(), torn, "space", TrashCursor{}, 10, time.Time{}); err == nil {
+	if _, err := NewFiles().ListTrash(t.Context(), torn, "space", TrashCursor{}, 10, time.Time{}, nil); err == nil {
 		t.Fatal("a row that would not scan reported success")
 	}
 	cut := &fakeQuerier{rows: &fakeRows{err: errFault}}
-	if _, err := NewFiles().ListTrash(t.Context(), cut, "space", TrashCursor{}, 10, time.Time{}); err == nil {
+	if _, err := NewFiles().ListTrash(t.Context(), cut, "space", TrashCursor{}, 10, time.Time{}, nil); err == nil {
 		t.Fatal("a listing cut short reported success")
 	}
 }
@@ -96,7 +96,7 @@ func TestPurgingAnswersEveryRowItRemovedSoItsBytesCanFollow(t *testing.T) {
 	one := aTrashedFile("files/a.md", time.Hour)
 	other := aTrashedFile("files/b.md", 900*time.Hour)
 	all := &fakeQuerier{rows: rowsOf(one, other)}
-	purged, err := NewFiles().PurgeTrash(t.Context(), all, "space", "")
+	purged, err := NewFiles().PurgeTrash(t.Context(), all, "space", "", nil)
 	if err != nil || len(purged) != 2 {
 		t.Fatalf("PurgeTrash = %d rows, %v", len(purged), err)
 	}
@@ -107,15 +107,15 @@ func TestPurgingAnswersEveryRowItRemovedSoItsBytesCanFollow(t *testing.T) {
 		t.Fatalf("one path and the whole trash are not one statement:\n%s", all.statements[0])
 	}
 	broken := &fakeQuerier{queryErr: errFault}
-	if _, err := NewFiles().PurgeTrash(t.Context(), broken, "space", ""); err == nil {
+	if _, err := NewFiles().PurgeTrash(t.Context(), broken, "space", "", nil); err == nil {
 		t.Fatal("a failed purge reported success")
 	}
 	torn := &fakeQuerier{rows: &fakeRows{scans: []func(...any) error{failing(errFault).scan}}}
-	if _, err := NewFiles().PurgeTrash(t.Context(), torn, "space", ""); err == nil {
+	if _, err := NewFiles().PurgeTrash(t.Context(), torn, "space", "", nil); err == nil {
 		t.Fatal("a row that would not scan reported success")
 	}
 	cut := &fakeQuerier{rows: &fakeRows{err: errFault}}
-	if _, err := NewFiles().PurgeTrash(t.Context(), cut, "space", ""); !errors.Is(err, errFault) {
+	if _, err := NewFiles().PurgeTrash(t.Context(), cut, "space", "", nil); !errors.Is(err, errFault) {
 		t.Fatalf("a purge cut short answered %v", err)
 	}
 }

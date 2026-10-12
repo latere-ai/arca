@@ -18,7 +18,7 @@
 //
 //	conformance.Run(t, url, token, conformance.WithVocabulary(authorizer.Vocabulary()))
 //
-// Actions lists every action, twenty-three of them over seven kinds, each
+// Actions lists every action, fifteen of them over six kinds, each
 // one a constant here; Kind reports the kind an action acts on, and Known
 // whether a string is in the vocabulary at all. Nothing here dials: the
 // package builds values and decodes them, and the client is the caller's.
@@ -37,8 +37,9 @@
 //
 // The promise, as for every package at this module's root: additive within
 // a module major, and the same on every build. An action string never
-// changes and never disappears, a resource kind stays the kind it is, and a
-// resource field keeps its wire name and its meaning. A new action is a new
+// changes, a resource kind stays the kind it is, and a resource field keeps
+// its wire name and its meaning. The module is at v0, where a minor release
+// may remove what the changelog names. A new action is a new
 // row in spec 006's table first and a constant here second, so an endpoint
 // that decides by the constants keeps compiling and an endpoint that decides
 // by a default keeps deciding.

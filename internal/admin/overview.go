@@ -41,10 +41,6 @@ type Space struct {
 	Bytes int64 `json:"bytes"`
 	// TrashedBytes is the part of that usage trash still holds.
 	TrashedBytes int64 `json:"trashed_bytes"`
-	// Workspaces is the live workspaces of the space.
-	Workspaces int64 `json:"workspaces"`
-	// Leases is the workspaces of the space a writer holds right now.
-	Leases int64 `json:"leases"`
 	// Links is the live token grants on the space.
 	Links int64 `json:"links"`
 	// LastWriteAt is when a path of the space last changed, null for a space
@@ -102,8 +98,7 @@ func owners(page []store.SpaceOverview) []string {
 func view(row store.SpaceOverview, links int64) Space {
 	s := Space{
 		Owner: row.Owner, Files: row.Files, Bytes: row.Bytes,
-		TrashedBytes: row.TrashedBytes, Workspaces: row.Workspaces,
-		Leases: row.Leases, Links: links,
+		TrashedBytes: row.TrashedBytes, Links: links,
 	}
 	if row.LastWriteAt != nil {
 		at := row.LastWriteAt.UTC()

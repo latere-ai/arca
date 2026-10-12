@@ -485,15 +485,21 @@ func TestNewRefusesAServiceThatCannotServe(t *testing.T) {
 	}
 }
 
-// TestAGrantMayCoverAWholePlaneAndNothingShallower: the owner of a space may
-// hand out a plane, and there is nothing above one, because a path in no
-// plane is a path this server does not serve.
-func TestAGrantMayCoverAWholePlaneAndNothingShallower(t *testing.T) {
+// TestAGrantMayCoverTheWholePlaneAndNothingShallower: the owner of a space
+// may hand out the plane, and there is nothing above it, because a path
+// outside the plane is a path this server does not serve.
+func TestAGrantMayCoverTheWholePlaneAndNothingShallower(t *testing.T) {
 	h := newHarness(t)
-	for _, prefix := range []string{"files", "files/", "workspaces"} {
+	for _, prefix := range []string{"files", "files/"} {
 		w := h.do(t, http.MethodPost, "/v1/shares", "alice", body(prefix, h.subject("carol"), "read"))
 		if w.Code != http.StatusCreated {
 			t.Errorf("a grant on %q = %d: %s", prefix, w.Code, w.Body)
+		}
+	}
+	for _, prefix := range []string{"repos", "repos/build", "memory/agent.json"} {
+		w := h.do(t, http.MethodPost, "/v1/shares", "alice", body(prefix, h.subject("carol"), "read"))
+		if got := refusalOf(t, w); got != api.CodeUnknownPlane {
+			t.Errorf("a grant on %q = %q, want %q", prefix, got, api.CodeUnknownPlane)
 		}
 	}
 	w := h.do(t, http.MethodPost, "/v1/shares", "alice",

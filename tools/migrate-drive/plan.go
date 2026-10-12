@@ -502,11 +502,12 @@ func copySpaceUsage(ctx context.Context, r *Run) error {
 // because a copy that writes ids explicitly leaves the sequence where a fresh
 // database left it and the first append would collide.
 //
-// The action is copied verbatim. Spec 019 calls Arca's vocabulary a superset
-// of Drive's; internal/events names eleven actions where Drive's constraint
-// named thirteen, so the two Drive kept that Arca does not are counted here
-// rather than rewritten, which is a decision for the maintainer and not for a
-// copy.
+// The action is copied verbatim. An action Drive kept that the vocabulary of
+// internal/events does not name is counted here rather than rewritten, which
+// is a decision for the maintainer and not for a copy. The vocabulary is the
+// one this build carries, so the count includes the three actions of the
+// second plane spec 028 removed after the cutover; rows already in a log
+// under them are history and stay as written.
 func copyEvents(ctx context.Context, r *Run) error {
 	known := map[string]bool{}
 	for _, a := range events.Actions() {

@@ -201,21 +201,21 @@ func TestTheOwnerPolicyTable(t *testing.T) {
 			allow: true,
 		},
 		{
-			name: "a grantee attaching to a workspace under a write grant", policy: policy(auth.PermissionWrite, "workspaces/build"),
-			subject: carol, action: authorizer.ActionWorkspaceAttach,
-			res:   authorizer.Workspace{ID: "01J8W1", Owner: alice, Slug: "build"}.Resource(),
+			name: "a grantee opening an upload under a write grant", policy: policy(auth.PermissionWrite, "files/reports"),
+			subject: carol, action: authorizer.ActionUploadWrite,
+			res:   authorizer.Upload{Owner: alice, Path: "files/reports/q3.pdf"}.Resource(),
 			allow: true,
 		},
 		{
-			name: "a grantee attaching to another workspace", policy: policy(auth.PermissionWrite, "workspaces/build"),
-			subject: carol, action: authorizer.ActionWorkspaceAttach,
-			res:    authorizer.Workspace{ID: "01J8W2", Owner: alice, Slug: "release"}.Resource(),
+			name: "a grantee opening an upload outside the grant", policy: policy(auth.PermissionWrite, "files/reports"),
+			subject: carol, action: authorizer.ActionUploadWrite,
+			res:    authorizer.Upload{Owner: alice, Path: "files/drafts/q3.pdf"}.Resource(),
 			reason: auth.ReasonNotGranted,
 		},
 		{
-			name: "a grantee deleting a workspace under a manage grant", policy: policy(auth.PermissionManage, "workspaces/build"),
-			subject: carol, action: authorizer.ActionWorkspaceDelete,
-			res:    authorizer.Workspace{ID: "01J8W1", Owner: alice, Slug: "build"}.Resource(),
+			name: "a grantee reading the log under a manage grant", policy: policy(auth.PermissionManage, "files"),
+			subject: carol, action: authorizer.ActionEventRead,
+			res:    authorizer.Event{Owner: alice}.Resource(),
 			reason: auth.ReasonNotGranted,
 		},
 		{
@@ -254,7 +254,7 @@ func TestTheOwnerPolicyTable(t *testing.T) {
 		{
 			name: "an action asked about the wrong kind", policy: policy(auth.PermissionNone, ""),
 			subject: alice, action: authorizer.ActionFileRead,
-			res:    authorizer.Workspace{ID: "01J8W1", Owner: alice, Slug: "build"}.Resource(),
+			res:    authorizer.Event{Owner: alice}.Resource(),
 			reason: auth.ReasonUnknownAction,
 		},
 	}
@@ -326,7 +326,7 @@ func admits(held, need auth.Permission) bool {
 	return order[held] >= order[need]
 }
 
-// TestTheLadderCoversTheWholeVocabulary: every one of the twenty-three is
+// TestTheLadderCoversTheWholeVocabulary: every one of the fifteen is
 // either reachable by a grant at a named rung or the owner's and an
 // administrator's, with nothing left undecided.
 func TestTheLadderCoversTheWholeVocabulary(t *testing.T) {
@@ -466,7 +466,7 @@ const (
 	writeRung  = "`write` adds"
 	manageRung = "`manage` adds"
 	ownerOnly  = "No grant reaches the remaining"
-	afterOwner = "Making a workspace"
+	afterOwner = "Reading a space's log"
 )
 
 // ladderOfSpec006 reads the owner policy's ladder out of the spec: the

@@ -179,20 +179,20 @@ func TestAReadOfAPathThatIsNotThereAndOfOneInTheTrashIsTheSameAnswer(t *testing.
 // twice and only one of the two is this package's.
 func TestAPathIsTheShapeSpec005Names(t *testing.T) {
 	for path, want := range map[string]string{
-		"":                     api.CodeInvalidPath,
-		"/files/plan.md":       api.CodeInvalidPath,
-		"files/plan.md/":       api.CodeInvalidPath,
-		"files//plan.md":       api.CodeInvalidPath,
-		"files/./plan.md":      api.CodeInvalidPath,
-		"files/../etc/passwd":  api.CodeInvalidPath,
-		"files/pl\x01an.md":    api.CodeInvalidPath,
-		"agents/plan.md":       api.CodeUnknownPlane,
-		"memory/state.json":    api.CodeUnknownPlane,
-		"plan.md":              api.CodeUnknownPlane,
-		"files":                api.CodeUnknownPlane,
-		"workspaces/build":     api.CodeInvalidPath,
-		"files/plan.md":        "",
-		"workspaces/build/a.c": "",
+		"":                    api.CodeInvalidPath,
+		"/files/plan.md":      api.CodeInvalidPath,
+		"files/plan.md/":      api.CodeInvalidPath,
+		"files//plan.md":      api.CodeInvalidPath,
+		"files/./plan.md":     api.CodeInvalidPath,
+		"files/../etc/passwd": api.CodeInvalidPath,
+		"files/pl\x01an.md":   api.CodeInvalidPath,
+		"agents/plan.md":      api.CodeUnknownPlane,
+		"memory/state.json":   api.CodeUnknownPlane,
+		"plan.md":             api.CodeUnknownPlane,
+		"files":               api.CodeUnknownPlane,
+		"repos/build/a.c":     api.CodeUnknownPlane,
+		"files/plan.md":       "",
+		"files/build/a.c":     "",
 	} {
 		plane, err := ValidatePath(path)
 		if want == "" {
@@ -214,9 +214,9 @@ func TestAPathIsTheShapeSpec005Names(t *testing.T) {
 func TestAPathThatIsNotOneIsRefusedBeforeTheBucketIsReached(t *testing.T) {
 	h := newHarness(t)
 	for path, want := range map[string]string{
-		"agents/plan.md":       api.CodeUnknownPlane,
-		"workspaces/build":     api.CodeInvalidPath,
-		"workspaces/build/a.c": api.CodeNotFound,
+		"agents/plan.md":  api.CodeUnknownPlane,
+		"files/build/":    api.CodeInvalidPath,
+		"files/build/a.c": api.CodeNotFound,
 	} {
 		if got := code(t, h.call(t, http.MethodGet, h.object(path), nil)); got != want {
 			t.Errorf("a read of %q is %q, want %q", path, got, want)

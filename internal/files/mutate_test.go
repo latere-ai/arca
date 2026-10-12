@@ -81,28 +81,33 @@ func TestAMoveOntoAnOccupiedPathIsAConflictAndChangesNothing(t *testing.T) {
 	}
 }
 
-func TestAMoveIsLimitedToTheFilesPlaneAndToOnePath(t *testing.T) {
+func TestAPostNamesOneOperationAndAPathInThePlane(t *testing.T) {
 	h := newHarness(t)
 	h.seed(t, "files/plan.md", "first")
-	h.write(t, "workspaces/build/main.go", "package main")
 
 	for body, want := range map[string]string{
-		`{"move_to":"workspaces/build/plan.md"}`:       api.CodeInvalidPath,
-		`{"move_to":"files/plan.md"}`:                  api.CodeInvalidField,
-		`{"move_to":"nowhere/plan.md"}`:                api.CodeUnknownPlane,
-		`{}`:                                           api.CodeMissingField,
-		`{"move_to":"files/a.md","restore_version":1}`: api.CodeExclusiveFields,
-		`{"restore_version":-1}`:                       api.CodeInvalidField,
-		`{"zone":"agents"}`:                            api.CodeUnknownField,
+		`{"move_to":"files/plan.md"}`:                     api.CodeInvalidField,
+		`{"move_to":"nowhere/plan.md"}`:                   api.CodeUnknownPlane,
+		`{"copy_to":"files/plan.md"}`:                     api.CodeInvalidField,
+		`{"copy_to":"nowhere/plan.md"}`:                   api.CodeUnknownPlane,
+		`{"copy_to":"files"}`:                             api.CodeUnknownPlane,
+		`{}`:                                              api.CodeMissingField,
+		`{"move_to":"files/a.md","restore_version":1}`:    api.CodeExclusiveFields,
+		`{"move_to":"files/a.md","copy_to":"files/b.md"}`: api.CodeExclusiveFields,
+		`{"copy_to":"files/a.md","restore_version":1}`:    api.CodeExclusiveFields,
+		`{"move_to":"files/a.md","recursive":true}`:       api.CodeInvalidField,
+		`{"restore_version":1,"recursive":true}`:          api.CodeInvalidField,
+		`{"recursive":true}`:                              api.CodeInvalidField,
+		`{"restore_version":-1}`:                          api.CodeInvalidField,
+		`{"zone":"agents"}`:                               api.CodeUnknownField,
 	} {
 		if got := code(t, h.post(t, "files/plan.md", body)); got != want {
 			t.Errorf("%s is %q, want %q", body, got, want)
 		}
 	}
-	// A path under workspaces/ belongs to the sync protocol, which reads a
-	// move as a delete and a create.
-	if got := code(t, h.post(t, "workspaces/build/main.go", `{"move_to":"workspaces/build/other.go"}`)); got != api.CodeInvalidPath {
-		t.Errorf("a move under the workspaces plane is %q", got)
+	// Nothing above was acted on: the object is where it was, alone.
+	if _, held := h.read(t, "files/plan.md"); !held || len(h.store.files) != 1 {
+		t.Errorf("a refused request changed the space: %d rows", len(h.store.files))
 	}
 }
 
@@ -175,8 +180,5 @@ func TestAVersionThatIsNotThereAndAVersionNumberThatIsNotOneAreRefused(t *testin
 	}
 	if got := code(t, h.call(t, http.MethodGet, h.object("files/plan.md")+"?versions=1&cursor=x", nil)); got != api.CodeInvalidField {
 		t.Error("a cursor that is not a version number was accepted")
-	}
-	if got := code(t, h.post(t, "workspaces/build/main.go", `{"restore_version":1}`)); got != api.CodeInvalidPath {
-		t.Error("a restore under the workspaces plane was accepted")
 	}
 }

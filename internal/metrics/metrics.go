@@ -15,7 +15,7 @@
 // exception is a vocabulary no set of values can be seeded at start-up: the
 // route of a request is the mux pattern and the op of a query is the
 // statement's name, and those series appear as they are recorded. No label
-// carries a path, an object name, a subject, a workspace slug, or a token.
+// carries a path, an object name, a subject, or a token.
 //
 // The registry itself is latere.ai/x/pkg/metrics; this is the list of names
 // over it and the recording surface above it.
@@ -85,14 +85,14 @@ var (
 // hostile client nor a new caller can grow the cardinality of a series.
 var (
 	statusClasses   = []string{"2xx", "3xx", "4xx", "5xx"}
-	bytesInKinds    = []string{"inline", "part", "sync"}
-	bytesOutKinds   = []string{"inline", "materialize"}
+	bytesInKinds    = []string{"inline", "part"}
+	bytesOutKinds   = []string{"inline"}
 	presignMethods  = []string{"get", "put"}
 	presignKinds    = []string{"download", "part"}
 	sessionOutcomes = []string{"created", "completed", "aborted", "expired"}
 	partOutcomes    = []string{"presigned", "completed", "missing"}
 	usageBands      = []string{"1g", "10g", "100g"}
-	planes          = []string{"files", "workspaces"}
+	planes          = []string{"files"}
 	runOutcomes     = []string{"ok", "error"}
 	findingActions  = []string{"found", "repaired", "deferred"}
 	bucketOps       = []string{
@@ -107,41 +107,36 @@ var (
 )
 
 // findingKinds is the closed vocabulary of arca_reaper_findings_total, one
-// member per thing the reconciler of spec 010 can find. The thirteenth,
-// lease_expired, joined the vocabulary when that spec's pass 3 reported a
-// finding for the lease it cleared: a pass whose findings no run reports is
-// a pass an operator cannot see run at all.
+// member per thing the reconciler of spec 010 can find.
 //
 // It is spelled here rather than imported from internal/reaper, so this
 // package registers the whole table without loading the packages that record
 // it; a test holds the two equal.
 var findingKinds = []string{
-	"orphan_object", "orphan_candidate", "missing_bytes", "workspace_purged",
-	"file_purged", "trash_purged", "share_expired", "event_pruned",
+	"orphan_object", "orphan_candidate", "missing_bytes",
+	"trash_purged", "share_expired", "event_pruned",
 	"star_pruned", "version_pruned", "upload_aborted", "usage_corrected",
-	"lease_expired",
 }
 
 // eventKinds is the closed vocabulary of arca_events_appended_total, the
 // action of one row of spec 010's log. Spelled here for the same reason, and
 // held equal to that package's table by a test.
 var eventKinds = []string{
-	"put", "move", "delete", "restore", "purge",
-	"attach", "release", "sync", "reap", "share_created", "share_revoked",
+	"put", "move", "copy", "delete", "restore", "purge",
+	"reap", "share_created", "share_revoked",
 }
 
 // errorCodes is the closed vocabulary of arca_requests_total's code: every
 // row of spec 013's error table, plus ok for a response that refused
 // nothing. A test holds it equal to that package's table.
 var errorCodes = append([]string{"ok"},
-	"attachment_gone", "authorizer_unavailable", "bad_request", "body_too_large",
+	"authorizer_unavailable", "bad_request", "body_too_large",
 	"exclusive_fields", "forbidden", "internal", "invalid_field", "invalid_path",
-	"length_required", "link_read_only", "manifest_incomplete", "missing_field",
+	"length_required", "link_read_only", "missing_field",
 	"not_acceptable", "not_found", "not_implemented", "object_too_large",
 	"path_taken", "precondition_failed", "quota_exceeded", "rate_limited",
-	"slug_taken", "storage_unavailable", "too_many_parts", "unauthenticated",
-	"unknown_field", "unknown_plane", "unsupported_media_type", "writer_held",
-	"lease_not_held",
+	"storage_unavailable", "too_many_objects", "too_many_parts", "unauthenticated",
+	"unknown_field", "unknown_plane", "unsupported_media_type",
 )
 
 // table is spec 018's metric table, in that table's order.
@@ -175,8 +170,6 @@ var table = []Metric{
 		Buckets: reaperBuckets},
 	{Name: "arca_reaper_findings_total", Kind: Counter, Help: "what the reconciler found, by kind and what it did about it",
 		Labels: []Label{{Name: "kind", Values: findingKinds}, {Name: "action", Values: findingActions}}},
-	{Name: "arca_lease_expiries_total", Kind: Counter, Help: "writer leases ended because their deadline passed"},
-	{Name: "arca_leases_held", Kind: Gauge, Help: "writer leases held right now"},
 	{Name: "arca_events_appended_total", Kind: Counter, Help: "rows appended to the event log, by action",
 		Labels: []Label{{Name: "kind", Values: eventKinds}}},
 	{Name: "arca_bucket_ops_total", Kind: Counter, Help: "bucket calls by operation and result",

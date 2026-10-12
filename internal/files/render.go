@@ -89,8 +89,8 @@ type Space struct {
 // subtree, with every path relative to the root.
 type Manifest struct {
 	Root string `json:"root"`
-	// PinnedAt is null here. This route pins nothing; the leased form of
-	// spec 009 is the one that does.
+	// PinnedAt is always null: this route pins nothing. The member stays on
+	// the wire so a client that reads it keeps working (spec 013).
 	PinnedAt *string        `json:"pinned_at"`
 	Files    []ManifestFile `json:"files"`
 }

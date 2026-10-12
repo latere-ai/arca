@@ -13,18 +13,31 @@ import (
 	"latere.ai/x/arca/object"
 )
 
-// remove answers DELETE on an object: one version with ?version=, the whole
-// object otherwise.
+// remove answers DELETE on a path: one version with ?version=, a folder
+// with ?recursive=1, the whole object otherwise.
 //
-// Under files/ a delete is soft: the row leaves every listing, read, share
-// and link, and the bytes stay, restorable for ARCA_TRASH_RETENTION. Under
-// workspaces/ it is hard, because the sync protocol of spec 009 owns those
-// trees and a soft row would come back as a phantom file at the next
-// materialize. ?permanent=1 is hard anywhere.
+// A delete is soft: the row leaves every listing, read, share and link, and
+// the bytes stay, restorable for ARCA_TRASH_RETENTION. It is permanent when
+// the request says ?permanent=1 or the answer that admitted it carries
+// limits.trash: false (spec 028). The two narrow and never widen: no answer
+// makes a delete soft that asked to be permanent.
 func (s *Service) remove(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	if r.URL.Query().Has("version") {
+	recursive, err := flag(r, "recursive")
+	if err != nil {
+		api.WriteError(w, r, err)
+		return
+	}
+	switch versioned := r.URL.Query().Has("version"); {
+	case recursive && versioned:
+		api.WriteError(w, r, api.Refuse(api.CodeExclusiveFields,
+			"recursive names a folder and version names one content of one path").About("recursive", "version"))
+		return
+	case versioned:
 		s.removeVersion(w, r)
+		return
+	case recursive:
+		s.removeFolder(w, r)
 		return
 	}
 	t, err := s.Target(ctx, r.PathValue("owner"), r.PathValue("path"))
@@ -42,15 +55,21 @@ func (s *Service) remove(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, r, err)
 		return
 	}
-	if _, err := s.Ask(ctx, t.Owner, authorizer.ActionFileDelete, authorizer.File{
+	d, err := s.Ask(ctx, t.Owner, authorizer.ActionFileDelete, authorizer.File{
 		ID: row.ID, Owner: t.Owner, Path: t.Path, Plane: string(t.Plane),
 		Size: authorizer.Bytes(row.SizeBytes),
-	}.Resource()); err != nil {
+	}.Resource())
+	if err != nil {
 		api.WriteError(w, r, s.Refused(err, "there is no object at %q", t.Path))
 		return
 	}
+	limits, err := LimitsOf(d)
+	if err != nil {
+		api.WriteError(w, r, fault(ctx, "read the answer's limits", err))
+		return
+	}
 
-	if t.Plane == object.PlaneFiles && !permanent {
+	if !permanent && !limits.NoTrash {
 		if err := s.trash(ctx, t); err != nil {
 			api.WriteError(w, r, err)
 			return

@@ -182,22 +182,32 @@ func TestARouteThatIsDeniedDoesNotAct(t *testing.T) {
 // differs from its row is a question the document and the server disagree
 // about.
 //
-// It reads the merged registry, so a contributed row is held to the spec the
-// same way a frame row is. How far this build is from the whole surface is
-// not a question this package can answer — the packages that contribute rows
-// import it and it imports none of them — so the count of the build is
-// tools/apidoc's, where the one union of every declaration lives.
+// It is the first half of criterion 2 of spec 028 too. The table is exactly
+// twenty-nine routes, and every route of the table and of the registry sits
+// under one of the prefixes spec 013 gives an owner, so a route under a
+// prefix a spec retired is neither written down nor registered.
 //
-// The converse, that every row of spec 013's table is registered, is
-// criterion 1 of that spec and closes when the last handler lands;
-// registered is a subset of the table until then.
+// It reads the merged registry, so a contributed row is held to the spec the
+// same way a frame row is. How many routes the whole build registers is not
+// a question this package can answer, because the packages that contribute
+// rows import it and it imports none of them. That count is tools/apidoc's,
+// where the one union of every declaration lives and is held equal to the
+// table in both directions.
 func TestEveryRegisteredRouteIsInSpec013sTable(t *testing.T) {
 	spec := routesOfSpec013(t)
-	if len(spec) < 41 {
-		t.Fatalf("spec 013's tables name %d routes, and the surface is forty-one plus the document", len(spec))
+	if len(spec) != surfaceRoutes {
+		t.Fatalf("spec 013's tables name %d routes, and the surface is %d plus the document", len(spec), surfaceRoutes)
+	}
+	for key := range spec {
+		if _, path, _ := strings.Cut(key, " "); !slices.Contains(prefixes, prefixOf(path)) {
+			t.Errorf("spec 013's table names %s, which is under no prefix the grammar gives an owner", key)
+		}
 	}
 	for _, r := range registry(t) {
 		key := r.method + " " + r.path
+		if !slices.Contains(prefixes, prefixOf(r.path)) {
+			t.Errorf("%s is registered under no prefix the grammar gives an owner", key)
+		}
 		action, ok := spec[key]
 		if !ok {
 			t.Errorf("%s is registered and spec 013's table does not name it", key)
@@ -207,6 +217,24 @@ func TestEveryRegisteredRouteIsInSpec013sTable(t *testing.T) {
 			t.Errorf("%s asks %q; spec 013's row says %q", key, r.action, action)
 		}
 	}
+}
+
+// surfaceRoutes is the size of spec 013's route table: twelve routes of
+// files, trash and stars, three of uploads, eleven of shares and links, one
+// of events and two of administration.
+const surfaceRoutes = 29
+
+// prefixes are the first segments under /v1 that the route tables of spec
+// 013 are written under, each owned by one spec (its second grammar rule).
+// They are written out so a route under any other one fails here before it
+// is served.
+var prefixes = []string{"files", "trash", "stars", "uploads", "shares", "events", "admin"}
+
+// prefixOf answers the first segment of a declared path under /v1.
+func prefixOf(path string) string {
+	rest := strings.TrimPrefix(path, "/v1/")
+	first, _, _ := strings.Cut(rest, "/")
+	return first
 }
 
 // TestTheDocumentDescribesEveryRegisteredRouteAndNoOther: the route table is

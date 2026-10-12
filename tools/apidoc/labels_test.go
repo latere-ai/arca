@@ -23,7 +23,7 @@ func TestOperationNavigationLabels(t *testing.T) {
 	if err := yaml.Unmarshal(Render(), &doc); err != nil {
 		t.Fatal(err)
 	}
-	verbs := strings.Fields("Write Read Get Move Delete List Restore Empty Star Unstar Create Revoke Rename Attach Renew Release Sync Start Complete Abort")
+	verbs := strings.Fields("Write Read Get Move Delete List Restore Empty Star Unstar Create Revoke Start Complete Abort")
 	for path, methods := range doc.Paths {
 		for method, op := range methods {
 			words := strings.Fields(op.Summary)
@@ -31,18 +31,20 @@ func TestOperationNavigationLabels(t *testing.T) {
 				t.Errorf("%s %s summary must contain one to four words: %q", method, path, op.Summary)
 				continue
 			}
-			if !slices.Contains(verbs, words[0]) {
+			// A label that lists what a route does separates the verbs with
+			// a comma, and the first one is still the action it begins with.
+			if !slices.Contains(verbs, strings.TrimSuffix(words[0], ",")) {
 				t.Errorf("%s %s summary must begin with an action: %q", method, path, op.Summary)
 			}
 		}
 	}
 	cases := []struct{ method, path, summary, detail string }{
 		{"PUT", "/v1/files/{owner}/{path}", "Write file", "Write one object; the body is the bytes."},
-		{"GET", "/v1/files/{owner}/{path}", "Read or list files", "Read one object, its subtree with ?list=1, which carries the space's usage at a plane root, or its versions with ?versions=1."},
+		{"GET", "/v1/files/{owner}/{path}", "Read or list files", "Read one object, its subtree with ?list=1, which carries the space's usage at the plane root, or its versions with ?versions=1."},
 		{"HEAD", "/v1/files/{owner}/{path}", "Get file headers", "The object's headers with no body."},
-		{"POST", "/v1/files/{owner}/{path}", "Move or restore file", "Move the object with move_to, or bring a version forward with restore_version."},
-		{"DELETE", "/v1/files/{owner}/{path}", "Delete file", "Trash the object; ?permanent=1 removes it and ?version=N prunes one version."},
-		{"GET", "/v1/files/materialize", "Get space manifest", "One space as a manifest of presigned URLs."},
+		{"POST", "/v1/files/{owner}/{path}", "Move, copy or restore", "Move the object with move_to, copy it with copy_to, copy a folder with copy_to and recursive, or bring a version forward with restore_version."},
+		{"DELETE", "/v1/files/{owner}/{path}", "Delete file or folder", "Trash the object; ?permanent=1 removes it, ?version=N prunes one version, and ?recursive=1 deletes every object under the folder."},
+		{"GET", "/v1/files/materialize", "Get space manifest", "A folder of one space, named with ?prefix=, as a manifest of presigned URLs."},
 		{"GET", "/v1/trash", "List trash", "What is trashed and still restorable, newest first."},
 		{"POST", "/v1/trash/restore", "Restore file", "Return one object to its path."},
 		{"DELETE", "/v1/trash", "Empty trash", "Empty the trash, or one path with ?path=."},
@@ -61,23 +63,11 @@ func TestOperationNavigationLabels(t *testing.T) {
 		{"POST", "/v1/shares/links", "Create link", "Mint a token grant on a subtree; the token is answered once."},
 		{"GET", "/v1/shares/links", "List links", "The token grants on a space."},
 		{"DELETE", "/v1/shares/links/{id}", "Revoke link", "Revoke a token grant."},
-		{"POST", "/v1/workspaces", "Create workspace", "Create a workspace in a space."},
-		{"GET", "/v1/workspaces", "List workspaces", "List the workspaces of a space."},
-		{"GET", "/v1/workspaces/deleted", "List deleted workspaces", "List the soft deleted workspaces of a space that are still restorable."},
-		{"GET", "/v1/workspaces/{id}", "Get workspace", "Read one workspace with its lease and the counters of its subtree."},
-		{"PATCH", "/v1/workspaces/{id}", "Rename workspace", "Rename a workspace, which moves its rows and no bucket key."},
-		{"DELETE", "/v1/workspaces/{id}", "Delete workspace", "Soft delete a workspace, leaving it restorable."},
-		{"POST", "/v1/workspaces/{id}/restore", "Restore workspace", "Undo a soft delete."},
-		{"POST", "/v1/workspaces/{id}/attach", "Attach workspace", "Open an attachment, taking the writer lease for a rw mount."},
-		{"POST", "/v1/workspaces/{id}/attach/{aid}/renew", "Renew attachment", "Push the attachment's deadline forward."},
-		{"DELETE", "/v1/workspaces/{id}/attach/{aid}", "Release attachment", "Release an attachment and the lease it held."},
-		{"GET", "/v1/workspaces/{id}/materialize", "Get workspace manifest", "The attachment's pinned manifest with a presigned read per file."},
-		{"POST", "/v1/workspaces/{id}/sync", "Sync workspace", "Declare the post-state manifest of the subtree; the server reconciles."},
 		{"POST", "/v1/uploads", "Start upload", "Open an upload session and answer its presigned part URLs."},
 		{"POST", "/v1/uploads/{id}/complete", "Complete upload", "Assemble the parts into the object at the session's path."},
 		{"DELETE", "/v1/uploads/{id}", "Abort upload", "Abort the session and discard its parts."},
 		{"GET", "/v1/admin/overview", "List space usage", "One row per space with its usage and its counts."},
-		{"POST", "/v1/admin/spaces/{owner}/restore", "Restore deleted item", "Restore one deleted object or workspace of a space."},
+		{"POST", "/v1/admin/spaces/{owner}/restore", "Restore deleted item", "Restore one trashed object of a space."},
 	}
 	for _, tc := range cases {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {

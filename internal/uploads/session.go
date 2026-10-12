@@ -73,9 +73,9 @@ func (s *Service) create(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, r, api.FromAuth(err))
 		return
 	}
-	limit, err := files.LimitOf(d)
+	limits, err := files.LimitsOf(d)
 	if err != nil {
-		api.WriteError(w, r, fault(ctx, "read the answer's limit", err))
+		api.WriteError(w, r, fault(ctx, "read the answer's limits", err))
 		return
 	}
 
@@ -98,7 +98,7 @@ func (s *Service) create(w http.ResponseWriter, r *http.Request) {
 		// The declared bytes count from the moment the session opens, so a
 		// caller cannot hold a thousand sessions open and fit them all under
 		// one limit (spec 010).
-		if _, err := s.content.Ledger().Charge(ctx, q, t.Owner, in.Size, limit); err != nil {
+		if _, err := s.content.Ledger().Charge(ctx, q, t.Owner, in.Size, limits.Quota); err != nil {
 			return s.charged(ctx, err)
 		}
 		written, err = s.sessions.Insert(ctx, q, store.Session{
@@ -164,26 +164,30 @@ func (s *Service) accepts(size int64) error {
 // session reads the session a request names and asks the one question every
 // route of this package asks. A session nobody may act on is a session that
 // is not there.
-func (s *Service) session(r *http.Request) (store.Session, files.Limit, error) {
+//
+// The limits it answers are the ones of this request's own answer. No
+// session row holds a limit, so a completion reads the allowance and
+// limits.versions off the question it asked itself (spec 028).
+func (s *Service) session(r *http.Request) (store.Session, files.Limits, error) {
 	ctx := r.Context()
 	held, err := s.sessions.Get(ctx, s.content.Querier(), r.PathValue("id"))
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
-		return store.Session{}, files.Limit{}, api.Refuse(api.CodeNotFound, "there is no upload with that id")
+		return store.Session{}, files.Limits{}, api.Refuse(api.CodeNotFound, "there is no upload with that id")
 	case err != nil:
-		return store.Session{}, files.Limit{}, fault(ctx, "read the upload", err)
+		return store.Session{}, files.Limits{}, fault(ctx, "read the upload", err)
 	}
 	d, err := s.content.Ask(ctx, held.Owner, authorizer.ActionUploadWrite, authorizer.Upload{
 		Owner: held.Owner, Path: held.Path, Size: authorizer.Bytes(held.DeclaredSize),
 	}.Resource())
 	if err != nil {
-		return store.Session{}, files.Limit{}, s.content.Refused(err, "there is no upload with that id")
+		return store.Session{}, files.Limits{}, s.content.Refused(err, "there is no upload with that id")
 	}
-	limit, err := files.LimitOf(d)
+	limits, err := files.LimitsOf(d)
 	if err != nil {
-		return store.Session{}, files.Limit{}, fault(ctx, "read the answer's limit", err)
+		return store.Session{}, files.Limits{}, fault(ctx, "read the answer's limits", err)
 	}
-	return held, limit, nil
+	return held, limits, nil
 }
 
 // close discards a session: the multipart first, and the row only once the

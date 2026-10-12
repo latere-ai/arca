@@ -44,7 +44,7 @@ import (
 // spec 010's pass table plus the two the predecessor's summary counted.
 type Kind string
 
-// The twelve kinds.
+// The ten kinds.
 const (
 	// KindOrphanObject is a key under the prefix that no row references
 	// (pass 1).
@@ -56,15 +56,6 @@ const (
 	// KindMissingBytes is a row whose key the bucket does not hold: invariant
 	// 2 broken, and the one finding a human always reads (pass 2).
 	KindMissingBytes Kind = "missing_bytes"
-	// KindWorkspacePurged is a soft deleted workspace past its window (pass
-	// 6). It is the one count that pass reports: a [Pass] answers one
-	// number, and how many rows the subtree held is in the purge event's
-	// detail instead.
-	KindWorkspacePurged Kind = "workspace_purged"
-	// KindFilePurged is a row removed with the subtree its workspace held
-	// (pass 6). It is in the vocabulary spec 018 labels with and is
-	// reported by no pass today, for the reason above.
-	KindFilePurged Kind = "file_purged"
 	// KindTrashPurged is a trashed object past its retention (pass 5).
 	KindTrashPurged Kind = "trash_purged"
 	// KindShareExpired is a grant removed for age (pass 7). An expired
@@ -84,23 +75,13 @@ const (
 	// holding its bytes (pass 10). A healthy installation reports none: a
 	// ledger that keeps needing one has a write path that forgot its delta.
 	KindUsageCorrected Kind = "usage_corrected"
-	// KindLeaseExpired is an attachment past its expiry, whose writer lease
-	// the pass cleared (pass 3). Spec 018's table absorbed it as the
-	// thirteenth member when that spec was built, and it stands beside that
-	// table's own counter of the expiry rather than duplicating it:
-	// arca_lease_expiries_total is the rate a platform alerts on, and this
-	// is the row of a run's table that says the pass ran. A pass whose
-	// findings no run reports is a pass an operator cannot see run at all.
-	KindLeaseExpired Kind = "lease_expired"
 )
 
-// kinds is the vocabulary in the order spec 018 lists it, the thirteenth
-// member above at the end.
+// kinds is the vocabulary in the order spec 018 lists it.
 var kinds = []Kind{
-	KindOrphanObject, KindOrphanCandidate, KindMissingBytes, KindWorkspacePurged,
-	KindFilePurged, KindTrashPurged, KindShareExpired, KindEventPruned,
+	KindOrphanObject, KindOrphanCandidate, KindMissingBytes,
+	KindTrashPurged, KindShareExpired, KindEventPruned,
 	KindStarPruned, KindVersionPruned, KindUploadAborted, KindUsageCorrected,
-	KindLeaseExpired,
 }
 
 // Kinds answers the closed vocabulary, in the order spec 018 lists it.
@@ -206,10 +187,9 @@ type Metrics interface {
 
 // Pass is a reconciliation pass over a table a later spec creates.
 //
-// Four of spec 010's ten passes read tables that are not in the schema yet:
-// the attachments of spec 009, the upload sessions of spec 007, the
-// workspaces of spec 009, and the grants of spec 008. Each arrives as an
-// implementation of this interface, built by the spec that creates its
+// Two of spec 010's eight passes read tables another package owns: the
+// upload sessions of spec 007 and the grants of spec 008. Each arrives as an
+// implementation of this interface, built by the package that owns its
 // table and given to the reconciler here; a pass the reconciler was not
 // given does not run and reports nothing.
 type Pass interface {
@@ -222,7 +202,7 @@ type Pass interface {
 	// has no counting half to run, and such a pass reports nothing on a dry
 	// run rather than a number it did not measure: under-reporting is a
 	// finding an operator does not see, and mutating in a dry run is a
-	// promise broken. The lease pass of spec 009 is the one such pass today.
+	// promise broken.
 	Sweep(ctx context.Context, q store.Querier, now time.Time, dry bool) (int, error)
 }
 
@@ -272,9 +252,9 @@ type Options struct {
 	Now func() time.Time
 	// Log is where the run's lines go. Nil is the default logger.
 	Log *slog.Logger
-	// Leases, Sessions, Tombstones and Grants are passes 3, 4, 6 and 7,
-	// whose tables specs 009, 007, 009 and 008 create. Nil does not run.
-	Leases, Sessions, Tombstones, Grants Pass
+	// Sessions and Grants are passes 4 and 7, whose tables specs 007 and
+	// 008 create. Nil does not run.
+	Sessions, Grants Pass
 }
 
 // Reconciler runs the passes.
@@ -321,7 +301,8 @@ func (r *Reconciler) Loop(ctx context.Context, interval time.Duration) {
 }
 
 // Run executes the passes once, in the order spec 010 numbers them, and
-// answers what they found.
+// answers what they found. The numbers are spec 010's and are not reused:
+// passes 3 and 6 were retired by spec 028, so eight run.
 //
 // Every pass runs. A pass that fails is collected and the run is reported as
 // a failure, because the passes are independent and a bucket that is down
@@ -334,21 +315,7 @@ func (r *Reconciler) Run(ctx context.Context) (Findings, error) {
 		errs    []error
 	)
 	q := r.opts.DB.Querier()
-	for _, p := range []struct {
-		name string
-		run  func(context.Context, store.Querier, *Findings, spaces) error
-	}{
-		{"orphan bytes", r.orphanBytes},
-		{"orphan rows", r.orphanRows},
-		{"expired leases", r.sweep(r.opts.Leases, KindLeaseExpired)},
-		{"expired uploads", r.sweep(r.opts.Sessions, KindUploadAborted)},
-		{"trash", r.purgeTrash},
-		{"tombstones", r.sweep(r.opts.Tombstones, KindWorkspacePurged)},
-		{"grant hygiene", r.sweep(r.opts.Grants, KindShareExpired)},
-		{"stale stars", r.pruneStars},
-		{"log retention", r.pruneLog},
-		{"ledger reconciliation", r.reconcileLedger},
-	} {
+	for _, p := range r.passes() {
 		if err := p.run(ctx, q, &f, changed); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", p.name, err))
 		}
@@ -366,6 +333,30 @@ func (r *Reconciler) Run(ctx context.Context) (Findings, error) {
 		r.opts.Log.InfoContext(ctx, "the reconciliation finished", attrs...)
 	}
 	return f, err
+}
+
+// pass is one row of spec 010's pass table: the number the spec gives it,
+// its name there, and what runs it.
+type pass struct {
+	number int
+	name   string
+	run    func(context.Context, store.Querier, *Findings, spaces) error
+}
+
+// passes is spec 010's pass table in its order. A test reads that table out
+// of the spec and holds this list to it, so a pass is added, retired or
+// renamed in both or in neither.
+func (r *Reconciler) passes() []pass {
+	return []pass{
+		{1, "orphan bytes", r.orphanBytes},
+		{2, "orphan rows", r.orphanRows},
+		{4, "expired uploads", r.sweep(r.opts.Sessions, KindUploadAborted)},
+		{5, "trash", r.purgeTrash},
+		{7, "grant hygiene", r.sweep(r.opts.Grants, KindShareExpired)},
+		{8, "stale stars", r.pruneStars},
+		{9, "log retention", r.pruneLog},
+		{10, "ledger reconciliation", r.reconcileLedger},
+	}
 }
 
 // record hands the run to spec 018's seam.
@@ -410,7 +401,7 @@ func (r *Reconciler) noteRuns(ctx context.Context, q store.Querier, changed spac
 	return nil
 }
 
-// sweep answers the pass runner for one of the four seams. A seam the
+// sweep answers the pass runner for one of the two seams. A seam the
 // reconciler was not given does not run and reports nothing.
 func (r *Reconciler) sweep(p Pass, kind Kind) func(context.Context, store.Querier, *Findings, spaces) error {
 	return func(ctx context.Context, q store.Querier, f *Findings, _ spaces) error {

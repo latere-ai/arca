@@ -61,10 +61,6 @@ type Set struct {
 	ReaperFindings  *pkgmetrics.Counter
 	EventsAppended  *pkgmetrics.Counter
 
-	// The writer lease (spec 009).
-	LeaseExpiries *pkgmetrics.Counter
-	LeasesHeld    *GaugeFamily
-
 	// The database (spec 004).
 	DBQuerySeconds *pkgmetrics.Histogram
 	DBConns        *GaugeFamily
@@ -122,9 +118,6 @@ func Register(reg *pkgmetrics.Registry) *Set {
 		ReaperDuration:  r.histogram("arca_reaper_duration_seconds"),
 		ReaperFindings:  r.counter("arca_reaper_findings_total"),
 		EventsAppended:  r.counter("arca_events_appended_total"),
-
-		LeaseExpiries: r.counter("arca_lease_expiries_total"),
-		LeasesHeld:    r.gauge("arca_leases_held"),
 
 		DBQuerySeconds: r.histogram("arca_db_query_seconds"),
 		DBConns:        r.gauge("arca_db_conns"),
@@ -200,8 +193,8 @@ func (s *Set) AuthorizerCall(_ string, seconds float64) {
 	s.AuthorizerSeconds.Observe(nil, seconds)
 }
 
-// In records bytes accepted into a space, by spec 018's vocabulary: inline,
-// part, or sync.
+// In records bytes accepted into a space, by spec 018's vocabulary: inline
+// or part.
 func (s *Set) In(kind string, n int64) {
 	if n <= 0 || !slices.Contains(bytesInKinds, kind) {
 		return
@@ -209,8 +202,8 @@ func (s *Set) In(kind string, n int64) {
 	s.BytesIn.Add(map[string]string{"kind": kind}, uint64(n))
 }
 
-// Out records bytes served out of a space: streamed inline, or handed out as
-// the presigned URLs of a materialize.
+// Out records bytes served out of a space, streamed inline. A manifest of
+// presigned URLs is counted as signed URLs and never as bytes out.
 func (s *Set) Out(kind string, n int64) {
 	if n <= 0 || !slices.Contains(bytesOutKinds, kind) {
 		return
@@ -224,13 +217,6 @@ func (s *Set) Presigned(method, kind string) {
 		return
 	}
 	s.PresignedURLs.Inc(map[string]string{"method": method, "kind": kind})
-}
-
-// LeaseExpired records n writer leases ended because their deadline passed.
-func (s *Set) LeaseExpired(n int) {
-	if n > 0 {
-		s.LeaseExpiries.Add(nil, uint64(n))
-	}
 }
 
 // EventAppended records one row appended to the log of spec 010.
