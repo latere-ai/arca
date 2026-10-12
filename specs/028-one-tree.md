@@ -1,6 +1,6 @@
 ---
-title: "One tree: a space is one tree of files and folders, workspaces are removed, a folder is deleted or copied in one call, and an answer's limits turn versions and the trash off"
-status: drafted
+title: "One tree: a space is one tree of files and folders, workspaces are removed, a folder is deleted or copied in one call, and an answer's limits turn versions and the trash off and leave subtrees out of an enumeration"
+status: complete
 track: core
 depends_on:
   - specs/001-architecture.md
@@ -13,7 +13,7 @@ depends_on:
   - specs/012-administration.md
   - specs/013-api.md
   - specs/017-conformance-suite.md
-affects: [object/, authorizer/, internal/files/, internal/workspaces/, internal/store/, internal/store/migrations/, internal/auth/, internal/api/, internal/events/, internal/reaper/, internal/admin/, internal/shares/, internal/uploads/, internal/metrics/, cmd/arcad/, api/openapi.yaml, test/conformance/, test/e2e/, docs/, README.md, specs/001-architecture.md, specs/004-metadata-store.md, specs/005-files.md, specs/006-identity.md, specs/008-shares-and-links.md, specs/010-events-and-reaper.md, specs/012-administration.md, specs/013-api.md, specs/017-conformance-suite.md, specs/018-observability.md]
+affects: [object/, authorizer/, internal/files/, internal/store/, internal/store/migrations/, internal/auth/, internal/api/, internal/events/, internal/reaper/, internal/admin/, internal/shares/, internal/uploads/, internal/metrics/, cmd/arcad/, api/openapi.yaml, test/conformance/, test/e2e/, docs/, README.md, specs/001-architecture.md, specs/004-metadata-store.md, specs/005-files.md, specs/006-identity.md, specs/008-shares-and-links.md, specs/010-events-and-reaper.md, specs/012-administration.md, specs/013-api.md, specs/017-conformance-suite.md, specs/018-observability.md]
 effort: large
 created: 2026-10-12
 updated: 2026-10-12
@@ -32,8 +32,10 @@ else in a space has rules of its own. This spec removes the second plane,
 `workspaces/`, with everything [[009-workspaces]] built for it, moves what
 that plane holds into ordinary folders, and adds what a tree needs and
 Arca lacks: deleting a folder in one call, copying a folder on the server,
-and two limits an authorizer's answer may carry so that a subtree an
-installation manages keeps no version history and no trash.
+two limits an authorizer's answer may carry so that a subtree an
+installation manages keeps no version history and no trash, and a third
+that leaves subtrees out of what a caller enumerates, so a space several
+subjects read can keep part of itself out of one reader's listings.
 
 ### Problem
 
@@ -58,6 +60,12 @@ Two operations are missing for a tree that people and programs manage. A
 folder is deleted one object at a time, so removing a tree for good takes
 as many calls as it has files and stops half way when one fails. A folder
 is copied by reading every byte out and writing it back.
+
+One answer is missing for a space several subjects read. An allow of a
+listing is all or nothing, and a listing is deep: it answers every object
+under its prefix. An authorizer can refuse a read inside a subtree and
+cannot keep that subtree's names, counts and sizes out of a listing
+above it.
 
 ### What an installation gets
 
@@ -165,41 +173,116 @@ works ([[006-identity]], [[010-events-and-reaper]]). Two members join it.
 
 | Member | Read on the answer to | Meaning |
 |---|---|---|
-| `limits.versions` | `file.write`, `upload.write` | `false`: the write this answer admits keeps no version of the content it replaces. The replaced object's bytes are dropped after the commit, when nothing else names them, and the space is charged the difference in size. Absent or `true`: versions as [[005-files]] keeps them |
+| `limits.versions` | `file.write`, `upload.write`, and `file.restore` where it brings a version forward | `false`: the write this answer admits keeps no version of the content it replaces. The replaced object's bytes are dropped after the commit, when nothing else names them, and the space is charged the difference in size. Absent or `true`: versions as [[005-files]] keeps them |
 | `limits.trash` | `file.delete` | `false`: the delete this answer admits is permanent, exactly as `?permanent=1` is: the row, its versions and their bytes. Absent or `true`: the trash of [[005-files]] |
+| `limits.omit` | a question that enumerates: `file.list`, `event.read`, `share.list`, `link.read` on a listing, and `file.delete` and `file.write` on a folder | a list of path prefixes of the space. The enumeration leaves out every path at or under one of them. Absent or empty: nothing is left out. The section below is its whole rule |
 
 ```json
 200 {"allow": true, "ttl": 300, "limits": {"versions": false}}
 200 {"allow": true, "ttl": 300, "limits": {"trash": false}}
+200 {"allow": true, "ttl": 60, "limits": {"omit": ["files/team/payroll", "files/agents/7c1e"]}}
 ```
 
-Rules of the two:
+Rules of the three:
 
 - They narrow and never widen. No value of `limits.trash` makes a delete
-  soft that asked for `?permanent=1`, and neither member is read on a
-  deny.
+  soft that asked for `?permanent=1`, no entry of `limits.omit` adds a
+  row to an enumeration, and no member is read on a deny.
 - Each is read where the limit of bytes is read, off the answer the
   handler was given, so an upload session's completing step reads the
   answer to its own `upload.write` and no session row holds a limit.
-- A member that is not a boolean does not decode, and the request is
-  refused with the `503` a `limits.quota_bytes` that does not decode is
-  refused with today. Nothing is written.
+- The object is read whole, in `internal/auth` `ReadLimits`. A member
+  that is not the type its row gives does not decode, and the request is
+  refused with the `503` `storage_unavailable` a `limits.quota_bytes`
+  that does not decode is refused with today. Nothing is written, and no
+  member of an answer Arca cannot read is applied.
 - Versions a path already has are untouched by a write under
   `limits.versions: false`. The limit is about the write, not the path.
 - A version brought forward under `limits.versions: false` becomes the
   current content and the content it replaces is dropped, not kept as a
   version.
 - The owner policy sends no limits, so an installation without an
-  authorizer keeps versions and the trash everywhere.
+  authorizer keeps versions and the trash everywhere and leaves nothing
+  out of an enumeration.
 - The two retention constants and `ARCA_TRASH_RETENTION` are unchanged.
   A numeric limit, such as a count of versions to keep, is not offered:
   the reaper's retention passes run without an answer, so they could not
   honor one.
 
-These two members are what the workspaces plane hard-coded by prefix.
-`internal/files` decides both from the plane today
+The first two members are what the workspaces plane hard-coded by
+prefix. `internal/files` decides both from the plane today
 (`out.Versioned = w.Plane == object.PlaneFiles && held`, and the soft
 arm of `remove`), and the change is to read the answer there.
+
+### Leaving subtrees out of an enumeration
+
+Added to this spec on 2026-10-12, before it was built. In a space
+several subjects may read, an authorizer answers an enumerating question
+with "allowed, but leave these subtrees out", and `limits.omit` is that
+answer.
+
+| Rule | Value |
+|---|---|
+| The member | `limits.omit`, a JSON array of strings, read on the answer to a question that enumerates. Absent, `null` or empty leaves nothing out |
+| An entry | a path prefix of the space, in the shape a path has: it begins with `files/` and names at least one segment under it, with no leading or trailing slash, no empty segment, no `.` or `..`, and no control character. `files` on its own is not an entry: an authorizer that leaves everything out denies the question |
+| What an entry covers | the path equal to it and every path under it, matched on whole segments. `files/team/pay` covers `files/team/pay` and `files/team/pay/may.pdf` and does not cover `files/team/payroll` |
+| An answer Arca cannot read | an `omit` that is not an array of strings, or an entry that is not in the shape above, is the authorizer's error and is no decision: `503` `storage_unavailable`, with nothing listed and nothing written. It is never ignored and never applied in part |
+| Where it is applied | in the query. A page is as full as the rows the caller may enumerate allow, a count counts only those rows, and a cursor is the position of a row the caller read |
+| What it does not shape | a question about one object or one folder. Each is its own question to the authorizer, which allows or refuses it, and Arca stores nothing from one answer to apply to the next |
+| Usage | a space's usage stays the whole space's: the `space` object of a root listing, each row of the overview of [[012-administration]], and what a write is charged against `limits.quota_bytes`. It is the counter the space is charged against, so it is not narrowed |
+| The owner policy | sends no `omit` |
+
+One example. The answer to `file.list` for `files/team` carries
+`"omit": ["files/team/payroll"]`. The listing of `files/team` then holds
+no entry under `files/team/payroll` and does not synthesize that folder.
+`GET /v1/files/{owner}/files/team/payroll/may.pdf` is not that question:
+it asks `file.read` for that path, and the caller reads the object or is
+refused by that answer alone. `GET
+/v1/files/{owner}/files/team/payroll?list=1` asks `file.list` for that
+folder, and its page is shaped by what that answer's own `limits.omit`
+holds and by nothing an earlier answer said.
+
+**The audit.** Every route of [[013-api]] that returns the path, the
+name, a count or the bytes of anything other than the one object asked
+for honors the member:
+
+| Route | Answer it is read on | What an entry leaves out |
+|---|---|---|
+| `GET /v1/files/{owner}/{path...}?list=1` | `file.list` | every entry it covers, and a folder in `prefixes` that holds nothing else. The listing is deep, one page of every object under the prefix, so one rule serves the listing of a folder and of every folder above it |
+| `GET /v1/files/materialize` | `file.list` | the files of the manifest it covers |
+| `GET /v1/trash` | `file.list` | the trashed entries it covers |
+| `DELETE /v1/trash` without `path` | `file.delete` | the trashed entries it covers stay in the trash and out of `purged` |
+| `GET /v1/stars` | `file.list` | the stars it covers. The page crosses spaces (below) |
+| `DELETE /v1/files/{owner}/{path...}?recursive=1` | `file.delete` | the objects it covers are neither trashed nor removed, with their versions. A grant or a link at, under or above an omitted subtree of the folder stays. The event's counts leave them out |
+| `POST /v1/files/{owner}/{path...}` with `copy_to` and `recursive` | `file.write` | an object is not copied when an entry covers its source path or its destination path, and `files` and `bytes` leave it out |
+| `GET /v1/events` | `event.read` | an event whose `path`, or whose `detail.from`, it covers. Both ends of a move and of a copy are read. `next_cursor` is the id of a row the caller read, so the next page passes over every omitted row after it |
+| `GET /v1/shares` | `share.list` | a grant whose `path_prefix` it covers. A grant on a prefix above an omitted subtree is listed |
+| `GET /v1/shares/with-me` | `share.list` | the same. The page crosses spaces (below) |
+| `GET /v1/shares/links` | `link.read` | a link whose `path_prefix` it covers |
+| `GET /v1/shares/links/{token}` | `link.read` | the entries of the link's listing it covers |
+
+Not shaped, each for the reason beside it:
+
+| Route | Why |
+|---|---|
+| `GET` and `HEAD` on a path, `?version=N`, `?versions=1` | one object. The version listing names one path and cannot span two |
+| `PUT` on a path, `POST` with `move_to`, `restore_version`, or `copy_to` without `recursive` | one object, named by the request |
+| `DELETE` of one path, `?version=N`, `DELETE /v1/trash?path=`, `POST /v1/trash/restore`, `PUT` and `DELETE /v1/stars` | one object, named by the request |
+| `POST /v1/uploads`, its complete and its abort | one session. No route lists sessions |
+| `POST /v1/shares`, `GET` and `DELETE /v1/shares/{id}`, `POST /v1/shares/links`, `DELETE /v1/shares/links/{id}` | one grant or one link |
+| `GET /v1/shares/links/{token}/meta`, `GET /v1/shares/links/{token}/files/{path...}` | the link itself, and one object under it |
+| `GET /v1/admin/overview` | usage per space, which stays the whole space's |
+| `POST /v1/admin/spaces/{owner}/restore` | one id |
+| the two document routes | no space |
+
+There is no search route.
+
+**Two pages cross spaces.** `GET /v1/stars` and `GET /v1/shares/with-me`
+ask one question that names the caller, and their rows are in every
+space the answer's `filter` admits. One answer carries one list, so an
+entry leaves out the matching path in every space on the page. An
+authorizer that has to tell two spaces apart on these two pages narrows
+by `filter.owners`. An entry scoped to one space is not offered.
 
 ### Deleting a folder
 
@@ -218,12 +301,13 @@ named `files/notes`.
 | The question | one `file.delete`, with `owner`, `path`, `plane` and `recursive: true` on the resource, and no `id` and no `size` |
 | The path | a folder inside the plane. The plane root itself is `invalid_path`: emptying a space is not a folder operation |
 | Soft | without `permanent=1`, and without `limits.trash: false` on the answer, every live object under the folder is trashed in one statement. Each is in the trash by itself and is restored one at a time |
+| Left out | a subtree the answer's `limits.omit` names is not touched in either form: its objects, their versions, and the grants and links at, under or above it inside the folder stay, and the event's counts leave it out. The call is still `204` |
 | Permanent | with `permanent=1`, or with `limits.trash: false` on the answer: every row under the folder goes, live and trashed, with the versions of each, in one transaction that also gives the bytes back to the space's usage. A grant or a public link whose prefix is the folder or under it is deleted in the same transaction, for the reason a move carries an exact-path grant: the next object written there must not inherit it |
 | The bytes | after the commit, in batches of one thousand keys, each id through the reference check of [[004-metadata-store]] first. A request that ends before the last batch leaves the rest for the reaper's first pass (invariant 1) |
 | Nothing under the folder | `204`. A folder with nothing in it and a folder that never existed are the same thing, so the call is idempotent |
 | With `version=` | `exclusive_fields` |
 | The answer | `204`, no body |
-| The event | one `delete` at the folder's path, detail `{"recursive": true, "files": <n>, "bytes": <b>, "trashed": <bool>}` |
+| The event | one `delete` at the folder's path, detail `{"recursive": true, "files": <n>, "bytes": <b>, "trashed": <bool>}`. `files` is the rows of `files` the call took; `bytes` is their sizes when trashed, and what the space's usage gave back, versions included, when removed. A call that found nothing under the folder appends nothing |
 | Open upload sessions under the folder | left alone. One that completes later writes its object by the answer it gets then |
 
 There is no bound on how many objects one call removes. The rows go in
@@ -264,11 +348,12 @@ sequenceDiagram
 
 | Rule | Value |
 |---|---|
-| The question | one `file.write`, with the destination as `path`, the source as `from`, `copy: true`, `recursive: true` on a folder, and `size` the sum of the bytes to be written |
+| The question | one `file.write`, with the destination as `path`, the source as `from`, `copy: true`, `recursive: true` on a folder, and `size` the sum of the bytes to be written, counted before the answer and so before any omission. It carries no `id` |
 | The space | the same space at both ends, as a move |
 | The destination | not the source and not inside it. Every destination path must be free: one live object at any of them is `409` `path_taken` and nothing is copied |
 | What is copied | the live content of each object: the bytes, the content type, the size. A `sha256` checksum is carried, since the bytes are the same; an `etag` checksum is the one the store answers for the copy |
 | What is not | versions, trashed objects, stars, grants, links, and publicity: a copy is private, and `created_by` is the caller |
+| Left out | an object whose source path or whose destination path the answer's `limits.omit` covers is not copied, and `files` and `bytes` leave it out. A folder all of whose objects are left out is `404` `not_found`, as a folder with nothing under it is |
 | Order | the bucket first and the rows second (invariant 1). Every destination row is written by the one write of [[005-files]] with the create-only precondition, all in one transaction, so a caller sees every object of the copy or none |
 | Usage | the sum is charged in that transaction against the answer's `limits.quota_bytes`. A refused charge is `413` `quota_exceeded`, and the handler deletes the keys it wrote |
 | A source that changes while the copy runs | `412` `precondition_failed` and nothing is written. The caller retries |
@@ -313,9 +398,9 @@ Made in the change that builds this, dated, because
 | [[001-architecture]] | one plane; invariant 7 and criterion 17 retired; the route count |
 | [[004-metadata-store]] | the ownership table gains `0006_one_tree.up.sql`; the two tables leave the schema block |
 | [[005-files]] | the target rule, the delete and version rules read from the answer, the folder delete and the copy, moves on every path |
-| [[006-identity]] | the vocabulary table at fifteen actions over six kinds; `recursive` and `copy` on `File`; the two limits; the ladder and the list no grant reaches; the rule for `grant` with `from` |
+| [[006-identity]] | the vocabulary table at fifteen actions over six kinds; `recursive` and `copy` on `File`; the three limits; the ladder and the list no grant reaches; the rule for `grant` with `from` |
 | [[008-shares-and-links]] | a grant's prefix is a path under `files/` |
-| [[010-events-and-reaper]] | the event table; passes 3 and 6 retired, their numbers kept unused |
+| [[010-events-and-reaper]] | the event table; passes 3 and 6 retired, their numbers kept unused; the tail under `limits.omit` |
 | [[012-administration]] | the overview's row and the restore across spaces without workspaces |
 | [[013-api]] | the workspace table removed, `?recursive=` and `copy_to` on the file rows, the error table |
 | [[017-conformance-suite]] | the group of spec 009 removed, the cases below added |
@@ -333,7 +418,7 @@ taken in one release with no window in which both shapes answer.
 |---|---|
 | A client of `/v1/workspaces` | every route is gone: `401` without a token and `404` `not_found` with one, as any path under the base that no row registers |
 | A client that reads or writes `workspaces/<slug>/...` through the file routes | `400` `unknown_plane`. The objects are at `files/workspaces/<slug>/...`, and the space's log says so in one `move` event per workspace |
-| An authorizer endpoint | it is never asked a `workspace.*` action again and needs no change to keep answering. `plane` is always `files`. It may start reading `recursive` and `copy`, and may start sending the two limits |
+| An authorizer endpoint | it is never asked a `workspace.*` action again and needs no change to keep answering. `plane` is always `files`. It may start reading `recursive` and `copy`, and may start sending the three limits |
 | A Go importer of `authorizer` or `object` | `KindWorkspace`, the eight `ActionWorkspace*` constants, the `Workspace` resource and `PlaneWorkspaces` no longer compile. The module is at v0, so the release moves the minor version and the changelog names the break |
 | A key or a grant list that names a `workspace.*` action | the entry matches nothing. Arca does not rewrite it |
 | A consumer tailing the log | `attach`, `release` and `sync` are no longer appended; rows already written stay until log retention removes them. `copy` is new, and a `delete` may carry `recursive` |
@@ -351,40 +436,43 @@ taken in one release with no window in which both shapes answer.
   authorizer's.
 - A Go client package. Open question 6 says where one would live.
 - A numeric limit on versions or on trash retention per answer.
-- An answer member that leaves named prefixes out of a listing. A
-  listing answers every object under its prefix, so an authorizer can
-  refuse a read inside a subtree and cannot yet keep the subtree's names
-  out of a listing above it.
+- An entry of `limits.omit` scoped to one space on the two pages that
+  cross spaces, and a shallow listing: a listing stays deep.
 - Copying between two spaces.
 
 ## Acceptance criteria
 
 | # | Criterion | Proved by | State |
 |---|---|---|---|
-| 1 | A path whose first segment is not `files` is `unknown_plane`, and `object.Plane` has one valid value | `object` `TestThePlaneIsFiles`; `internal/files` `TestAPathOutsideFilesIsInNoPlane` | not built |
-| 2 | No route under `/v1/workspaces` is registered or described, the surface is twenty-nine routes, and the document and the mux are one list | `internal/api` `TestEveryRegisteredRouteIsInSpec013sTable`, `TestTheDocumentDescribesEveryRegisteredRouteAndNoOther` | not built |
-| 3 | The vocabulary is fifteen actions over six kinds and equals [[006-identity]]'s table; the ladder and the list no grant reaches cover it whole | `authorizer` `TestVocabularyMatchesSpec006`; `internal/auth` `TestTheLadderCoversTheWholeVocabulary` | not built |
-| 4 | The migration moves every object of a live workspace to `files/workspaces/<slug>/` with its object id, its size and the space's usage unchanged, and makes no bucket call | `internal/store` `TestStoreOneTreeMovesAWorkspaceIntoFiles` | not built |
-| 5 | A destination the space already holds picks the next free folder, and no existing row changes | `TestStoreOneTreeNeverOverwritesAPath` | not built |
-| 6 | A soft deleted workspace's objects are in the trash at the workspace's deletion time, restorable, and purged by the trash pass at the same moment the tombstone pass would have purged them | `TestStoreOneTreeTrashesADeletedWorkspace` | not built |
-| 7 | A star, a grant, a public link and an open upload session on a workspace path resolve to the same object after the migration | `TestStoreOneTreeCarriesWhatKeysOnThePath` | not built |
-| 8 | The migration appends one `move` event per workspace, drops both tables, and a fault in the middle leaves the database as it was | `TestStoreOneTreeIsAllOrNothing` | not built |
-| 9 | An overwrite whose answer carries `limits.versions: false` keeps no version, drops the replaced bytes and charges the difference; with the member absent or `true` it keeps one | `internal/files` `TestAWriteKeepsNoVersionWhenTheAnswerSaysSo` | not built |
-| 10 | A delete whose answer carries `limits.trash: false` removes the row, its versions and their bytes; with the member absent or `true` it trashes | `TestADeleteIsPermanentWhenTheAnswerSaysSo` | not built |
-| 11 | An upload session's completing step reads `limits.versions` off its own answer, and no table holds either limit | `internal/uploads` `TestACompletionReadsTheLimitOfItsOwnAnswer`; `internal/store` `TestNoColumnHoldsALimit` | not built |
-| 12 | A limit member that is not a boolean is refused with a `503`, as a byte limit that does not decode is, and nothing is written | `internal/files` `TestALimitThatDoesNotDecodeIsNoDecision` | not built |
-| 13 | A soft folder delete trashes every live object under the folder and nothing beside it: not the object at the folder's own path, not a sibling whose name starts with it | `TestAFolderDeleteTrashesTheSubtreeAndNothingElse` | not built |
-| 14 | A permanent folder delete removes live and trashed rows, their versions, the grants and links under the folder and the bytes, gives the usage back, and makes one bucket call per thousand keys | `TestAPermanentFolderDeleteLeavesNothing` with `blob.Counting`; `internal/store` `TestStoreAPermanentFolderDeleteLeavesBothStoresEmpty` | not built |
-| 15 | A folder delete of nothing is `204`, twice in a row, and the plane root is `invalid_path` | `TestAFolderDeleteIsIdempotent` | not built |
-| 16 | A folder delete asks one `file.delete` carrying `recursive: true`, and appends one `delete` event with the counts | `TestAFolderDeleteAsksOnceAndRecordsOnce` | not built |
-| 17 | A folder copy writes every object under the destination with a new object id and the same bytes, and no object body is read or written by the server | `TestAFolderCopyMovesNoByteThroughTheServer` with `blob.Counting`; `internal/store` `TestStoreAFolderCopyIsReadableAtBothEnds` against MinIO | not built |
-| 18 | A copy onto a path a live object holds is `path_taken`, a copy past the answer's `limits.quota_bytes` is `quota_exceeded`, and each leaves no row and no key | `TestACopyThatIsRefusedWritesNothing` | not built |
-| 19 | A copy asks one `file.write` carrying `path`, `from`, `copy: true`, `size`, and `recursive: true` on a folder; a folder past `MaxCopyObjects` is `too_many_objects` before any bucket call | `TestACopyAsksOnceWithBothEnds`, `TestACopyIsBounded` | not built |
-| 20 | A copy carries no version, star, grant, link or publicity, and the copy of a public object is private | `TestACopyIsPrivateAndBare` | not built |
-| 21 | On a question with `from`, a caller whose grant covers only one of the two paths is refused, under the owner policy and with an authorizer that admits by `grant` | `internal/auth` `TestAGrantMustCoverBothEnds`; `test/conformance` `case028BothEnds` | not built |
-| 22 | The event table is nine actions, no handler appends `attach`, `release` or `sync`, and the reaper runs eight passes | `internal/events` `TestEveryAppendedActionIsInTheTable`; `internal/reaper` `TestThePassesAreTheTableOfSpec010` | not built |
-| 23 | The portable suite drives the folder delete, the copy and the two limits against a running installation, and holds no case of spec 009 | `test/conformance` `case028FolderDelete`, `case028FolderCopy`, `case028Limits` | not built |
-| 24 | No file of the tree outside `specs/`, the changelog and the migrations names a workspace | a grep test in `internal/api`, `TestNothingNamesAWorkspace` | not built |
+| 1 | A path whose first segment is not `files` is `unknown_plane`, and `object.Plane` has one valid value | `object` `TestThePlaneIsFiles`; `internal/files` `TestAPathOutsideFilesIsInNoPlane` | built |
+| 2 | No route under `/v1/workspaces` is registered or described, the surface is twenty-nine routes, and the document and the mux are one list | `internal/api` `TestEveryRegisteredRouteIsInSpec013sTable`, `TestTheDocumentDescribesEveryRegisteredRouteAndNoOther`; `test/conformance` `case028NoSecondPlane` | built |
+| 3 | The vocabulary is fifteen actions over six kinds and equals [[006-identity]]'s table; the ladder and the list no grant reaches cover it whole | `authorizer` `TestVocabularyMatchesSpec006`; `internal/auth` `TestTheLadderCoversTheWholeVocabulary`, `TestTheLadderMatchesSpec006` | built |
+| 4 | The migration moves every object of a live workspace to `files/workspaces/<slug>/` with its object id, its size and the space's usage unchanged, and makes no bucket call | `internal/store` `TestStoreOneTreeMovesAWorkspaceIntoFiles`, which holds every row's id, object id, checksum, size and times and the ledger equal across the migration; the migration is SQL inside the database and reaches no bucket | built |
+| 5 | A destination the space already holds picks the next free folder, and no existing row changes | `TestStoreOneTreeNeverOverwritesAPath` | built |
+| 6 | A soft deleted workspace's objects are in the trash at the workspace's deletion time, restorable, and purged by the trash pass at the same moment the tombstone pass would have purged them | `TestStoreOneTreeTrashesADeletedWorkspace` | built |
+| 7 | A star, a grant, a public link and an open upload session on a workspace path resolve to the same object after the migration | `TestStoreOneTreeCarriesWhatKeysOnThePath`, `TestStoreOneTreeNarrowsAGrantItCannotCarry` | built |
+| 8 | The migration appends one `move` event per workspace, drops both tables, and a fault in the middle leaves the database as it was | `TestStoreOneTreeIsAllOrNothing`, `TestStoreOneTreeMovesAWorkspaceIntoFiles` | built |
+| 9 | An overwrite whose answer carries `limits.versions: false` keeps no version, drops the replaced bytes and charges the difference; with the member absent or `true` it keeps one | `internal/files` `TestAWriteKeepsNoVersionWhenTheAnswerSaysSo`, `TestAVersionBroughtForwardKeepsNoVersionWhenTheAnswerSaysSo`; `test/conformance` `case028Limits` | built |
+| 10 | A delete whose answer carries `limits.trash: false` removes the row, its versions and their bytes; with the member absent or `true` it trashes | `TestADeleteIsPermanentWhenTheAnswerSaysSo`; `case028Limits` | built |
+| 11 | An upload session's completing step reads `limits.versions` off its own answer, and no table holds either limit | `internal/uploads` `TestACompletionReadsTheLimitOfItsOwnAnswer`; `internal/store` `TestNoColumnHoldsALimit` | built |
+| 12 | A limit member that is not a boolean is refused with a `503`, as a byte limit that does not decode is, and nothing is written | `internal/files` `TestALimitThatDoesNotDecodeIsNoDecision`; `internal/auth` `TestALimitThatIsNotItsTypeIsAnError` | built |
+| 13 | A soft folder delete trashes every live object under the folder and nothing beside it: not the object at the folder's own path, not a sibling whose name starts with it | `TestAFolderDeleteTrashesTheSubtreeAndNothingElse`; `case028FolderDelete` | built |
+| 14 | A permanent folder delete removes live and trashed rows, their versions, the grants and links under the folder and the bytes, gives the usage back, and makes one bucket call per thousand keys | `TestAPermanentFolderDeleteLeavesNothing` with `blob.Counting`; `internal/files` `TestStoreAPermanentFolderDeleteLeavesBothStoresEmpty` against MinIO; `internal/store` `TestStoreDroppingASubtreeTakesTheTrashAndTheHistoryWithIt`; `test/e2e` `TestE2EAFolderDeleteTrashesWithoutChargingAndAPermanentOneGivesTheBytesBack` | built |
+| 15 | A folder delete of nothing is `204`, twice in a row, and the plane root is `invalid_path` | `TestAFolderDeleteIsIdempotent` | built |
+| 16 | A folder delete asks one `file.delete` carrying `recursive: true`, and appends one `delete` event with the counts | `TestAFolderDeleteAsksOnceAndRecordsOnce` | built |
+| 17 | A folder copy writes every object under the destination with a new object id and the same bytes, and no object body is read or written by the server | `TestAFolderCopyMovesNoByteThroughTheServer` with `blob.Counting`; `internal/files` `TestStoreAFolderCopyIsReadableAtBothEnds` against MinIO; `test/e2e` `TestE2EAFolderIsCopiedInsideTheBucketAndReadAtBothEnds` | built |
+| 18 | A copy onto a path a live object holds is `path_taken`, a copy past the answer's `limits.quota_bytes` is `quota_exceeded`, and each leaves no row and no key | `TestACopyThatIsRefusedWritesNothing`, `TestASourceThatChangesWhileItIsCopiedRefusesTheCopy` | built |
+| 19 | A copy asks one `file.write` carrying `path`, `from`, `copy: true`, `size`, and `recursive: true` on a folder; a folder past `MaxCopyObjects` is `too_many_objects` before any bucket call | `TestACopyAsksOnceWithBothEnds`, `TestACopyIsBounded` | built |
+| 20 | A copy carries no version, star, grant, link or publicity, and the copy of a public object is private | `TestACopyIsPrivateAndBare` | built |
+| 21 | On a question with `from`, a caller whose grant covers only one of the two paths is refused, under the owner policy and with an authorizer that admits by `grant` | `internal/auth` `TestAGrantMustCoverBothEnds`; `internal/files` `TestAMoveNeedsAGrantOnBothEnds`, `TestACopyNeedsAGrantOnBothEnds`; `test/conformance` `case028BothEnds` | built |
+| 22 | The event table is nine actions, no handler appends `attach`, `release` or `sync`, and the reaper runs eight passes | `internal/events` `TestEveryAppendedActionIsInTheTable`, `TestTheVocabularyIsClosedAndInTheOrderTheSpecListsIt`; `internal/reaper` `TestThePassesAreTheTableOfSpec010` | built |
+| 23 | The portable suite drives the folder delete, the copy and the two limits against a running installation, and holds no case of spec 009 | `test/conformance` `case028FolderDelete`, `case028FolderCopy`, `case028Limits`, `case028Omit` | built |
+| 24 | No file of the tree outside `specs/`, the changelog and the migrations names a workspace | `internal/api` `TestNothingNamesAWorkspace` | built differently: the test keeps a list of named exceptions, each with its reason |
+| 25 | An answer's `limits.omit` leaves every path at or under its prefixes out of each route of the audit above, and a second caller with no omission reads everything | `internal/files` `TestAListingLeavesOutWhatTheAnswerOmits`, `TestTheTrashLeavesOutWhatTheAnswerOmits`, `TestTheStarListingLeavesOutWhatTheAnswerOmits`; `internal/shares` `TestTheGrantPagesLeaveOutWhatTheAnswerOmits`, `TestTheLinkPagesLeaveOutWhatTheAnswerOmits`; `internal/events` `TestTheTailReadsTheOmissionOffItsAnswer`; `internal/store` `TestStoreAnOmittedSubtreeIsLeftOutOfEveryEnumeration`; `case028Omit` | built |
+| 26 | An event whose path or whose `detail.from` is under an omitted prefix is on no page of the tail, and the cursor moves past it | `internal/events` `TestStoreTheTailLeavesOutWhatTheAnswerOmits`; `case028Omit` | built |
+| 27 | An omitted subtree is neither deleted nor copied by a caller it is omitted for, and the counts of the answer and the event leave it out | `TestAFolderDeleteLeavesAnOmittedSubtreeWhereItIs`, `TestAFolderCopyLeavesOutWhatTheAnswerOmitsAtBothEnds`; `case028Omit` | built |
+| 28 | A question about one object or one folder inside an omitted subtree is not shaped by an earlier answer's omission | `TestAQuestionAboutOneObjectReadsNoOmission` | built |
+| 29 | An `omit` entry that is not a path of the space is refused with a `503` and never applied in part; usage stays the whole space's; the owner policy sends no limits | `internal/auth` `TestAnOmitEntryIsAPathOfTheSpace`, `TestTheOwnerPolicySendsNoLimits`; `TestALimitThatDoesNotDecodeIsNoDecision`; `TestAListingLeavesOutWhatTheAnswerOmits` for the usage | built |
 
 ## Dependencies
 
@@ -434,3 +522,68 @@ Each is a choice, with the recommendation first.
    `latere.ai/x/cella/client`. The alternative is
    a package in the shared library, where `latere.ai/x/pkg/drive` sat
    and went unmaintained once its one consumer left.
+
+## Outcome
+
+Complete on 2026-10-12. A space is one tree under `files/`; the second
+plane, `internal/workspaces`, its two tables, twelve routes, eight
+actions, three events, two reaper passes, two metrics and five error
+codes are gone, and migration `0006_one_tree.up.sql` moves what it held
+into ordinary folders. The folder delete is `internal/files/folder.go`'s
+`removeFolder`, the copy its `copyObject` and `copyFolder`, and an
+answer's limits are read whole by `internal/auth` `ReadLimits` and, for
+the object plane, `files.LimitsOf`. The statements over a folder and the
+omission predicate are `internal/store/files_subtree.go`. Every criterion
+above has a passing test in its tier.
+
+The open questions, as built:
+
+1. Forward only, as recommended. No `.down.sql`; the paragraph on the
+   rollback migration is what a rollback needs.
+2. Trashed at the workspace's own deletion time, as recommended.
+3. `plane` stays on the question, always `files`, as recommended.
+4. A folder delete trashes by default, as recommended, and is permanent
+   with `?permanent=1` or `limits.trash: false`.
+5. 10,000 objects and `too_many_objects`, as recommended.
+6. Not built. A Go client is a spec of its own, and nothing here needed
+   one.
+
+Built where the design was silent, each a choice to review:
+
+- **A grant on the whole removed plane.** A grant or a link whose prefix
+  is `workspaces` itself moves to `files/workspaces` when the space held
+  nothing there, and is revoked when it did, so the migration never
+  widens what a grant covers.
+- **What a destination collides with.** A folder is free when no path, no
+  version, no star, no open upload and no grant of the space is at or
+  under it, and no other workspace of the migration took it. Rows under
+  `workspaces/` that no workspace names, in any of those tables, form a
+  slug of their own, are moved the same way and trashed, and get a `move`
+  event too.
+- **A fault in the migration.** The migrator marks the version dirty, as
+  for every migration; the database is as it was, and an operator clears
+  the mark before running it again.
+- **`limits.versions` on a restore.** It is read on the answer to
+  `file.restore` when a version is brought forward, which is the question
+  that write asks.
+- **The copy's refusals the table did not name.** A `copy_to` equal to the
+  source or inside the source folder is `invalid_field`; `recursive`
+  without `copy_to` is `invalid_field`; a copy's `size` is counted before
+  the answer, so it is the whole folder's under an omission; a folder all
+  of whose objects an answer omits is `404`, as an empty one is.
+- **A folder delete that finds nothing** appends no event.
+- **`limits.omit` entries** are refused when they name the plane alone.
+  On the two pages that cross spaces, `GET /v1/stars` and
+  `GET /v1/shares/with-me`, an entry leaves out the matching path in
+  every space on the page.
+- **Criterion 24** keeps a list of named exceptions: the migration's tier
+  test, the finished migration from the predecessor, the workflows'
+  `github.workspace`, the compatibility cases of the suite and the unit
+  tier, and the operator's upgrade section of `docs/operations.md`, which
+  is excepted as a whole file.
+
+Found while building and fixed beside it: a grant id that is not an
+identifier answered `500` on `GET /v1/shares/{id}` and now reads as a
+missing grant. Found and not fixed: `GET` routes that answer JSON do not
+refuse an `Accept` header that excludes it, where [[013-api]] says
+`406 not_acceptable`.

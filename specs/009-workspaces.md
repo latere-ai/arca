@@ -20,9 +20,9 @@ author: changkun
 tree under `files/`, and the plane, the lease, the twelve routes, the
 eight actions and the two tables this spec built are removed by that
 spec, whose migration moves every object under `workspaces/<slug>/` into
-an ordinary folder. Everything below is the record of what was built and
-is still served until [[028-one-tree]] is. Nothing new is designed
-against it.
+an ordinary folder. Everything below is the record of what was built
+and served until [[028-one-tree]] removed it on the same day. Nothing new
+is designed against it.
 
 ## Overview
 

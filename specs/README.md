@@ -56,7 +56,7 @@ spec once every spec in its `depends_on` is at `testing` or later, not
 | [006](006-identity.md) | Identity: verification, the subject, the action vocabulary, the authorizer question, the owner policy | complete |
 | [007](007-uploads.md) | Uploads: sessions, size classes, direct-to-bucket parts, integrity | complete |
 | [008](008-shares-and-links.md) | Shares and links: grants and the permission ladder, public links, what a caller sees shared with them | complete |
-| [009](009-workspaces.md) | Workspaces: durable subtrees, the writer lease, materialize and sync. Superseded by 028 on 2026-10-12; served until 028 is built | superseded |
+| [009](009-workspaces.md) | Workspaces: durable subtrees, the writer lease, materialize and sync. Superseded by 028 on 2026-10-12 and removed by it | superseded |
 | [010](010-events-and-reaper.md) | Events and the reaper: the ledger, the log, the reconciliation of the two stores | complete |
 | 011 | Webhooks | retired 2026-09-18 before drafting closed; the number is not reused. Events are tailed by cursor, spec 010 |
 | [012](012-administration.md) | Administration: the overview across spaces, the cross-space restore, the record of what was done, the `check` command | complete |
@@ -75,7 +75,7 @@ spec once every spec in its `depends_on` is at `testing` or later, not
 | [025](025-observability-follow-ups.md) | Observability follow-ups: the request span, the redaction handler, the label sweep, the stored-bytes gauge | validated |
 | [026](026-installation-verification-jobs.md) | Installation verification jobs: the candidate, the deploy archive, the install walk, and the clean-runner check of a published release | validated |
 | [027](027-serving-under-the-capability-prefix.md) | Serving under the capability prefix: the base path, the second audience, and the one batch that moves both callers | complete |
-| [028](028-one-tree.md) | One tree: a space is one tree of files and folders, workspaces are removed, a folder is deleted or copied in one call, and an answer's limits turn versions and the trash off | drafted |
+| [028](028-one-tree.md) | One tree: a space is one tree of files and folders, workspaces are removed, a folder is deleted or copied in one call, and an answer's limits turn versions and the trash off and leave subtrees out of an enumeration | complete |
 
 The order of building is the order of the numbers except where a spec's
 `depends_on` says otherwise, and 019 runs alongside all of them: each
