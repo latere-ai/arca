@@ -111,6 +111,16 @@ func TestGetReadsOneGrantAndTellsAMissingRow(t *testing.T) {
 	if _, err := NewShares().Get(t.Context(), q, "nobody"); !errors.Is(err, pgx.ErrNoRows) {
 		t.Errorf("a grant that is not there = %v", err)
 	}
+	// A string the database refuses as not an identifier names no grant,
+	// which is the answer a wrong id gets and never a fault.
+	q = &fakeQuerier{row: failing(&pgconn.PgError{Code: "22P02"})}
+	if _, err := NewShares().Get(t.Context(), q, "not-an-id"); !errors.Is(err, pgx.ErrNoRows) {
+		t.Errorf("an id that is not one = %v", err)
+	}
+	q = &fakeQuerier{row: failing(&pgconn.PgError{Code: "08006"})}
+	if _, err := NewShares().Get(t.Context(), q, "01J8GRANT"); err == nil || errors.Is(err, pgx.ErrNoRows) {
+		t.Errorf("a connection that failed = %v, want a fault", err)
+	}
 }
 
 func TestRevokeReportsWhetherThereWasAGrant(t *testing.T) {

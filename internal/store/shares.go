@@ -193,10 +193,13 @@ func (shares) Create(ctx context.Context, q Querier, g Grant) (Grant, error) {
 }
 
 // Get reads one grant by its id.
+//
+// A string that is not an identifier at all names no grant, which is the
+// answer a wrong id gets (spec 001, invariant 6).
 func (shares) Get(ctx context.Context, q Querier, id string) (Grant, error) {
 	g, err := scanGrant(q.QueryRow(ctx, `SELECT `+grantColumns+` FROM shares WHERE id = $1`, id))
 	if err != nil {
-		return Grant{}, fmt.Errorf("store: read the grant %q: %w", id, err)
+		return Grant{}, fmt.Errorf("store: read the grant %q: %w", id, noSuchID(err))
 	}
 	return g, nil
 }
