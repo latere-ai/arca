@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.5.0 - 2026-10-13
+
 ### Breaking
 
 - **A space is one tree under `files/`.** The `/v1/workspaces` routes, the
