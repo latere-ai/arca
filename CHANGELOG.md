@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.6.0 - 2026-10-17
+
 ### Added
 
 - **`ARCA_TRUSTED_PROXIES` names the proxies in front of the server.**
