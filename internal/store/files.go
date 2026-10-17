@@ -65,6 +65,13 @@ type Files interface {
 	// path, with the cursor the next page starts after. A path at or under
 	// one of omit is left out, which is limits.omit of spec 028.
 	ListPrefix(ctx context.Context, q Querier, owner, prefix, cursor string, limit int, omit []string) ([]File, string, error)
+	// SearchPrefix is ListPrefix narrowed to the paths whose last segment
+	// contains text, ignoring case and taking the text literally (spec 029).
+	SearchPrefix(ctx context.Context, q Querier, owner, prefix, text, cursor string, limit int, omit []string) ([]File, string, error)
+	// RecentPrefix answers at most limit live paths under a prefix, the most
+	// recently modified first, narrowed as SearchPrefix is when text is not
+	// empty (spec 029).
+	RecentPrefix(ctx context.Context, q Querier, owner, prefix, text string, limit int, omit []string) ([]File, error)
 
 	// The write arms, the two deletes and the trash of spec 005, in
 	// files_write.go and files_trash.go, where the comment on each says what
@@ -178,28 +185,15 @@ func (files) ListPrefix(ctx context.Context, q Querier, owner, prefix, cursor st
 	if limit <= 0 {
 		return nil, "", fmt.Errorf("store: list %q of %q: the page holds %d rows", prefix, owner, limit)
 	}
-	rows, err := q.Query(ctx, `
+	page, err := scanFiles(ctx, q, fmt.Sprintf("list %q of %q", prefix, owner), `
 		SELECT `+fileColumns+`
 		  FROM files
 		 WHERE owner = $1 AND path LIKE $2 ESCAPE '\' AND path > $3 AND deleted_at IS NULL
 		   AND `+notOmitted("path", 5)+`
 		 ORDER BY path
-		 LIMIT $4`, owner, likePrefix(prefix), cursor, limit, omitted(omit))
+		 LIMIT $4`, limit, owner, likePrefix(prefix), cursor, limit, omitted(omit))
 	if err != nil {
-		return nil, "", fmt.Errorf("store: list %q of %q: %w", prefix, owner, err)
-	}
-	defer rows.Close()
-
-	page := make([]File, 0, limit)
-	for rows.Next() {
-		f, err := scanFile(rows)
-		if err != nil {
-			return nil, "", fmt.Errorf("store: list %q of %q: %w", prefix, owner, err)
-		}
-		page = append(page, f)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, "", fmt.Errorf("store: list %q of %q: %w", prefix, owner, err)
+		return nil, "", err
 	}
 	next := ""
 	if len(page) == limit {
@@ -208,9 +202,100 @@ func (files) ListPrefix(ctx context.Context, q Querier, owner, prefix, cursor st
 	return page, next, nil
 }
 
+// SearchPrefix answers one page of live paths under a prefix whose name, the
+// last segment of the path, contains text ignoring case (spec 029). The page
+// is ordered and keyset paginated on the path as ListPrefix's is, so a
+// search resumes on the cursor a listing would.
+func (files) SearchPrefix(ctx context.Context, q Querier, owner, prefix, text, cursor string, limit int, omit []string) ([]File, string, error) {
+	if limit <= 0 {
+		return nil, "", fmt.Errorf("store: search %q of %q: the page holds %d rows", prefix, owner, limit)
+	}
+	page, err := scanFiles(ctx, q, fmt.Sprintf("search %q of %q", prefix, owner), `
+		SELECT `+fileColumns+`
+		  FROM files
+		 WHERE owner = $1 AND path LIKE $2 ESCAPE '\' AND path > $3 AND deleted_at IS NULL
+		   AND `+nameContains("path", 6)+`
+		   AND `+notOmitted("path", 5)+`
+		 ORDER BY path
+		 LIMIT $4`, limit, owner, likePrefix(prefix), cursor, limit, omitted(omit), likeContains(text))
+	if err != nil {
+		return nil, "", err
+	}
+	next := ""
+	if len(page) == limit {
+		next = page[len(page)-1].Path
+	}
+	return page, next, nil
+}
+
+// RecentPrefix answers at most limit live paths under a prefix, the most
+// recently modified first and two of one instant in path order, so the
+// answer is stable (spec 029). A text that is not empty keeps the names that
+// contain it, as SearchPrefix does. There is no cursor: the answer is one
+// page.
+func (files) RecentPrefix(ctx context.Context, q Querier, owner, prefix, text string, limit int, omit []string) ([]File, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("store: list the newest of %q of %q: the page holds %d rows", prefix, owner, limit)
+	}
+	name := "TRUE"
+	args := []any{owner, likePrefix(prefix), limit, omitted(omit)}
+	if text != "" {
+		name = nameContains("path", 5)
+		args = append(args, likeContains(text))
+	}
+	return scanFiles(ctx, q, fmt.Sprintf("list the newest of %q of %q", prefix, owner), `
+		SELECT `+fileColumns+`
+		  FROM files
+		 WHERE owner = $1 AND path LIKE $2 ESCAPE '\' AND deleted_at IS NULL
+		   AND `+name+`
+		   AND `+notOmitted("path", 4)+`
+		 ORDER BY updated_at DESC, path
+		 LIMIT $3`, limit, args...)
+}
+
+// scanFiles runs one statement over fileColumns and reads every row it
+// answers, wrapping each failure with what the statement was doing.
+func scanFiles(ctx context.Context, q Querier, doing, statement string, capacity int, args ...any) ([]File, error) {
+	rows, err := q.Query(ctx, statement, args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: %s: %w", doing, err)
+	}
+	defer rows.Close()
+
+	out := make([]File, 0, capacity)
+	for rows.Next() {
+		f, err := scanFile(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: %s: %w", doing, err)
+		}
+		out = append(out, f)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: %s: %w", doing, err)
+	}
+	return out, nil
+}
+
+// nameContains is the predicate of spec 029's name match: the last segment
+// of column, lowered, matches the LIKE pattern bound at parameter, lowered.
+// Lowering both sides in the statement folds them by one rule, the
+// database's own, so a text and a name never disagree on what a letter's
+// lower case is.
+func nameContains(column string, parameter int) string {
+	return fmt.Sprintf(`lower(regexp_replace(%s, '^.*/', '')) LIKE lower($%d) ESCAPE '\'`, column, parameter)
+}
+
+// likeContains renders a text as a LIKE pattern that matches it anywhere
+// and literally, so a percent or an underscore in what a person typed
+// matches itself and not everything.
+func likeContains(text string) string { return "%" + likeEscape(text) + "%" }
+
 // likePrefix renders a prefix as a LIKE pattern, so a path holding a percent
 // or an underscore matches itself and not everything.
-func likePrefix(prefix string) string {
-	escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(prefix)
-	return escaped + "%"
+func likePrefix(prefix string) string { return likeEscape(prefix) + "%" }
+
+// likeEscape escapes the two LIKE wildcards and the escape character itself,
+// with the backslash every statement here names as its ESCAPE.
+func likeEscape(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
 }

@@ -211,6 +211,14 @@ func (m *memory) ListPrefix(context.Context, store.Querier, string, string, stri
 	return nil, "", nil
 }
 
+func (m *memory) SearchPrefix(context.Context, store.Querier, string, string, string, string, int, []string) ([]store.File, string, error) {
+	return nil, "", nil
+}
+
+func (m *memory) RecentPrefix(context.Context, store.Querier, string, string, string, int, []string) ([]store.File, error) {
+	return nil, nil
+}
+
 // The versions table, of which this package reaches the capture alone.
 
 func (m *memory) Capture(_ context.Context, _ store.Querier, owner, path, ifMatch string) (bool, error) {

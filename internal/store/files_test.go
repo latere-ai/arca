@@ -171,3 +171,108 @@ func TestAPrefixMatchesItselfAndNotEverything(t *testing.T) {
 		}
 	}
 }
+
+// TestASearchBindsTheTextEscaped: the text a person typed reaches the
+// statement as a pattern that matches it anywhere and literally, the match
+// is on the last segment with both sides lowered, and the page is keyset
+// paginated on the path as a listing is (spec 029).
+func TestASearchBindsTheTextEscaped(t *testing.T) {
+	for text, want := range map[string]string{
+		"plan":       `%plan%`,
+		"50%_off":    `%50\%\_off%`,
+		`back\slash`: `%back\\slash%`,
+		"Überblick":  `%Überblick%`,
+		"two words ": `%two words %`,
+	} {
+		if got := likeContains(text); got != want {
+			t.Errorf("likeContains(%q) = %q, want %q", text, got, want)
+		}
+	}
+
+	first, second := aFile(), aFile()
+	second.Path = "files/notes/zebra.md"
+	q := &fakeQuerier{rows: rowsOf(first, second)}
+	page, cursor, err := NewFiles().SearchPrefix(t.Context(), q, first.Owner, "files/notes/", "50%", "files/a", 2, nil)
+	if err != nil {
+		t.Fatalf("SearchPrefix: %v", err)
+	}
+	if len(page) != 2 || cursor != second.Path {
+		t.Fatalf("the page holds %d rows and the cursor is %q", len(page), cursor)
+	}
+	statement := q.statements[0]
+	for _, want := range []string{
+		"path LIKE $2 ESCAPE '\\'", "path > $3", "deleted_at IS NULL",
+		"lower(regexp_replace(path, '^.*/', '')) LIKE lower($6) ESCAPE '\\'", "ORDER BY path", "LIMIT $4",
+	} {
+		if !strings.Contains(statement, want) {
+			t.Errorf("the search does not carry %q:\n%s", want, statement)
+		}
+	}
+	if args := q.args[0]; args[1] != `files/notes/%` || args[2] != "files/a" || args[5] != `%50\%%` {
+		t.Errorf("the search bound %v", args)
+	}
+	short := &fakeQuerier{rows: rowsOf(first)}
+	if _, cursor, err := NewFiles().SearchPrefix(t.Context(), short, first.Owner, "files/", "a", "", 2, nil); err != nil || cursor != "" {
+		t.Fatalf("a short page of a search answered the cursor %q, %v", cursor, err)
+	}
+}
+
+// TestRecentOrdersOnTheModificationAndBindsTheTextOnlyWhenThereIsOne: the
+// newest first, ties in path order, one page, and the name match joins the
+// statement only when a text was given, so no empty pattern is bound.
+func TestRecentOrdersOnTheModificationAndBindsTheTextOnlyWhenThereIsOne(t *testing.T) {
+	plain := &fakeQuerier{rows: rowsOf(aFile())}
+	rows, err := NewFiles().RecentPrefix(t.Context(), plain, "owner", "files/", "", 10, nil)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("RecentPrefix = %d rows, %v", len(rows), err)
+	}
+	statement := plain.statements[0]
+	for _, want := range []string{"path LIKE $2 ESCAPE '\\'", "deleted_at IS NULL", "ORDER BY updated_at DESC, path", "LIMIT $3"} {
+		if !strings.Contains(statement, want) {
+			t.Errorf("the newest page does not carry %q:\n%s", want, statement)
+		}
+	}
+	if strings.Contains(statement, "regexp_replace") || len(plain.args[0]) != 4 {
+		t.Errorf("a newest page with no text matched a name: %v\n%s", plain.args[0], statement)
+	}
+
+	named := &fakeQuerier{rows: rowsOf(aFile())}
+	if _, err := NewFiles().RecentPrefix(t.Context(), named, "owner", "files/", "Plan_", 10, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(named.statements[0], "LIKE lower($5) ESCAPE '\\'") || named.args[0][4] != `%Plan\_%` {
+		t.Errorf("a newest page with a text bound %v:\n%s", named.args[0], named.statements[0])
+	}
+}
+
+// TestASearchAndRecentSurfaceEveryWayTheyCanFail: a page of no rows, a
+// connection that fails, a row that does not scan and a walk that stops are
+// each an error and never a page.
+func TestASearchAndRecentSurfaceEveryWayTheyCanFail(t *testing.T) {
+	for name, run := range map[string]func(q Querier, limit int) error{
+		"SearchPrefix": func(q Querier, limit int) error {
+			_, _, err := NewFiles().SearchPrefix(t.Context(), q, "owner", "files/", "a", "", limit, nil)
+			return err
+		},
+		"RecentPrefix": func(q Querier, limit int) error {
+			_, err := NewFiles().RecentPrefix(t.Context(), q, "owner", "files/", "a", limit, nil)
+			return err
+		},
+	} {
+		if err := run(&fakeQuerier{}, 0); err == nil {
+			t.Errorf("%s accepted a page of no rows", name)
+		}
+		if err := run(&fakeQuerier{queryErr: errors.New("the connection failed")}, 10); err == nil {
+			t.Errorf("%s answered a page over a failed connection", name)
+		}
+		unreadable := &fakeQuerier{rows: &fakeRows{scans: []func(...any) error{
+			func(...any) error { return errors.New("the row is not a file") },
+		}}}
+		if err := run(unreadable, 10); err == nil {
+			t.Errorf("%s answered a page with a row it could not read", name)
+		}
+		if err := run(&fakeQuerier{rows: &fakeRows{err: errors.New("the walk was interrupted")}}, 10); err == nil {
+			t.Errorf("%s answered an interrupted walk", name)
+		}
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"math"
 	"slices"
 	"strings"
 	"sync"
@@ -360,6 +361,36 @@ func (m *memory) ListPrefix(_ context.Context, _ store.Querier, owner, prefix, c
 	}
 	slices.SortFunc(out, func(a, b store.File) int { return strings.Compare(a.Path, b.Path) })
 	return page(out, limit), "", nil
+}
+
+// SearchPrefix is ListPrefix narrowed to the names holding the text, with
+// the fold Go makes. What Postgres folds is the store tier's to prove.
+func (m *memory) SearchPrefix(ctx context.Context, q store.Querier, owner, prefix, text, cursor string, limit int, omit []string) ([]store.File, string, error) {
+	rows, _, err := m.ListPrefix(ctx, q, owner, prefix, cursor, math.MaxInt, omit)
+	if err != nil {
+		return nil, "", err
+	}
+	out := slices.DeleteFunc(rows, func(f store.File) bool { return !named(f, text) })
+	return page(out, limit), "", nil
+}
+
+// RecentPrefix answers the live rows under a prefix, newest first and ties
+// in path order, narrowed as SearchPrefix is.
+func (m *memory) RecentPrefix(ctx context.Context, q store.Querier, owner, prefix, text string, limit int, omit []string) ([]store.File, error) {
+	rows, _, err := m.ListPrefix(ctx, q, owner, prefix, "", math.MaxInt, omit)
+	if err != nil {
+		return nil, err
+	}
+	out := slices.DeleteFunc(rows, func(f store.File) bool { return !named(f, text) })
+	slices.SortStableFunc(out, func(a, b store.File) int { return b.UpdatedAt.Compare(a.UpdatedAt) })
+	return page(out, limit), nil
+}
+
+// named reports whether a row's last segment holds the text, ignoring
+// case; an empty text names every row.
+func named(f store.File, text string) bool {
+	name := f.Path[strings.LastIndex(f.Path, "/")+1:]
+	return strings.Contains(strings.ToLower(name), strings.ToLower(text))
 }
 
 // inFolder reports whether a row is under a folder and not left out, which

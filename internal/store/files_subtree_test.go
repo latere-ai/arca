@@ -56,6 +56,18 @@ func TestAnEnumerationCarriesTheOmissionInItsStatement(t *testing.T) {
 			_, _, err := NewFiles().ListPrefix(t.Context(), q, "space", "files/", "", 10, omit)
 			return err
 		},
+		"SearchPrefix": func(q Querier, omit []string) error {
+			_, _, err := NewFiles().SearchPrefix(t.Context(), q, "space", "files/", "may", "", 10, omit)
+			return err
+		},
+		"RecentPrefix": func(q Querier, omit []string) error {
+			_, err := NewFiles().RecentPrefix(t.Context(), q, "space", "files/", "", 10, omit)
+			return err
+		},
+		"RecentPrefix with a text": func(q Querier, omit []string) error {
+			_, err := NewFiles().RecentPrefix(t.Context(), q, "space", "files/", "may", 10, omit)
+			return err
+		},
 		"ListTrash": func(q Querier, omit []string) error {
 			_, err := NewFiles().ListTrash(t.Context(), q, "space", TrashCursor{}, 10, time.Time{}, omit)
 			return err
