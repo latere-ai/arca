@@ -23,7 +23,9 @@ const manifestPage = 1000
 
 // list answers the live rows under a prefix, keyset paginated on the path,
 // with the common prefixes below it synthesised so a browser can render a
-// tree this server does not store.
+// tree this server does not store. ?q= and ?recent= narrow the same
+// question's answer to a search by name or to the newest files (spec 029),
+// which found answers.
 //
 // The answer's limits.omit leaves subtrees out of the page (spec 028). The
 // omission is in the query, so a page is never short for a row it left out,
@@ -38,6 +40,11 @@ func (s *Service) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit, err := api.Limit(r)
+	if err != nil {
+		api.WriteError(w, r, err)
+		return
+	}
+	narrow, err := findOf(r)
 	if err != nil {
 		api.WriteError(w, r, err)
 		return
@@ -64,16 +71,17 @@ func (s *Service) list(w http.ResponseWriter, r *http.Request) {
 	}
 
 	prefix := subtree(t.Path)
+	if narrow.recent || narrow.text != "" {
+		s.found(w, r, t.Owner, prefix, narrow, limit, limits.Omit)
+		return
+	}
 	rows, _, err := s.files.ListPrefix(ctx, s.db.Querier(), t.Owner, prefix, api.Cursor(r), limit+1, limits.Omit)
 	if err != nil {
 		api.WriteError(w, r, fault(ctx, "list the subtree", err))
 		return
 	}
 	page, next := api.Paginate(rows, limit, func(f store.File) string { return f.Path })
-	listing := Listing{Entries: make([]Object, 0, len(page)), Prefixes: prefixesOf(page, prefix), NextCursor: next}
-	for _, f := range page {
-		listing.Entries = append(listing.Entries, s.Render(f))
-	}
+	listing := Listing{Entries: s.entries(page), Prefixes: prefixesOf(page, prefix), NextCursor: next}
 	// A listing of a plane root reports what the space holds, so an owner
 	// reads its own usage without an administrator's action (spec 005). The
 	// question is the file.list already asked: the space is what that answer
