@@ -30,6 +30,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -76,6 +77,10 @@ type Options struct {
 	BasePath                         string
 	RequestsPerMinute                int
 	UnauthenticatedRequestsPerMinute int
+	// TrustedProxies is ARCA_TRUSTED_PROXIES: the ranges whose
+	// X-Forwarded-For names the client, for the address bucket and the
+	// authorizer's request.ip alike.
+	TrustedProxies []netip.Prefix
 	// Events is the log GET /v1/events tails and Querier the database it
 	// reads through, both spec 010's. The log is required, because the route
 	// is registered and a surface that registers a route it cannot answer
@@ -114,10 +119,12 @@ type API struct {
 	basePath   string
 	perSubject *ratelimit.Buckets
 	perAddress *ratelimit.Buckets
-	links      Links
-	clock      func() time.Time
-	rows       []route
-	document   []byte
+	// trusted is ARCA_TRUSTED_PROXIES, read by [auth.ClientAddress].
+	trusted  []netip.Prefix
+	links    Links
+	clock    func() time.Time
+	rows     []route
+	document []byte
 	// eventTail is the handler of spec 010, built once over the log and the
 	// database of this build.
 	eventTail http.Handler
@@ -153,6 +160,7 @@ func New(o Options) (*API, error) {
 		links: o.Links, clock: o.Now,
 		perSubject: buckets(o.RequestsPerMinute),
 		perAddress: buckets(o.UnauthenticatedRequestsPerMinute),
+		trusted:    o.TrustedProxies,
 		rows:       rows,
 		metrics:    o.Metrics, logs: o.Logger,
 	}

@@ -6,6 +6,22 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Added
+
+- **`ARCA_TRUSTED_PROXIES` names the proxies in front of the server.**
+  A comma separated list of CIDR ranges, such as an ingress's pod range.
+  When a request comes from inside one, the client address is the last
+  `X-Forwarded-For` entry outside every range, and that address is what
+  the per-address limit counts and what the authorizer is told as
+  `request.ip`. Unset, no forwarded header is read, as before.
+
+### Fixed
+
+- **An oversized `PUT` names the upload route under the installation's
+  base.** The `object_too_large` detail said `POST /v1/uploads` whatever
+  `ARCA_BASE_PATH` was; it now names the route the installation serves,
+  such as `POST /v1/storage/uploads`.
+
 ## v0.5.0 - 2026-10-13
 
 ### Breaking

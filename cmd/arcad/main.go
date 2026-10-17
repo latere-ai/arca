@@ -532,6 +532,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		BasePath:                         cfg.BasePath,
 		RequestsPerMinute:                cfg.RequestsPerMinute,
 		UnauthenticatedRequestsPerMinute: cfg.UnauthenticatedRequestsPerMinute,
+		TrustedProxies:                   cfg.TrustedProxies,
 		// The log of spec 010 and the database it reads through, which is
 		// what GET /v1/events tails.
 		Events: log, Querier: db.Querier(),

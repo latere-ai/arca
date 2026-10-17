@@ -5,6 +5,7 @@ package config
 
 import (
 	"maps"
+	"net/netip"
 	"reflect"
 	"slices"
 	"strings"
@@ -84,6 +85,7 @@ func TestLoadReadsEveryVariable(t *testing.T) {
 		"ARCA_ADMIN_SUBJECTS":                      "https://issuer.example|root, https://issuer.example|ops",
 		"ARCA_REQUESTS_PER_MINUTE":                 "1200",
 		"ARCA_UNAUTHENTICATED_REQUESTS_PER_MINUTE": "0",
+		"ARCA_TRUSTED_PROXIES":                     "10.150.0.0/16, fd00::/8",
 		"ARCA_MAX_UPLOAD_BYTES":                    "1073741824",
 		"ARCA_INLINE_BYTES":                        "8388608",
 		"ARCA_REAP_INTERVAL":                       "90s",
@@ -113,6 +115,7 @@ func TestLoadReadsEveryVariable(t *testing.T) {
 		AuthorizerURL: "https://authz.example/decide", AuthorizerToken: "s3cret",
 		AdminSubjects:     []string{"https://issuer.example|root", "https://issuer.example|ops"},
 		RequestsPerMinute: 1200, UnauthenticatedRequestsPerMinute: 0,
+		TrustedProxies: []netip.Prefix{netip.MustParsePrefix("10.150.0.0/16"), netip.MustParsePrefix("fd00::/8")},
 		MaxUploadBytes: 1 << 30, InlineBytes: 8 << 20,
 		ReapInterval: 90 * time.Second, TrashRetention: 168 * time.Hour,
 		OTelEndpoint: "https://collector.example:4318",
@@ -324,6 +327,9 @@ func TestTheIdentityVariablesAreChecked(t *testing.T) {
 		{"a rate below zero", map[string]string{
 			"ARCA_UNAUTHENTICATED_REQUESTS_PER_MINUTE": "-1",
 		}, "ARCA_UNAUTHENTICATED_REQUESTS_PER_MINUTE is -1"},
+		{"a trusted proxy that is not a range", map[string]string{
+			"ARCA_TRUSTED_PROXIES": "10.150.0.0/16, the-ingress",
+		}, `ARCA_TRUSTED_PROXIES entry "the-ingress" is not a CIDR range`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

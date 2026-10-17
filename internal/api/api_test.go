@@ -6,6 +6,8 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"testing"
 
@@ -241,6 +243,34 @@ func TestTheAddressRateLimitBoundsWhatHasNoSubject(t *testing.T) {
 	// left alone.
 	if w := h.do(t, http.MethodGet, fill(probePath), h.bearer()); w.Code != http.StatusOK {
 		t.Errorf("a verified caller was charged the address bucket: %d %s", w.Code, w.Body)
+	}
+}
+
+// TestTwoClientsBehindATrustedProxyAreTwoAddresses: behind the ingress
+// every request comes from the proxy's own address, so the bucket is the
+// forwarded client's, and one client's guesses do not spend another's.
+func TestTwoClientsBehindATrustedProxyAreTwoAddresses(t *testing.T) {
+	h := newHarness(t, func(o *Options) {
+		o.UnauthenticatedRequestsPerMinute = 1
+		o.TrustedProxies = []netip.Prefix{netip.MustParsePrefix("10.150.0.0/16")}
+	})
+	h.endpoint.Allow(stub.Rule{Subject: "*", Action: "*", Resource: "*", Allow: true})
+	from := func(client string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodGet, "/v1/shares/links/guess", nil)
+		r.RemoteAddr = "10.150.0.79:55000"
+		r.Header.Set("X-Forwarded-For", client)
+		w := httptest.NewRecorder()
+		h.mux.ServeHTTP(w, r)
+		return w
+	}
+	if w := from("198.51.100.4"); w.Code != http.StatusOK {
+		t.Fatalf("the first client's request answered %d", w.Code)
+	}
+	if w := from("198.51.100.4"); w.Code != http.StatusTooManyRequests {
+		t.Errorf("the first client's second request answered %d, want 429", w.Code)
+	}
+	if w := from("203.0.113.9"); w.Code != http.StatusOK {
+		t.Errorf("another client behind the same proxy answered %d: %s", w.Code, w.Body)
 	}
 }
 

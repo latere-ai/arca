@@ -74,7 +74,8 @@ describes both.
 | Variable | Required | Default | What it is |
 |---|---|---|---|
 | `ARCA_REQUESTS_PER_MINUTE` | no | `600` | Requests one authenticated subject may send one replica in a minute. `0` turns the limit off. |
-| `ARCA_UNAUTHENTICATED_REQUESTS_PER_MINUTE` | no | `60` | Requests one client address may send one replica in a minute on the routes that carry no bearer (public links) and on requests whose token was refused. `0` turns the limit off. The address is the connection's peer, so behind a proxy that does not preserve the client's address every such caller shares one budget. |
+| `ARCA_UNAUTHENTICATED_REQUESTS_PER_MINUTE` | no | `60` | Requests one client address may send one replica in a minute on the routes that carry no bearer (public links) and on requests whose token was refused. `0` turns the limit off. The address is the connection's peer, or behind a proxy in `ARCA_TRUSTED_PROXIES` the client it forwards. |
+| `ARCA_TRUSTED_PROXIES` | no | unset | CIDR ranges of the proxies in front of the server, comma separated, such as an ingress's pod range. When a request's peer is inside one, the client address is the last `X-Forwarded-For` entry outside every range; that address is what the limit above counts and what the authorizer is told as `request.ip`. Unset, no forwarded header is read, so behind a proxy every caller is the proxy's address and shares one budget. |
 | `ARCA_MAX_UPLOAD_BYTES` | no | `5368709120` (5 GiB) | The largest object the server accepts by any route. |
 | `ARCA_INLINE_BYTES` | no | `16777216` (16 MiB) | The largest object streamed through the server. A `PUT` above it is refused; an upload session sends the parts straight to the bucket instead. A read above it is a redirect to a presigned URL. It cannot exceed `ARCA_MAX_UPLOAD_BYTES`. |
 

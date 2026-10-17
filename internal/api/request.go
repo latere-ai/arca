@@ -58,7 +58,7 @@ func (a *API) requestID(next http.Handler) http.Handler {
 		// route and before the verifier: it has to exist before the first
 		// question is asked, and a public link route asks questions like any
 		// other (spec 012).
-		ctx := auth.WithMarks(auth.WithRequest(WithRequestID(r.Context(), id), auth.RequestInfo(r, id)))
+		ctx := auth.WithMarks(auth.WithRequest(WithRequestID(r.Context(), id), auth.RequestInfo(r, id, a.trusted)))
 		otel.SetAttributes(ctx, attribute.String("arca.request_id", id))
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

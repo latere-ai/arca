@@ -137,6 +137,7 @@ operator fixes a deployment in one round. A blank value is unset.
 | `ARCA_OTEL_EXPORTER_OTLP_ENDPOINT` | the standard `OTEL_EXPORTER_OTLP_ENDPOINT`, then unset | where traces, logs and metrics go; unset exports nothing | 018 |
 | `ARCA_REQUESTS_PER_MINUTE` | `600` | the token bucket per subject after authentication; `0` disables it | 015 |
 | `ARCA_UNAUTHENTICATED_REQUESTS_PER_MINUTE` | `60` | the token bucket per client address before authentication, which bounds bad tokens and link token guessing | 015 |
+| `ARCA_TRUSTED_PROXIES` | unset | CIDR ranges whose `X-Forwarded-For` names the client address, for that bucket and the authorizer's `request.ip`; unset reads no forwarded header | 015 |
 | `ARCA_TEST_DRIFT` | unset | makes the server drift from the contract in one named way, so the conformance suite is proved to catch it; refused outside the test build | 017 |
 
 The rows for later specs are reference entries; the spec named builds

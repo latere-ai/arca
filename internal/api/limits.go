@@ -74,10 +74,11 @@ func (a *API) limitAddress(next http.Handler) http.Handler {
 }
 
 // chargeAddress takes one token from the address bucket and reports whether
-// there was one. The key is the peer address the authorizer would be told
-// about, so one client is one key whatever it sends in a header.
+// there was one. The key is the client address the authorizer is told
+// about: the peer's, or behind a trusted proxy the one it forwarded, so one
+// client is one key whatever it sends in a header.
 func (a *API) chargeAddress(r *http.Request) bool {
-	return allowed(a.perAddress, auth.RequestInfo(r, "").IP)
+	return allowed(a.perAddress, auth.ClientAddress(r, a.trusted))
 }
 
 // refuseVerification is the verifier's [auth.Refuser]: the 401 of spec 006

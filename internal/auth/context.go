@@ -7,6 +7,9 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"net/netip"
+	"slices"
+	"strings"
 	"sync/atomic"
 
 	"latere.ai/x/pkg/authz"
@@ -96,14 +99,63 @@ func Administrative(ctx context.Context) bool {
 }
 
 // RequestInfo reads what the authorizer learns about the request itself off
-// an http.Request: the id already on the context, the peer address with its
-// port removed, and the user agent.
-func RequestInfo(r *http.Request, id string) authz.Caller {
-	ip := r.RemoteAddr
-	if host, _, err := net.SplitHostPort(ip); err == nil {
-		ip = host
+// an http.Request: the id already on the context, the client address by
+// [ClientAddress], and the user agent.
+func RequestInfo(r *http.Request, id string, trusted []netip.Prefix) authz.Caller {
+	return authz.Caller{ID: id, IP: ClientAddress(r, trusted), UserAgent: r.UserAgent()}
+}
+
+// ClientAddress is the caller's address for the address bucket and for the
+// authorizer's request.ip: the peer's, or, when the peer is inside one of
+// the trusted ranges (ARCA_TRUSTED_PROXIES), the last X-Forwarded-For entry
+// outside every range, which is the address the nearest untrusted hop
+// presented. A forwarded header from a peer outside the ranges is ignored,
+// and so is every header when no range is trusted, so a caller cannot
+// choose the address it is limited under. An entry that is not an address
+// ends the walk and the peer stands.
+func ClientAddress(r *http.Request, trusted []netip.Prefix) string {
+	peer := hostOf(r.RemoteAddr)
+	addr, err := netip.ParseAddr(peer)
+	if err != nil || !inRanges(addr, trusted) {
+		return peer
 	}
-	return authz.Caller{ID: id, IP: ip, UserAgent: r.UserAgent()}
+	var entries []string
+	for _, h := range r.Header.Values("X-Forwarded-For") {
+		for e := range strings.SplitSeq(h, ",") {
+			if e = strings.TrimSpace(e); e != "" {
+				entries = append(entries, e)
+			}
+		}
+	}
+	for _, entry := range slices.Backward(entries) {
+		a, err := netip.ParseAddr(hostOf(entry))
+		if err != nil {
+			return peer
+		}
+		if !inRanges(a, trusted) {
+			return a.Unmap().String()
+		}
+	}
+	return peer
+}
+
+// hostOf strips a port from host:port and the brackets from an IPv6
+// literal; a bare host is returned as it is.
+func hostOf(s string) string {
+	if host, _, err := net.SplitHostPort(s); err == nil {
+		return host
+	}
+	return strings.Trim(s, "[]")
+}
+
+func inRanges(a netip.Addr, ranges []netip.Prefix) bool {
+	a = a.Unmap()
+	for _, p := range ranges {
+		if p.Contains(a) {
+			return true
+		}
+	}
+	return false
 }
 
 // Refuser writes the refusal a middleware decided. The envelope is spec

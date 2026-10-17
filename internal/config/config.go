@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"regexp"
 	"sort"
@@ -134,6 +135,10 @@ type Config struct {
 	// token buckets of spec 015. Zero disables one.
 	RequestsPerMinute                int
 	UnauthenticatedRequestsPerMinute int
+	// TrustedProxies are the ranges whose X-Forwarded-For names the
+	// client, for the address bucket and the authorizer's request.ip.
+	// Empty trusts no header, and the peer is the client.
+	TrustedProxies []netip.Prefix
 	// MaxUploadBytes is the largest object this server accepts by any
 	// route, and InlineBytes the boundary between the two size classes of
 	// spec 007: at or below it a put streams through the server, above it
@@ -238,6 +243,7 @@ func Load(getenv Getenv) (Config, error) {
 			DefaultRequestsPerMinute, "ARCA_REQUESTS_PER_MINUTE", note),
 		UnauthenticatedRequestsPerMinute: count(getenv("ARCA_UNAUTHENTICATED_REQUESTS_PER_MINUTE"),
 			DefaultUnauthenticatedRequestsPerMinute, "ARCA_UNAUTHENTICATED_REQUESTS_PER_MINUTE", note),
+		TrustedProxies: prefixes(getenv("ARCA_TRUSTED_PROXIES"), "ARCA_TRUSTED_PROXIES", note),
 		MaxUploadBytes: size(getenv("ARCA_MAX_UPLOAD_BYTES"),
 			DefaultMaxUploadBytes, "ARCA_MAX_UPLOAD_BYTES", note),
 		InlineBytes: size(getenv("ARCA_INLINE_BYTES"),
@@ -373,6 +379,21 @@ func boolean(raw, name string, note func(string, ...any)) bool {
 
 // count reads a whole number that is not negative. Unset is the default, and
 // zero is what the variable's own row says it is rather than an absence.
+// prefixes reads a comma separated list of CIDR ranges; an entry that is
+// not one is a problem, named with the variable.
+func prefixes(raw, name string, note func(string, ...any)) []netip.Prefix {
+	var out []netip.Prefix
+	for _, s := range list(raw) {
+		p, err := netip.ParsePrefix(s)
+		if err != nil {
+			note("%s entry %q is not a CIDR range such as 10.0.0.0/8", name, s)
+			continue
+		}
+		out = append(out, p.Masked())
+	}
+	return out
+}
+
 func count(raw string, def int, name string, note func(string, ...any)) int {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
