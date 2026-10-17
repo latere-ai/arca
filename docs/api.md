@@ -304,7 +304,7 @@ GET /v1/files/{owner}/files/notes?list=1&recent=1&q=report
 - The text is matched literally: `%`, `_` and `\` are ordinary characters.
   It is at most 200 bytes of UTF-8; a longer one is `400 invalid_field`.
 - Letters outside ASCII match their other case when the database was
-  created with a UTF-8 locale, which is the Postgres default; a database
+  created with a UTF-8 locale, as the official Postgres image creates it; a database
   created with the `C` locale matches the case of those letters exactly.
 - An empty `q`, or one of only spaces, is the plain listing.
 - `recent=1` with `q` answers the newest files whose name holds the text.

@@ -18,7 +18,7 @@ refused before it is pushed.
   names. The text is matched literally and is at most 200 bytes; past
   that, or with a `cursor` beside `recent=1`, the answer is `400`.
   Letters outside ASCII match their other case when the database was
-  created with a UTF-8 locale, as Postgres creates one by default.
+  created with a UTF-8 locale, as the official Postgres image creates it.
 
 ## v0.6.0 - 2026-10-17
 
