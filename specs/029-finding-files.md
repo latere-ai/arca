@@ -1,6 +1,6 @@
 ---
 title: "Finding files: a folder listing narrowed to names that contain a text, and the newest files under a folder"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/005-files.md
@@ -143,14 +143,45 @@ can be added without a change to this contract.
 
 | # | Criterion | Proved by | State |
 |---|---|---|---|
-| 1 | `q` answers the live files under the path whose last segment contains the text ignoring case, in path order, paged by the path cursor, with `prefixes` `[]` and no `space` at the plane root; a sibling of the path and a trashed file are absent | `internal/files` `TestASearchKeepsTheNamesThatHoldTheText`; `internal/store` `TestStoreASearchMatchesTheNameUnderThePrefix` | |
-| 2 | `%`, `_` and `\` in `q` match themselves and nothing else | `internal/store` `TestStoreASearchTakesTheTextLiterally`, `TestASearchBindsTheTextEscaped` | |
-| 3 | A non-ASCII name is matched ignoring case on a UTF-8 database | `internal/store` `TestStoreASearchFoldsTheCaseOfANameBeyondASCII` | |
-| 4 | Nothing under a subtree `limits.omit` names is in a search or a recent page, matches inside it included, and a page stays full | `internal/files` `TestASearchAndRecentLeaveOutWhatTheAnswerOmits`; `internal/store` `TestStoreAnOmittedSubtreeIsLeftOutOfASearchAndRecent`, `TestAnEnumerationCarriesTheOmissionInItsStatement` | |
-| 5 | A blank `q` is the plain listing, with its `prefixes` and its `space` | `internal/files` `TestABlankSearchIsThePlainListing` | |
-| 6 | `q` over 200 bytes, not UTF-8 or with a NUL is `invalid_field` on `q`, `recent` other than `0` or `1` is `invalid_field` on `recent`, and `recent=1` with a `cursor` is `exclusive_fields`, each before the authorizer is asked | `internal/files` `TestASearchOrRecentItCannotReadIsRefused` | |
-| 7 | `recent=1` answers the newest `modified` first with ties in path order, at most `limit`, no `next_cursor`, no trashed file, and with `q` only the matches | `internal/files` `TestRecentAnswersTheNewestFilesFirst`; `internal/store` `TestStoreRecentIsNewestFirstAndBounded` | |
-| 8 | Both ask one `file.list` about the path, and an answer whose filter does not admit the space is an empty page | `internal/files` `TestASearchAndRecentAskTheListingsQuestion` | |
-| 9 | Both statements carry the subtree and the omission, and every failure of the query, the scan and the walk reaches the caller | `internal/store` `TestASearchAndRecentSurfaceEveryWayTheyCanFail`, `TestAnEnumerationCarriesTheOmissionInItsStatement` | |
-| 10 | `arcad` as a process answers both against the real stores | `test/e2e` `TestE2EAFolderIsSearchedByNameAndListedNewestFirst` | |
-| 11 | The `GET` row of the document names both parameters, and the committed document is current | `tools/apidoc` `TestTheCommittedDocumentIsCurrent` | |
+| 1 | `q` answers the live files under the path whose last segment contains the text ignoring case, in path order, paged by the path cursor, with `prefixes` `[]` and no `space` at the plane root; a sibling of the path and a trashed file are absent | `internal/files` `TestASearchKeepsTheNamesThatHoldTheText`; `internal/store` `TestStoreASearchMatchesTheNameUnderThePrefix` | built |
+| 2 | `%`, `_` and `\` in `q` match themselves and nothing else | `internal/store` `TestStoreASearchTakesTheTextLiterally`, `TestASearchBindsTheTextEscaped` | built |
+| 3 | A non-ASCII name is matched ignoring case on a UTF-8 database | `internal/store` `TestStoreASearchFoldsTheCaseOfANameBeyondASCII` | built |
+| 4 | Nothing under a subtree `limits.omit` names is in a search or a recent page, matches inside it included, and a page stays full | `internal/files` `TestASearchAndRecentLeaveOutWhatTheAnswerOmits`; `internal/store` `TestStoreAnOmittedSubtreeIsLeftOutOfASearchAndRecent`, `TestAnEnumerationCarriesTheOmissionInItsStatement` | built |
+| 5 | A blank `q` is the plain listing, with its `prefixes` and its `space` | `internal/files` `TestABlankSearchIsThePlainListing` | built |
+| 6 | `q` over 200 bytes, not UTF-8 or with a NUL is `invalid_field` on `q`, `recent` other than `0` or `1` is `invalid_field` on `recent`, and `recent=1` with a `cursor` is `exclusive_fields`, each before the authorizer is asked | `internal/files` `TestASearchOrRecentItCannotReadIsRefused` | built |
+| 7 | `recent=1` answers the newest `modified` first with ties in path order, at most `limit`, no `next_cursor`, no trashed file, and with `q` only the matches | `internal/files` `TestRecentAnswersTheNewestFilesFirst`; `internal/store` `TestStoreRecentIsNewestFirstAndBounded` | built |
+| 8 | Both ask one `file.list` about the path, and an answer whose filter does not admit the space is an empty page | `internal/files` `TestASearchAndRecentAskTheListingsQuestion` | built |
+| 9 | Both statements carry the subtree and the omission, and every failure of the query, the scan and the walk reaches the caller | `internal/store` `TestASearchAndRecentSurfaceEveryWayTheyCanFail`, `TestRecentOrdersOnTheModificationAndBindsTheTextOnlyWhenThereIsOne`, `TestAnEnumerationCarriesTheOmissionInItsStatement` | built |
+| 10 | `arcad` as a process answers both against the real stores | `test/e2e` `TestE2EAFolderIsSearchedByNameAndListedNewestFirst` | built |
+| 11 | The `GET` row of the document names both parameters, and the committed document is current | `tools/apidoc` `TestTheCommittedDocumentIsCurrent` | built |
+
+## Outcome
+
+Complete on 2026-10-18. The parameters are read by `internal/files/find.go`
+`findOf` and answered by its `found`, which `list` hands a narrowed request
+to after the question and the answer's limits are read; the statements are
+`internal/store/files.go` `SearchPrefix` and `RecentPrefix`, with the name
+predicate `nameContains` and the pattern `likeContains`. The plain listing
+and the two statements share one row scanner, `scanFiles`. The document's
+`GET` row names both parameters in its description, which is how the
+document carries every query parameter of the route. Every criterion above
+has a passing test in its tier. The store halves of criteria 1 to 4 and 7
+run in the store tier and criterion 10 in the e2e tier, `make test-store`
+and `make test-e2e`, which the gate does not run.
+
+Built where the design was silent, each a choice to review:
+
+- **`recent=0`.** The plain listing, with its folders and its usage, as
+  any parameter that is `0` or `1` reads.
+- **An empty `cursor` beside `recent=1`.** A first page, not a refusal: a
+  client that always sends the member sends it empty on the first page.
+- **The fold in the unit tier.** The handler tier's fake folds with Go's
+  `strings.ToLower`, so what Postgres folds is proved in the store tier
+  alone, and against the stack's database, whose locale is `en_US.utf8`.
+
+Not built:
+
+- **A conformance case.** The e2e tier drives both parameters against
+  `arcad`; a case in `test/conformance` for another installation to run is
+  left for when one needs it.
+
