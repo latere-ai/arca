@@ -9,7 +9,7 @@ depends_on:
 affects: [internal/files/, internal/api/, internal/store/, internal/config/, cmd/arcad/, test/e2e/]
 effort: large
 created: 2026-09-18
-updated: 2026-10-12
+updated: 2026-10-18
 author: changkun
 ---
 
@@ -292,6 +292,11 @@ render a tree Arca does not store.
 
 Trashed rows are absent. A cursor is a path, so a listing is stable
 under concurrent inserts and a caller can resume it tomorrow.
+
+**Amended 2026-10-18 ([[029-finding-files]]).** `?q=` narrows the same
+listing to the files whose name contains a text, and `?recent=1` answers
+the newest files under the prefix in one page. Both ask this `file.list`,
+answer `prefixes` empty and carry no `space`.
 
 A listing of the plane root, `GET /v1/files/{owner}/files?list=1`,
 carries `space` beside `entries`:

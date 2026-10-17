@@ -133,7 +133,9 @@ page is stable while other clients write.
 
 The file listing adds two members beside the envelope: `prefixes`, the
 folders the page implies, and, when the listing is of `files`, the root of
-the tree, `space`, which is `{"bytes", "files"}` for the whole space.
+the tree, `space`, which is `{"bytes", "files"}` for the whole space. A
+listing that [finds files](#finding-files) answers `prefixes` as an empty
+array and no `space`.
 
 ### Conditional requests
 
@@ -243,6 +245,9 @@ order:
 | `?versions=1` | `file.read` | the path's earlier versions, oldest first |
 | `?version=N` | `file.read` | the bytes of version N |
 
+A listing also [finds files](#finding-files) by name with `?q=`, and answers
+the newest ones with `?recent=1`.
+
 **Writing.** A `PUT` is admitted before its first byte is read, so it needs
 `Content-Length`. A body above the inline size is refused with
 `413 object_too_large`; send it through an [upload](#uploads) instead.
@@ -276,6 +281,37 @@ Each `url` is a presigned `GET` of that object, valid for five minutes, and
 each `path` is written below `root`. `pinned_at` is always null: the route
 reads the space as it is and pins nothing. A client that keeps a local copy
 of a folder downloads the files whose checksum it does not already hold.
+
+### Finding files
+
+A listing takes two more parameters, for a client that lets a person find
+a file by typing part of its name, or offers the files they changed last.
+Both ask the same `file.list` and answer the same shape.
+
+| Parameter | Answer |
+|---|---|
+| `?q=<text>` | the files under the path whose name contains the text, ignoring case, in path order and paged with `?cursor=` and `?limit=` like any listing |
+| `?recent=1` | the files under the path, the most recently modified first, at most `?limit=` of them, in one page with no `next_cursor` |
+
+```
+GET /v1/files/{owner}/files?list=1&q=plan
+GET /v1/files/{owner}/files?list=1&recent=1&limit=20
+GET /v1/files/{owner}/files/notes?list=1&recent=1&q=report
+```
+
+- A file's name is the last segment of its path, so `q=plan` finds
+  `files/notes/q3-plan.md` and not `files/plan/readme.md`.
+- The text is matched literally: `%`, `_` and `\` are ordinary characters.
+  It is at most 200 bytes of UTF-8; a longer one is `400 invalid_field`.
+- Letters outside ASCII match their other case when the database was
+  created with a UTF-8 locale, which is the Postgres default; a database
+  created with the `C` locale matches the case of those letters exactly.
+- An empty `q`, or one of only spaces, is the plain listing.
+- `recent=1` with `q` answers the newest files whose name holds the text.
+  `recent=1` with a `cursor` is `400 exclusive_fields`.
+- Neither answers `prefixes` or `space`, and both leave out every subtree
+  the authorizer's answer [omits](#leaving-subtrees-out-of-an-enumeration),
+  so a match inside one is never listed.
 
 ### Folders
 
@@ -664,7 +700,7 @@ anything other than the one object asked for honors the member:
 
 | Route | Answer it is read on | What an entry leaves out |
 |---|---|---|
-| `GET /v1/files/{owner}/{path}?list=1` | `file.list` | every entry it covers, and a folder in `prefixes` that holds nothing else. The listing is deep, one page of every object under the prefix, so one rule serves the listing of a folder and of every folder above it |
+| `GET /v1/files/{owner}/{path}?list=1` | `file.list` | every entry it covers, and a folder in `prefixes` that holds nothing else. The listing is deep, one page of every object under the prefix, so one rule serves the listing of a folder and of every folder above it. A search with `?q=` and a page with `?recent=1` leave out the same entries |
 | `GET /v1/files/materialize` | `file.list` | the files of the manifest it covers |
 | `GET /v1/trash` | `file.list` | the trashed entries it covers |
 | `DELETE /v1/trash` without `path` | `file.delete` | the trashed entries it covers stay in the trash and out of `purged` |

@@ -6,6 +6,20 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Added
+
+- **A folder listing finds files by name and answers the newest ones.**
+  `GET /v1/files/{owner}/{path}?list=1&q=plan` answers the files under
+  the folder whose name contains `plan`, ignoring case, paged with
+  `cursor` and `limit` like any listing. `&recent=1` answers the most
+  recently modified files first, at most `limit` of them, in one page;
+  with `q` it keeps the names that match. Both take the listing's own
+  permission and leave out every folder the authorizer's `limits.omit`
+  names. The text is matched literally and is at most 200 bytes; past
+  that, or with a `cursor` beside `recent=1`, the answer is `400`.
+  Letters outside ASCII match their other case when the database was
+  created with a UTF-8 locale, as Postgres creates one by default.
+
 ## v0.6.0 - 2026-10-17
 
 ### Added
