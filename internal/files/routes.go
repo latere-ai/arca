@@ -31,7 +31,7 @@ func Table() []api.Route {
 			Method: http.MethodGet, Path: "/v1/files/{owner}/{path...}",
 			Action: authorizer.ActionFileRead, Status: http.StatusOK,
 			Summary:     "Read or list files",
-			Description: "Read one object, its subtree with ?list=1, which carries the space's usage at the plane root, or its versions with ?versions=1.",
+			Description: "Read one object, its subtree with ?list=1, which carries the space's usage at the plane root, or its versions with ?versions=1. A listing takes ?q= to keep the files whose name contains that text, ignoring case, and ?recent=1 to answer the newest files first in one page; neither carries prefixes or the usage.",
 		},
 		{
 			Method: http.MethodHead, Path: "/v1/files/{owner}/{path...}",
