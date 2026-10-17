@@ -83,6 +83,16 @@ func TestAPutIsRefusedWithoutALengthAndAboveTheTwoSizes(t *testing.T) {
 		t.Errorf("the refusal does not name the session API:\n%s", over.Body)
 	}
 
+	// An installation served under another base names the session route
+	// there, the address its callers open.
+	based := newHarness(t, func(o *Options) {
+		o.Config = configOf(inlineBytes, 1<<20)
+		o.Config.BasePath = "/v1/storage"
+	})
+	if body := based.put(t, "files/a.md", strings.Repeat("x", inlineBytes+1)).Body.String(); !strings.Contains(body, "POST /v1/storage/uploads") {
+		t.Errorf("the refusal does not name the session route under the base:\n%s", body)
+	}
+
 	small := newHarness(t, func(o *Options) { o.Config = configOf(4, 8) })
 	huge := small.put(t, "files/a.md", strings.Repeat("x", 9))
 	if got := code(t, huge); got != api.CodeObjectTooLarge {

@@ -14,6 +14,7 @@ import (
 	"latere.ai/x/arca/authorizer"
 	"latere.ai/x/arca/internal/api"
 	"latere.ai/x/arca/internal/blob"
+	"latere.ai/x/arca/internal/config"
 
 	"latere.ai/x/arca/object"
 )
@@ -121,9 +122,15 @@ func (s *Service) acceptsLength(length int64) error {
 		return api.Refuse(api.CodeObjectTooLarge,
 			"the body is %d bytes and this server accepts %d", length, s.cfg.MaxUploadBytes)
 	case length > s.cfg.InlineBytes:
+		// The session route is served under the installation's base, so the
+		// refusal names the address a caller of this installation opens.
+		base := s.cfg.BasePath
+		if base == "" {
+			base = config.DefaultBasePath
+		}
 		return api.Refuse(api.CodeObjectTooLarge,
-			"the body is %d bytes and this server streams %d through itself; open a session at POST /v1/uploads",
-			length, s.cfg.InlineBytes)
+			"the body is %d bytes and this server streams %d through itself; open a session at POST %s/uploads",
+			length, s.cfg.InlineBytes, base)
 	default:
 		return nil
 	}
