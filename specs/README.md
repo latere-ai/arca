@@ -76,6 +76,7 @@ spec once every spec in its `depends_on` is at `testing` or later, not
 | [026](026-installation-verification-jobs.md) | Installation verification jobs: the candidate, the deploy archive, the install walk, and the clean-runner check of a published release | validated |
 | [027](027-serving-under-the-capability-prefix.md) | Serving under the capability prefix: the base path, the second audience, and the one batch that moves both callers | complete |
 | [028](028-one-tree.md) | One tree: a space is one tree of files and folders, workspaces are removed, a folder is deleted or copied in one call, and an answer's limits turn versions and the trash off and leave subtrees out of an enumeration | complete |
+| [029](029-finding-files.md) | Finding files: a folder listing narrowed to names that contain a text, and the newest files under a folder | in-progress |
 
 The order of building is the order of the numbers except where a spec's
 `depends_on` says otherwise, and 019 runs alongside all of them: each
