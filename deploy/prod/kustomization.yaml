@@ -40,6 +40,7 @@ patches:
   # The two the shared origin costs: the base the surface is served under,
   # and the second audience a credential addressed to that origin carries.
   - path: base-path.yaml
+  - path: trusted-proxies.yaml
   - path: audience.yaml
   - path: authorizer.yaml
   - path: pull-secret.yaml

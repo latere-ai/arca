@@ -1,0 +1,23 @@
+# The proxies in front of this installation.
+#
+# Every request reaches arcad from the ingress controller's pod, so without
+# this the per-address limit on public links and refused tokens counts the
+# controller, and every anonymous reader shares one budget. The controller
+# runs in the cluster's pod range and forwards the client address it took
+# from Cloudflare in X-Forwarded-For; ARCA_TRUSTED_PROXIES makes arcad read
+# that header from a peer in this range, and from no other. The value is
+# the pod range Lux trusts in platform/deploy/lux/prod/luxd.env.
+#
+# The reaper serves no surface and reads no client address.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: arcad
+spec:
+  template:
+    spec:
+      containers:
+        - name: arcad
+          env:
+            - name: ARCA_TRUSTED_PROXIES
+              value: 10.150.0.0/16
