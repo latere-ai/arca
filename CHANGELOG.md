@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.9.2 - 2026-10-19
+
 ### Security
 
 - **A public object is read on a site apart from the platform's.** An
