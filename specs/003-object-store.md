@@ -8,7 +8,7 @@ depends_on:
 affects: [object/, internal/blob/, internal/config/, cmd/arcad/, .lateregate.yaml]
 effort: medium
 created: 2026-09-18
-updated: 2026-09-19
+updated: 2026-10-18
 author: changkun
 ---
 
@@ -219,9 +219,12 @@ carries the store's composite ETag instead, kind `etag`
 | `PresignGet` | a URL for one key, method `GET`, expiry 5 minutes |
 
 `PresignGet` signs exactly one object, one method, and one expiry, and
-sets `response-content-disposition: attachment; filename="<name>"` when
-the caller asked for a download, so a browser saves the file under its
-own name instead of the key. The five minute lifetime is a constant,
+sets `response-content-disposition` to the `Disposition` its caller
+passes when the read is a download, so a browser saves the file under its
+own name instead of the key. The caller renders the whole header value
+(`api.Attachment`, [[031-download-only-link-reads]], amended
+2026-10-18) and the store passes it through, so the one encoder of a
+file's name is outside the store. The five minute lifetime is a constant,
 `blob.PresignTTL`: a presigned URL is a bearer credential for that
 object, and a short one bounds what a leaked redirect is worth
 ([[015-security-and-threat-model]]).

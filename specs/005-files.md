@@ -257,24 +257,28 @@ creators commits and the other reads `412`.
 | Condition | Answer |
 |---|---|
 | `If-None-Match` matches the stored checksum | `304`, no body |
-| the object is public | `302` to `ARCA_PUBLIC_CDN_URL` over the key, or to a presigned URL when that variable is unset |
-| `size <= ARCA_INLINE_BYTES` | `200`, the body streamed from the bucket, with `ETag`, `Content-Type`, `Content-Length` |
+| the object is public | `302` to `ARCA_PUBLIC_CDN_URL` over the key, or to a presigned URL when that variable is unset or the read is a download |
+| `size <= ARCA_INLINE_BYTES` | `200`, the body streamed from the bucket, with `ETag`, `Content-Type`, `Content-Length` and `X-Content-Type-Options: nosniff` |
 | `size > ARCA_INLINE_BYTES` | `302` to a presigned URL, five minute expiry |
 
 `?inline=1` asks for the bytes and is honored only at or below the
 inline size: above it the redirect stands, because invariant 4 is not a
 default a caller may waive. `?inline=0` asks for the redirect at any
 size, for a client that would rather not hold a connection open.
-`?download=1` puts the file's last segment in the presigned URL's
-content disposition, so a browser saves it under its own name instead of
-the key. [[013-api]] owns the three parameters.
+`?download=1` makes the read an attachment under the file's last
+segment, so a browser saves it under its own name instead of the key:
+the streamed answer carries the disposition and the presigned URL asks
+the bucket for the same one. A read through a link is always one
+([[031-download-only-link-reads]], amended 2026-10-18). [[013-api]] owns
+the three parameters.
 
 A row without bytes is `500` and a reaper finding, never `404`
 (invariant 2).
 
 `HEAD` runs the same gate and answers `Content-Type`,
-`Content-Length`, `ETag`, and `Last-Modified` with no body, including
-for a public object, where `GET` would redirect.
+`Content-Length`, `ETag`, `Last-Modified` and
+`X-Content-Type-Options: nosniff` with no body, including for a public
+object, where `GET` would redirect.
 
 ### List
 

@@ -20,10 +20,11 @@ depends_on:
   - specs/016-release-and-installation.md
   - specs/017-conformance-suite.md
   - specs/018-observability.md
+  - specs/031-download-only-link-reads.md
 affects: [internal/auth/, internal/api/, internal/blob/, internal/files/, internal/shares/, internal/admin/, internal/uploads/, internal/events/, internal/reaper/, internal/config/, object/, deploy/base/, deploy/prod/, test/e2e/, test/deploy/, SECURITY.md]
 effort: medium
 created: 2026-09-18
-updated: 2026-10-12
+updated: 2026-10-18
 author: changkun
 ---
 
@@ -361,6 +362,7 @@ it. Names are as they appear in the tree.
 | public link enumeration | 256 bits from `crypto/rand` under a unique index, and a token bucket per client address in front of the routes that take no bearer | 008, 013 | `TestTheTokenCarriesTheEntropySpec015Requires`, `TestTheAddressRateLimitBoundsWhatHasNoSubject` |
 | a link refusal that says which refusal it was | an unknown, revoked, or expired token, a path outside the prefix, and a denied `link.read` are one sentence naming neither token nor path | 008 | `TestARefusedRedemptionNamesNoToken`, `TestATokenThatResolvesToNothingIsNotFoundBeforeAnyQuestion`, `TestAnAuthorizerThatDeniesLinkReadStopsEveryLink` |
 | a link token in an access log or a referrer | a link response sets `Referrer-Policy: no-referrer`, and the access log names the mux pattern rather than the path, so a token in a path segment reaches no line. The cited tests prove the header and that no bearer reaches a line; that the pattern is logged for a link route in particular is structural and is one of the gaps criterion 23 would surface | 008, 018 | `TestTheThreeRoutesRedeemATokenWithNoBearer`, `TestE2EAPublicLinkIsReadWithNoBearer`, `TestTheRequestLineCarriesTheIdsAndNothingSecret` |
+| a file a link serves rendered as a page of the server's origin, so a page a program wrote runs its script there against whoever opens the link | every answer of the three link routes carries `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox`, set by the frame before any handler writes; the file route names the file through an encoder no name can break out of; a link's redirect asks the bucket for the same disposition, and a public object read through a link is presigned rather than sent to `ARCA_PUBLIC_CDN_URL` | 031, 008 | `TestEveryAnswerOfTheLinkRowsIsDownloadOnly`, `TestEveryAnswerOfTheLinkRoutesIsDownloadOnly`, `TestALinkReadIsAnAttachmentUnderItsName`, `TestALinkReadThatRedirectsAsksTheBucketForTheAttachment`, `TestALinkReadOfAPublicObjectIsPresignedAndNotSentToTheCDN`, `TestAnAttachmentCarriesTheNameExactlyAndNothingElse`, `TestE2EALinkIsReadForDownloadOnly` |
 | a link token in a listing | the token is answered once at creation and is absent from every other shape | 008 | `TestMintingALinkAnswersTheTokenOnce` |
 | a link that grants more than reading | a token grant carries `read`; a create asking for more is `link_read_only` | 008 | `TestALinkThatWouldGrantMoreThanReadingIsRefused`, `TestE2EALinkThatWouldWriteIsRefused` |
 | a link read outside the subtree it names | the prefix is matched by segment, so `files/reports` covers `files/reports/q3.pdf` and not `files/reports-archive` | 008 | `TestALinkServesNothingOutsideItsPrefix` |
@@ -430,6 +432,12 @@ the subject it names, for the answer's `ttl` ([[006-identity]]).
 - A CDN's own access control. `ARCA_PUBLIC_CDN_URL` names an origin the
   operator runs, and what it caches and for how long is configured
   there; a public object's bytes may outlive the revoke in a cache.
+- The bucket's and the CDN's own response headers. A signed URL asks the
+  bucket for a disposition and for no other header, so `nosniff` and the
+  sandbox are on Arca's own answers and a redirected link read is kept a
+  download by its disposition ([[031-download-only-link-reads]]). An
+  owner's read of a public object is sent to the CDN and answered under
+  the type the object was written with, on the CDN's host.
 
 ### The root file
 
@@ -452,6 +460,7 @@ fails, and so does a row naming a control the table above does not have.
 | a decision the authorizer cannot give is a refusal, never an allow | a grants table that cannot answer admitting a stranger |
 | a presigned URL names one object, one method, and one expiry, and is never logged | a presigned URL leaking from a redirect, a log, or a history |
 | a public link resolves to the object its token names and to nothing beside it | a link read outside the subtree it names |
+| a file a link serves is saved as a download and never rendered as a page of the server's origin | a file a link serves rendered as a page of the server's origin, so a page a program wrote runs its script there against whoever opens the link |
 Two commitments the first draft of this section carried are not in the
 root file and are not in this table: that Arca reads no claim for
 meaning, and the list of the three ways a byte leaves. Both are true and
@@ -519,6 +528,7 @@ their own tier.
 | 24 | Every commitment in `SECURITY.md` is a row of this spec's commitment mapping and every row of that mapping is a control of the table, and every spec a control cites is in this file's `depends_on` | `TestEveryCommitmentOfTheRootFileIsAControl`, `TestEverySpecAControlNamesIsADependency` |
 | 25 | The lookup sites addressed by a server-minted id answer a deny exactly as an absence, developer detail included, so [[013-api]]'s sentence holds with no route excepted | `TestEveryShareLookupDenyIsTheAnswerAnAbsenceGives` |
 | 26 | A question that names two paths carries the lower of the caller's rungs on them, and an enumeration leaves out every path an answer's `limits.omit` names, with an entry that is not a path of the space refused | `TestAGrantMustCoverBothEnds`, `TestAMoveNeedsAGrantOnBothEnds`, `TestACopyNeedsAGrantOnBothEnds`, `TestStoreAnOmittedSubtreeIsLeftOutOfEveryEnumeration`, `TestAnOmitEntryIsAPathOfTheSpace` |
+| 27 | Every answer of the three link routes carries `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox`, the file route names the file in a disposition no name can break, and a link's redirect asks the bucket for that disposition | `TestEveryAnswerOfTheLinkRowsIsDownloadOnly`, `TestEveryAnswerOfTheLinkRoutesIsDownloadOnly`, `TestAnAttachmentCarriesTheNameExactlyAndNothingElse`, `TestALinkReadThatRedirectsAsksTheBucketForTheAttachment`, `TestE2EALinkIsReadForDownloadOnly` |
 
 ## Outcome
 

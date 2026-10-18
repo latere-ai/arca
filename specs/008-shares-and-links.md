@@ -9,7 +9,7 @@ depends_on:
 affects: [space/, authorizer/, internal/shares/, internal/api/, internal/store/, docs/]
 effort: large
 created: 2026-09-18
-updated: 2026-10-12
+updated: 2026-10-18
 author: changkun
 ---
 
@@ -346,7 +346,7 @@ three are the same three routes the service Arca replaces served:
 |---|---|---|
 | GET | `/v1/shares/links/{token}/meta` | `{"kind","owner","path_prefix"}`, what a viewer needs before it fetches anything |
 | GET | `/v1/shares/links/{token}` | a listing of the subtree, paginated |
-| GET | `/v1/shares/links/{token}/files/{path...}` | one object, as a redirect to a presigned URL, or inline below `ARCA_INLINE_BYTES` |
+| GET | `/v1/shares/links/{token}/files/{path...}` | one object, as a redirect to a presigned URL, or inline below `ARCA_INLINE_BYTES`, always as a download |
 
 These three require no bearer token, and the order they work in is
 fixed. The handler resolves the token to its grant first, refuses it
@@ -361,6 +361,16 @@ resolved, which is the branch [[006-identity]]'s diagram draws.
 
 Serving is confined to the grant: only paths the prefix covers, and reads
 only, because a token grant carries `read`.
+
+**Amended 2026-10-18 ([[031-download-only-link-reads]]):** every answer
+of the three routes is a download. Each carries
+`Content-Disposition: attachment`, `X-Content-Type-Options: nosniff` and
+`Content-Security-Policy: sandbox`, set by the frame before the handler
+writes, refusals included. The file route names the file in the
+disposition, and its redirect above `ARCA_INLINE_BYTES` asks the bucket
+for the same disposition whatever `?download=` says. A URL alone opens
+these routes in a browser, so a file a program wrote is saved and never
+rendered as a page of the server's origin.
 
 Requiring no bearer token is deliberate: a link that needed one would not
 be a link. [[015-security-and-threat-model]] carries the consequences,
@@ -378,10 +388,20 @@ grant and never from the path: the service Arca replaces read
 `files/avatar` and `files/public/**` as public by name, and Arca reads
 no such convention. Nothing else depends on the distinction.
 
+**Amended 2026-10-18 ([[031-download-only-link-reads]]):** the `302` to
+`ARCA_PUBLIC_CDN_URL` is the owner's own read of a public object. A read
+of it through the link is presigned with the attachment disposition,
+because the CDN's URL is unsigned and can ask for no disposition, and
+the object would be answered under the type it was written with on the
+CDN's host. The object stays public in the bucket.
+
 There is no HTML page. The service Arca replaces rendered `/s/{token}` as
 a branded viewer; Arca serves JSON and bytes, and the hosted platform
 that builds on Arca renders whatever page it wants on top of these three
-routes.
+routes. Since [[031-download-only-link-reads]] such a page reads them
+with `fetch` or shows an image in an `img` element, neither of which
+reads the disposition; a frame that loads the file route saves the file
+rather than showing it.
 
 ### Revocation
 

@@ -1,14 +1,13 @@
 ---
 title: "Download-only link reads: every answer of the three link routes is an attachment that is never sniffed and never runs, a link's redirect asks the bucket for the attachment, and a file's name is encoded so that no name can break the header"
-status: drafted
+status: complete
 track: core
 depends_on:
   - specs/003-object-store.md
   - specs/005-files.md
   - specs/008-shares-and-links.md
   - specs/013-api.md
-  - specs/015-security-and-threat-model.md
-affects: [internal/api/, internal/files/, internal/blob/, internal/shares/, test/conformance/, test/e2e/, docs/api.md, specs/003-object-store.md, specs/005-files.md, specs/008-shares-and-links.md, specs/013-api.md, specs/015-security-and-threat-model.md]
+affects: [internal/api/, internal/files/, internal/blob/, internal/shares/, api/openapi.yaml, test/conformance/, test/e2e/, docs/api.md, docs/configuration.md, SECURITY.md, specs/003-object-store.md, specs/005-files.md, specs/008-shares-and-links.md, specs/013-api.md, specs/015-security-and-threat-model.md]
 effort: small
 created: 2026-10-18
 updated: 2026-10-18
@@ -222,11 +221,64 @@ size was answered inline.
 
 | # | Criterion | Proved by | State |
 |---|---|---|---|
-| 1 | Every answer of the three link routes carries `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox`: the meta, the listing, the file, a refusal of each, and the `not_implemented` of a build with no shares service | `internal/api` and `internal/shares` unit tests over each route and each refusal | |
-| 2 | The file route's disposition names the path's last segment in both forms, set before the conditional check, so a `304` carries it | `internal/files` unit test over `ServeObject`'s `200` and `304` | |
-| 3 | `api.Attachment` leaves no control character, no format character and no unescaped quote in the header for any name; it falls back to `download` for an empty, dot-only or over-long name; and `mime.ParseMediaType` decodes its `filename*` back to the cleaned name, for ASCII, CJK, accented and right-to-left names | `internal/api` table test, and a fuzz target over arbitrary names | |
-| 4 | A link read above the inline size presigns with the disposition whatever `?download=` says, and a link read of a public object presigns rather than redirecting to `ARCA_PUBLIC_CDN_URL` | `internal/files` unit test reading `response-content-disposition` off the memory store's URL | |
-| 5 | The bucket answers a presigned read with the disposition the URL asked for, a non-ASCII name included | `internal/blob` store-tier test against MinIO | |
-| 6 | An owner's read carries `nosniff`, no disposition and no policy by default; `?download=1` is an attachment at or below the inline size and presigned with the disposition above it and for a public object | `internal/files` unit tests | |
-| 7 | `arcad` as a process answers a link's file, meta and listing with the three headers and the named disposition | `test/e2e` | |
-| 8 | The portable suite holds an installation's link file route to the three headers | `test/conformance` `case008LinkFile` | |
+| 1 | Every answer of the three link routes carries `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox`: the meta, the listing, the file, a refusal of each, and the `not_implemented` of a build with no shares service | `internal/api` `TestEveryAnswerOfTheLinkRowsIsDownloadOnly`, with a bound service and with none; `internal/shares` `TestEveryAnswerOfTheLinkRoutesIsDownloadOnly`, over the three routes, an unknown token on each, and a path outside the prefix | built |
+| 2 | The file route's disposition names the path's last segment in both forms, set before the conditional check, so a `304` carries it | `internal/files` `TestALinkReadIsAnAttachmentUnderItsName`, `TestALinkRevalidationKeepsTheName` | built |
+| 3 | `api.Attachment` leaves no control character, no format character and no unescaped quote in the header for any name; it falls back to `download` for an empty, dot-only or over-long name; and `mime.ParseMediaType` decodes its `filename*` back to the cleaned name, for ASCII, CJK, accented and right-to-left names | `internal/api` `TestAnAttachmentCarriesTheNameExactlyAndNothingElse`, and `FuzzAttachment`, whose seeds run with the unit tier | built |
+| 4 | A link read above the inline size presigns with the disposition whatever `?download=` says, and a link read of a public object presigns rather than redirecting to `ARCA_PUBLIC_CDN_URL` | `internal/files` `TestALinkReadThatRedirectsAsksTheBucketForTheAttachment`, `TestALinkReadOfAPublicObjectIsPresignedAndNotSentToTheCDN` | built |
+| 5 | The bucket answers a presigned read with the disposition the URL asked for, a non-ASCII name included | `internal/blob` `TestStoreAPresignedReadIsOneKeyAndOneMethod` against MinIO | built |
+| 6 | An owner's read carries `nosniff`, no disposition and no policy by default; `?download=1` is an attachment at or below the inline size and presigned with the disposition above it and for a public object | `internal/files` `TestAnOwnersReadIsInlineAndNeverSniffed`, `TestALinkReadOfAPublicObjectIsPresignedAndNotSentToTheCDN`, `TestAVersionDownloadIsAnAttachment` | built |
+| 7 | `arcad` as a process answers a link's file, meta and listing with the three headers and the named disposition | `test/e2e` `TestE2EALinkIsReadForDownloadOnly`, which also follows the redirect to MinIO and reads the disposition the bucket answers | built |
+| 8 | The portable suite holds an installation's link file route to the three headers | `test/conformance` `case008LinkFile` | built |
+
+## Outcome
+
+Complete on 2026-10-18. The headers are set by `DownloadOnly` in
+`internal/api/disposition.go`, called first in the frame's dispatcher
+`(*API).link`, so every answer of the three rows carries them, the
+`not_implemented` of a build with no shares service included. The name
+is rendered by `api.Attachment` in the same file. `internal/files`
+`ServeObject` is the link read: `serve` sets the named disposition
+before the conditional check when the read is a link's, and `attachment`
+makes a link read a download whatever `?download=` says, which sends a
+public object to `presign` rather than to the CDN. `blob.PresignOptions`
+carries `Disposition`, the rendered header, in place of `Filename`, and
+`blob.S3` and `blob.Memory` pass it through. `headers`, which a streamed
+read and a `HEAD` share, sets `nosniff`. Every criterion has a passing
+test in its tier. Criterion 5 runs in the store tier, criterion 7 in the
+e2e tier and criterion 8 in the conformance tier, which the gate does
+not run; all three were run against the local stack for this change
+(`make test-store` for `internal/blob` and `internal/files`,
+`make test-e2e`, `make test-conformance`). `FuzzAttachment` ran for
+twenty seconds, a little over a million names, with no failure.
+
+[[015-security-and-threat-model]] gains the control "a file a link
+serves rendered as a page of the server's origin" and criterion 27, and
+`SECURITY.md` the commitment that a file a link serves is saved as a
+download and never rendered as a page of the server's origin, which the
+mapping of that spec answers with the new control.
+
+Built where the design was silent, each a choice to review:
+
+- **The headers are the frame's, not the handlers'.** Setting them in
+  `(*API).link` rather than in each of the three handlers of
+  `internal/shares` covers a refusal written by any layer below and a
+  build that binds no shares service. `Referrer-Policy` stays where it
+  was, in the handlers.
+- **The fallback name is `download`.** A name with nothing left once it
+  is cleaned, or longer than 255 bytes, is saved under it. A long name is
+  not cut, because a cut name loses its extension.
+- **The ASCII stand-in replaces a character, not a byte.** `résumé.pdf`
+  falls back to `r_sum_.pdf`; `filename*` carries the name exactly.
+- **A link read keeps the stored type.** It is not rewritten to
+  `application/octet-stream`, as a page that previews a linked image in
+  an `img` element needs `image/svg+xml` for an SVG, and the disposition,
+  `nosniff` and the sandbox already keep a browser from rendering it. The
+  signed URL asks the bucket for the disposition only, for the same
+  reason.
+- **An owner's download is a download everywhere.** `?download=1` on a
+  streamed read, on a version and on a public object follows the link
+  read's rule. Before, it changed only the redirect.
+- **An invalid `?download=` on a public object is now refused.** The
+  parameter is read before the public branch, which it now steers, so
+  `?download=maybe` is `invalid_field` there as it already was for every
+  other object.
