@@ -411,6 +411,13 @@ jobs:
           ARCA_PREVIOUS_SUITE_MD: ${{ github.workspace }}/release-evidence/previous-suite.md
         run: |
           set -euo pipefail
+          # The suite above and this one drive the same subjects, and the two
+          # together send more requests than the per-subject bucket of spec
+          # 015 holds in a minute (ARCA_REQUESTS_PER_MINUTE, 600 on the
+          # stack). The bucket refills within a minute, so this suite starts
+          # with a full one rather than failing on rate_limited answers that
+          # say nothing about the release.
+          sleep 60
           go test -v -count=1 -timeout 30m -tags=tiers ./test/conformance/ \
             -run '^TestPreviousSuitePasses$' 2>&1 | tee previous-suite.log
           { echo; cat release-evidence/previous-suite.md; } >> release-evidence/conformance.md
