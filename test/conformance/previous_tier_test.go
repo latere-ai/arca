@@ -116,8 +116,9 @@ func goCommand(t *testing.T, module string, args ...string) string {
 }
 
 // goEnv is the environment of a go command in the temporary module: this
-// one, with no workspace that could pull this tree's packages in, and the
-// module free to record what the previous suite needs.
+// one, with GOWORK off so no go.work file above the module pulls this
+// tree's packages in, and the module free to record what the previous
+// suite needs.
 func goEnv() []string {
 	return append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod")
 }
