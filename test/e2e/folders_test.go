@@ -3,12 +3,13 @@
 
 //go:build tiers
 
-// The e2e tier of spec 028's two folder operations: arcad as a process, the
-// bytes in MinIO and the rows in Postgres. A folder is deleted and copied in
-// one call each, and what this tier reads that no fake can show is the
-// bucket: a copy made inside the store is readable at both ends through the
-// presigned URL a read answers, under a key of its own, and a permanent
-// delete leaves no key behind and gives the space its bytes back.
+// The e2e tier of the folder operations of specs 028 and 030: arcad as a
+// process, the bytes in MinIO and the rows in Postgres. A folder is deleted,
+// copied and moved in one call each, and what this tier reads that no fake
+// can show is the bucket: a copy made inside the store is readable at both
+// ends through the presigned URL a read answers, under a key of its own, a
+// move reads at its new paths from the keys it had, and a permanent delete
+// leaves no key behind and gives the space its bytes back.
 package e2e
 
 import (
@@ -336,5 +337,108 @@ func TestE2EAFolderDeleteTrashesWithoutChargingAndAPermanentOneGivesTheBytesBack
 	}
 	if final, _ := i.foldersUsage(t); final != afterBytes {
 		t.Errorf("a delete of an empty folder moved the usage from %d to %d", afterBytes, final)
+	}
+}
+
+// TestE2EAFolderMoveRenamesItsRowsAndLeavesTheBucketAlone is spec 030
+// against both stores: one call moves every object under the folder, each
+// keeps its object id and so its key, the bytes read at the new paths
+// through the bucket, the history is at the new path, the usage does not
+// move, the log holds one move with the counts, and a second move onto the
+// destination is refused whole.
+func TestE2EAFolderMoveRenamesItsRowsAndLeavesTheBucketAlone(t *testing.T) {
+	i := filesInstallation(t)
+	tree := map[string]string{
+		"/plan.md":      "the plan, second draft\n",
+		"/deeper/a.txt": "two folders down\n",
+	}
+	i.foldersWrite(t, "files/mv-src/plan.md", "the plan, first draft\n")
+	var total int64
+	for leaf, content := range tree {
+		i.foldersWrite(t, "files/mv-src"+leaf, content)
+		total += int64(len(content))
+	}
+	db, bucket := i.database(t), i.bucket(t)
+	ids := map[string]object.ID{}
+	for leaf := range tree {
+		ids[leaf] = i.foldersObjectID(t, db, "files/mv-src"+leaf)
+	}
+	beforeBytes, beforeFiles := i.foldersUsage(t)
+
+	code, body := i.foldersCall(t, http.MethodPost, "files/mv-src", `{"move_to":"files/mv-dst/2026","recursive":true}`)
+	if code != http.StatusOK {
+		t.Fatalf("the folder move answered %d: %s", code, body)
+	}
+	var answer struct {
+		Path  string `json:"path"`
+		Files int    `json:"files"`
+		Bytes int64  `json:"bytes"`
+	}
+	if err := json.Unmarshal([]byte(body), &answer); err != nil {
+		t.Fatalf("the folder move answered %s: %v", body, err)
+	}
+	if answer.Path != "files/mv-dst/2026" || answer.Files != len(tree) || answer.Bytes != total {
+		t.Fatalf("the folder move answered %+v, want files/mv-dst/2026, %d files and %d bytes", answer, len(tree), total)
+	}
+
+	for leaf, content := range tree {
+		moved := "files/mv-dst/2026" + leaf
+		if got := i.foldersObjectID(t, db, moved); got != ids[leaf] {
+			t.Errorf("%q names the object %s, want the %s it had before the move", moved, got, ids[leaf])
+		}
+		if _, err := bucket.Head(t.Context(), ids[leaf].Key(i.prefix)); err != nil {
+			t.Errorf("the key of %s is not in the bucket after the move: %v", moved, err)
+		}
+		if got := i.foldersFetch(t, moved); !bytes.Equal(got, []byte(content)) {
+			t.Errorf("%q fetched %q from the bucket, want %q", moved, got, content)
+		}
+		gone := i.filesDo(t, http.MethodGet, i.filesObject("files/mv-src"+leaf), nil)
+		_ = gone.Body.Close()
+		if gone.StatusCode != http.StatusNotFound {
+			t.Errorf("%q reads %d after the folder moved", "files/mv-src"+leaf, gone.StatusCode)
+		}
+	}
+	history := i.filesDo(t, http.MethodGet, i.filesObject("files/mv-dst/2026/plan.md")+"?versions=1", nil)
+	var versions struct {
+		Entries []struct {
+			Checksum string `json:"checksum"`
+		} `json:"entries"`
+	}
+	filesJSON(t, history, &versions)
+	if len(versions.Entries) != 1 || versions.Entries[0].Checksum != filesDigest("the plan, first draft\n") {
+		t.Errorf("the history at the new path is %+v, want the first draft", versions.Entries)
+	}
+	if afterBytes, afterFiles := i.foldersUsage(t); afterBytes != beforeBytes || afterFiles != beforeFiles {
+		t.Errorf("the folder move moved the usage from %d bytes in %d files to %d in %d",
+			beforeBytes, beforeFiles, afterBytes, afterFiles)
+	}
+	moves := 0
+	for _, e := range i.tail(t, filesCaller, i.filesOwner()) {
+		if e.Action != "move" || e.Path != "files/mv-dst/2026" {
+			continue
+		}
+		moves++
+		if e.Detail["from"] != "files/mv-src" || e.Detail["recursive"] != true ||
+			e.Detail["files"] != float64(len(tree)) || e.Detail["bytes"] != float64(total) {
+			t.Errorf("the move event carries %v", e.Detail)
+		}
+	}
+	if moves != 1 {
+		t.Errorf("one folder move left %d move events at the destination, want one", moves)
+	}
+
+	// A second folder with an object at a path the first one now holds is
+	// refused whole, and nothing of it moves.
+	i.foldersWrite(t, "files/mv-other/plan.md", "another plan\n")
+	i.foldersWrite(t, "files/mv-other/fresh.md", "nothing holds this one\n")
+	code, body = i.foldersCall(t, http.MethodPost, "files/mv-other", `{"move_to":"files/mv-dst/2026","recursive":true}`)
+	if code != http.StatusConflict || errorCode(t, []byte(body)) != "path_taken" {
+		t.Fatalf("a folder move onto a taken path answered %d: %s", code, body)
+	}
+	if got := filesRead(t, i.filesDo(t, http.MethodGet, i.filesObject("files/mv-other/fresh.md"), nil)); got != "nothing holds this one\n" {
+		t.Errorf("a refused folder move took fresh.md; its source reads %q", got)
+	}
+	if got := filesRead(t, i.filesDo(t, http.MethodGet, i.filesObject("files/mv-dst/2026/plan.md"), nil)); got != tree["/plan.md"] {
+		t.Errorf("a refused folder move overwrote its destination, which reads %q", got)
 	}
 }
