@@ -14,8 +14,9 @@ refused before it is pushed.
   answers the number of files and bytes moved. No bytes are copied and
   the space's usage does not change. Each object keeps its versions, its
   stars and its public link, and a share or a link on the folder or
-  inside it moves with the folder. A trashed object under the folder
-  stays where it was. Any path the move would take that is already held,
+  inside it moves with the folder, unless the destination already holds
+  something the share would then cover, in which case the share stays
+  where it was. A trashed object under the folder stays where it was. Any path the move would take that is already held,
   by a live or a trashed object, is `409` `path_taken` and nothing moves;
   a folder of more than 10,000 objects is `422` `too_many_objects`, as
   for a copy. The authorizer is asked `file.write` once, with both
