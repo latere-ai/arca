@@ -85,7 +85,7 @@ on every question with `from`.
 | Objects | every live object under the folder that the answer's `limits.omit` covers at neither end | a trashed object, the object at the folder's own path, and an object left out by `limits.omit` |
 | Versions | the history of each moved object, with it | the history of what stays |
 | Stars | a star on a moved object follows it; a subject that had starred the destination path keeps one star, as a move of one object leaves | stars on what stays |
-| Grants and links | a grant or a link whose prefix is the folder or under it follows to the same prefix below `move_to` | one whose prefix is at, under or above a subtree `limits.omit` covers, at either end; and one whose prefix is the path of an object that stays (a trashed one, or the object at the folder's own path), which goes on naming that object |
+| Grants and links | a grant or a link whose prefix is the folder or under it follows to the same prefix below `move_to` | one whose prefix is at, under or above a subtree `limits.omit` covers, at either end; one whose prefix is the path of an object that stays (a trashed one, or the object at the folder's own path), which goes on naming that object; and one whose new prefix would cover a row, live or trashed, that the move did not write |
 | Publicity | a public object stays public: publicity is a setting on the bucket key ([[008-shares-and-links]]), and the key does not change | |
 | Upload sessions | | a session open under the folder is left alone. One that completes later writes its object at the session's path, by the answer it gets then, as under a folder delete |
 
@@ -94,6 +94,15 @@ exact-path grant with a moved object: left behind on a path that is now
 free, it would cover the next object written there, which its owner
 never shared. A grant on an ancestor of the folder covers a subtree and
 stays where it is, as on the move of one object.
+
+A grant never comes to cover more than it did. The destination may be a
+folder that already holds objects, or an ancestor of the source
+(`files/notes/deep` moved to `files/notes`), and a grant carried onto
+such a prefix would hand its grantee objects nobody shared with them. So
+a grant whose new prefix covers any row the move did not write stays
+where it is, and the moved objects leave what it covers. This is the
+rule migration `0006_one_tree.up.sql` of [[028-one-tree]] kept for a
+grant on the removed plane: a move narrows access and never widens it.
 
 A trashed object stays at its path with its history. It is in the trash
 by itself and is restored to the path it was trashed from, as each
@@ -201,7 +210,7 @@ for every move.
 | # | Criterion | Proved by | State |
 |---|---|---|---|
 | 1 | A folder move renames every live object under the folder to the same path below `move_to`, keeping each row's id, object id, size and checksum, makes no bucket call and leaves the usage as it was | `internal/files` `TestAFolderMoveRenamesTheRowsAndTouchesNoBytes` with `blob.Counting`, and `TestStoreAFolderMoveMakesNoBucketCallAndCarriesWhatKeysOnThePath` against MinIO and Postgres; `internal/store` `TestStoreAFolderMoveRenamesTheRowsAndWhatKeysOnThem` | built |
-| 2 | Versions and stars of each moved object follow it; a grant and a link under the folder follow it; a grant on an ancestor stays | `TestAFolderMoveRenamesTheRowsAndTouchesNoBytes`; `TestStoreAFolderMoveMakesNoBucketCallAndCarriesWhatKeysOnThePath`; `internal/store` `TestStoreAFolderMoveRenamesTheRowsAndWhatKeysOnThem`, `TestAFolderMoveCarriesTheStarsAndLeavesOnePerSubject` | built |
+| 2 | Versions and stars of each moved object follow it; a grant and a link under the folder follow it; a grant on an ancestor stays, and so does one whose new prefix would cover a row the move did not write | `TestAFolderMoveRenamesTheRowsAndTouchesNoBytes`; `TestStoreAFolderMoveMakesNoBucketCallAndCarriesWhatKeysOnThePath`; `internal/store` `TestStoreAFolderMoveRenamesTheRowsAndWhatKeysOnThem`, `TestStoreAFolderMoveLeavesTheGrantsAnOmissionKeeps`, `TestMovingTheGrantsUnderAFolderLeavesWhatStaysBehind`, `TestAFolderMoveCarriesTheStarsAndLeavesOnePerSubject` | built |
 | 3 | A trashed object, the object at the folder's own path and a sibling whose name begins with the folder's stay where they are, with their history and an exact-path grant | `TestAFolderMoveRenamesTheRowsAndTouchesNoBytes`; `internal/store` `TestStoreAFolderMoveRenamesTheRowsAndWhatKeysOnThem`, `TestStoreAFolderMoveLeavesTheGrantsAnOmissionKeeps` | built |
 | 4 | A destination a live or a trashed row holds, an object this move would move away included, is `path_taken` and nothing moves | `TestAFolderMoveOntoATakenPathMovesNothing`; `internal/store` `TestStoreAFolderMoveRefusesADestinationAnyRowHolds`, `TestTakenNamesTheFirstPathARowHolds` | built |
 | 5 | `move_to` equal to the folder or inside it is `invalid_field` on `move_to`; the plane root is `invalid_path`; nothing under the folder is `not_found` | `TestAFolderMoveRefusesWhatIsNotAMoveOfAFolder`, `TestAPostNamesOneOperationAndAPathInThePlane` | built |
@@ -238,14 +247,17 @@ id and the same key in MinIO before and after.
 
 Built where the design was silent, each a choice to review:
 
-- **Grants under the folder follow it.** The move of one object carries
-  only a grant on its exact path. A folder move carries every grant and
-  link whose prefix is the folder or under it, because the folder's path
-  is what the move frees. One at, under or above an omitted subtree
-  stays, by `DeleteUnder`'s rule, and one on the path of an object still
-  there stays with that object. The alternative, carrying exact-path
-  grants only, leaves a grant on an emptied folder to cover whatever is
-  written there next.
+- **Grants under the folder follow it, and never widen.** The move of
+  one object carries only a grant on its exact path. A folder move
+  carries every grant and link whose prefix is the folder or under it,
+  because the folder's path is what the move frees. One at, under or
+  above an omitted subtree stays, by `DeleteUnder`'s rule; one on the
+  path of an object still there stays with that object; and one whose new
+  prefix would cover a row, live or trashed, that the move did not write
+  stays, so moving a shared folder into a folder that already holds
+  objects keeps the share where it was rather than extending it. The
+  alternative, carrying exact-path grants only, leaves a grant on an
+  emptied folder to cover whatever is written there next.
 - **A trashed object stays.** The request names live objects. A trashed
   one keeps its path, its history and an exact-path grant, and is
   restored where it was trashed from. The alternative, moving it with the
