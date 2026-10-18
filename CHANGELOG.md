@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.8.1 - 2026-10-18
+
 ### Fixed
 
 - **A release is published again after the previous release's suite
