@@ -208,6 +208,7 @@ func cases() []specCases {
 		{"010", cases010()},
 		{"012", cases012()},
 		{"028", cases028()},
+		{"030", cases030()},
 		{"017", []testCase{{name: "Pending", group: GroupPending, run: case017Pending}}},
 	}
 }

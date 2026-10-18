@@ -247,11 +247,13 @@ func TestSuiteCatchesADrift(t *testing.T) {
 		}},
 		// The codes drift sends path_taken out as not_found, so every case
 		// that makes the target refuse a live destination catches it: a
-		// move onto one, a restore onto one, and a copy onto one.
+		// move onto one, a restore onto one, a copy onto one, and a folder
+		// move onto one.
 		{"codes", map[string][]string{
 			"005/MoveKeepsTheETag": {"POST /v1/files/{owner}/{path...}"},
 			"013/ErrorTable":       {"POST /v1/trash/restore"},
 			"028/FolderCopy":       {"POST /v1/files/{owner}/{path...}"},
+			"030/FolderMove":       {"POST /v1/files/{owner}/{path...}"},
 		}},
 		// The etag drift reaches the validator a route answers, so the
 		// cases that read one catch it. The version history is not one of
