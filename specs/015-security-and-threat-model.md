@@ -437,7 +437,11 @@ the subject it names, for the answer's `ttl` ([[006-identity]]).
   sandbox are on Arca's own answers and a redirected link read is kept a
   download by its disposition ([[031-download-only-link-reads]]). An
   owner's read of a public object is sent to the CDN and answered under
-  the type the object was written with, on the CDN's host.
+  the type the object was written with, on the CDN's host. The operator
+  keeps that host on a registrable domain apart from the origin's and from
+  any console or sign-in, where a page someone stored would be same-site
+  with them; the hosted installation's deploy tests require it of its own
+  overlay.
 
 ### The root file
 
