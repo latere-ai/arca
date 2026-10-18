@@ -8,7 +8,7 @@ depends_on:
 affects: [authorizer/, internal/auth/, internal/api/, cmd/arcad/, .lateregate.yaml, docs/]
 effort: medium
 created: 2026-09-18
-updated: 2026-10-12
+updated: 2026-10-18
 author: changkun
 ---
 
@@ -227,6 +227,41 @@ order none, `read`, `write`, `manage`, and it is absent where the caller
 holds none on either. The owner policy's grant step decides on the same
 rung, so both modes read one answer about the two paths.
 
+**Amended 2026-10-18.** A `File` and an `Upload` also carry `grants`:
+every subject holding a live subject grant on a prefix of the resource's
+path, each with the highest rung it holds there, as
+`[{"subject": "<issuer>|<sub>", "permission": "read"}]`, ordered by
+subject in byte order. On a question that names a `from`, a subject is
+listed only when it holds a rung on both paths, with the lower of the
+two, as `grant` is read. The list holds at most `authorizer.MaxGrants`,
+64, entries; past that it lists the first 64 by subject and the question
+carries `grants_truncated: true`. It is sent on the questions that carry
+`grant`'s conditions, a path, a caller, and a space that is not the
+caller's own, as an empty list where nobody holds a grant, and is absent
+on the rest, so an endpoint tells "nobody holds one" from "this question
+does not say", and from a server that predates the member. A token grant
+is never listed: it names no subject.
+
+`grant` is the caller's own rung and is unchanged. `grants` is for an
+endpoint that decides a question as a subject other than the caller: a
+platform that decides an agent's question as the person the agent acts
+for reads that person's rung from it. Arca cannot fill `grant` for that
+person, because it reads no claim and so does not know whom the endpoint
+decides as; listing every holder leaves the choice to the endpoint, which
+knows. A subject a truncated list does not name may hold a rung, so an
+endpoint that does not find its subject in a truncated list refuses
+rather than read it as none. The bound keeps the question a few
+kilobytes whatever a space has shared: an endpoint reads the question
+whole before it decides, and a body past its bound is no decision.
+
+`internal/auth` resolves `grants` through the `GrantLookup` seam with one
+read of the table, `Holders`, beside the reading `grant` takes, so a
+question that carries the member costs one more indexed query and a
+question about the caller's own space costs none. A table that cannot
+answer it is `authorizer_unavailable`, never a deny, on the same rule as
+`grant`. The owner policy does not read the member: its grant step reads
+the caller's rung, and the caller is the subject it decides as.
+
 The member is spelled `grant` on the wire and nowhere else, and that
 spelling is the whole of the pairing between this core and an endpoint:
 Arca renders it from `authorizer.File.Grant` and
@@ -368,6 +403,7 @@ and the owner policy is not consulted.
 | 13 | Every question about a file or an upload that names a path carries the caller's rung as `grant`, absent where they hold none and absent on the caller's own space, in both modes, and a grants table that cannot answer is `authorizer_unavailable` | `internal/auth` grant test |
 | 14 | Under an external authorizer that admits the ladder's actions of `resource.grant`, a grantee reads a shared object and a caller with no grant on it reads a missing one | `test/conformance` `case006Grantee` |
 | 15 | A question that names a `from` carries the lower of the caller's rungs on `path` and on `from`, and the owner policy decides on that rung | `internal/auth` `TestAGrantMustCoverBothEnds`; `internal/files` `TestAMoveNeedsAGrantOnBothEnds` |
+| 16 | A question about a file or an upload that carries `grant`'s conditions carries `grants`: every subject's highest live rung on the path, the lower of two on a question that names a `from`, ordered by subject, an empty list where nobody holds one, at most 64 entries and `grants_truncated` past them; the caller's own space and an anonymous question carry neither; a table that cannot answer is `authorizer_unavailable` | `internal/auth` `TestTheQuestionCarriesEveryHoldersGrant`; `internal/store` `TestStoreSharesHoldersAreEachSubjectsRungOnThePath` |
 
 ## Not in this spec
 
@@ -418,6 +454,7 @@ What proves each criterion:
 | 13 | `internal/auth`, `TestTheQuestionCarriesTheCallersGrant` (eleven rows over the kinds, the rungs, the anonymous caller and the space's own owner), `TestAGrantsTableThatCannotAnswerStopsTheQuestion`, `TestBothModesResolveTheGrant`, `TestNoGrantsTableIsNoGrant`, `TestTheResourceTheHandlerBuiltIsNotChanged` |
 | 14 | `test/conformance`, `case006Grantee`, against the grants mode of `test/stubs/authorizer` |
 | 15 | added 2026-10-12: `internal/auth`, `TestAGrantMustCoverBothEnds` and `TestATableThatCannotAnswerForTheSourceStopsTheQuestion`; `internal/shares`, `TestAQuestionWithASourceIsDecidedOnBothPaths`; `internal/files`, `TestAMoveNeedsAGrantOnBothEnds`, through the routes under the owner policy |
+| 16 | added 2026-10-18: `internal/auth`, `TestTheQuestionCarriesEveryHoldersGrant`, `TestTheHoldersAreBoundedAndMarkedTruncated` and `TestAGrantsTableThatCannotListTheHoldersStopsTheQuestion`; `internal/shares`, `TestTheHoldersAreReadFromTheTable`; `internal/store`, `TestStoreSharesHoldersAreEachSubjectsRungOnThePath` against Postgres; `authorizer`, `TestGrantsAreSentAsAListOfHolders` |
 
 Coverage of the owning packages: `authorizer` 100.0% of statements,
 `internal/auth` 90.6%.
