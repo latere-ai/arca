@@ -640,8 +640,8 @@ The vocabulary is fifteen actions over six kinds:
 
 | Kind | Actions | Fields |
 |---|---|---|
-| `File` | `file.read`, `file.write`, `file.delete`, `file.list`, `file.restore` | `owner`, `path`, `plane`, `size`, `from`, `recursive`, `copy`, `grant` |
-| `Upload` | `upload.write` | `owner`, `path`, `size`, `grant` |
+| `File` | `file.read`, `file.write`, `file.delete`, `file.list`, `file.restore` | `owner`, `path`, `plane`, `size`, `from`, `recursive`, `copy`, `grant`, `grants`, `grants_truncated` |
+| `Upload` | `upload.write` | `owner`, `path`, `size`, `grant`, `grants`, `grants_truncated` |
 | `Share` | `share.create`, `share.read`, `share.list`, `share.revoke` | `owner`, `path`, `grantee`, `permission` |
 | `Link` | `link.create`, `link.read`, `link.revoke` | `owner`, `path` |
 | `Event` | `event.read` | `owner` |
@@ -670,6 +670,36 @@ On a question that carries `from`, a move or a copy, it is the lower of the
 rungs the caller holds on `path` and on `from`, so a grant that covers one
 end and not the other gives none. An endpoint that honors Arca's grants
 reads it; one that keeps its own permissions ignores it.
+
+`grants` is the rung of everyone who holds one on the resource, for an
+endpoint that decides a question as somebody other than the caller, such
+as an agent's request decided as the person the agent acts for. `grant`
+cannot serve it: it is the caller's, and Arca reads no claim, so it does
+not know whom the endpoint decides as. `grants` lists each subject that
+holds a grant on the path, with the highest rung it holds there, sorted
+by subject:
+
+```json
+"grants": [
+  {"subject": "https://issuer.example|4c1d", "permission": "read"},
+  {"subject": "https://issuer.example|7e20", "permission": "write"}
+]
+```
+
+On a move or a copy a subject is listed only when it holds a rung on both
+`path` and `from`, with the lower of the two. A link is never listed: it
+names no subject. The list holds at most 64 entries, the first 64 by
+subject, and a question about a path more subjects hold a grant on also
+carries `"grants_truncated": true`. A subject missing from a truncated
+list may still hold a rung, so an endpoint that does not find the subject
+it decides as in a truncated list refuses the question rather than read it
+as holding none.
+
+`grants` is sent on every `File` and `Upload` question about a path in a
+space that is not the caller's own, as an empty list when nobody holds a
+grant there. It is absent on a question about the caller's own space, on an
+anonymous one, and from a release of Arca before it was added, so an
+endpoint tells "nobody holds a grant" from "this question does not say".
 
 The answer is `200` either way:
 
