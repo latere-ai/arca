@@ -105,11 +105,14 @@ type PutOptions struct {
 
 // PresignOptions shapes one signed download.
 type PresignOptions struct {
-	// Filename, when set, makes the store answer the object as an
-	// attachment under that name, so a browser saves the file under its own
-	// name instead of the key. Empty leaves the object inline, which is what
-	// a preview and a programmatic fetch want.
-	Filename string
+	// Disposition, when set, is the Content-Disposition the store answers
+	// the object with (S3's response-content-disposition), such as an
+	// attachment under the file's own name so a browser saves it under that
+	// name instead of the key. It is the whole header value, rendered by the
+	// caller: the store passes it through and never renders a name. Empty
+	// leaves the object inline, which is what a preview and a programmatic
+	// fetch want.
+	Disposition string
 }
 
 // Written is what a put stored.

@@ -220,8 +220,8 @@ func (m *Memory) List(_ context.Context, prefix, startAfter string, max int32) (
 // it: a test that follows a redirect runs against the store tier.
 func (m *Memory) PresignGet(_ context.Context, key string, o PresignOptions) (string, error) {
 	q := url.Values{"X-Amz-Expires": {fmt.Sprint(int(PresignTTL.Seconds()))}}
-	if o.Filename != "" {
-		q.Set("response-content-disposition", fmt.Sprintf("attachment; filename=%q", o.Filename))
+	if o.Disposition != "" {
+		q.Set("response-content-disposition", o.Disposition)
 	}
 	return m.PresignBase + "/" + key + "?" + q.Encode(), nil
 }

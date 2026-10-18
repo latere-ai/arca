@@ -210,11 +210,11 @@ func runStoreTable(t *testing.T, open func(t *testing.T) storeUnderTest) {
 			t.Fatalf("PresignGet = %q, %v", plain, err)
 		}
 		if strings.Contains(plain, "content-disposition") {
-			t.Errorf("a read with no filename asked for an attachment: %q", plain)
+			t.Errorf("a read with no disposition asked for an attachment: %q", plain)
 		}
-		named, err := s.store.PresignGet(t.Context(), key, PresignOptions{Filename: "notes.txt"})
+		named, err := s.store.PresignGet(t.Context(), key, PresignOptions{Disposition: `attachment; filename="notes.txt"`})
 		if err != nil || !strings.Contains(named, "content-disposition") {
-			t.Fatalf("PresignGet with a filename = %q, %v", named, err)
+			t.Fatalf("PresignGet with a disposition = %q, %v", named, err)
 		}
 	})
 

@@ -389,8 +389,8 @@ func (s *S3) List(ctx context.Context, prefix, startAfter string, max int32) (Li
 // PresignGet signs one key, one method, and one expiry.
 func (s *S3) PresignGet(ctx context.Context, key string, o PresignOptions) (string, error) {
 	input := &s3.GetObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(key)}
-	if o.Filename != "" {
-		input.ResponseContentDisposition = aws.String(fmt.Sprintf("attachment; filename=%q", o.Filename))
+	if o.Disposition != "" {
+		input.ResponseContentDisposition = aws.String(o.Disposition)
 	}
 	req, err := s.presign.PresignGetObject(ctx, input, s3.WithPresignExpires(s.presignTTL))
 	if err != nil {

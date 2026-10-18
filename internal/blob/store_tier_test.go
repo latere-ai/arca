@@ -180,7 +180,12 @@ func TestStoreAPresignedReadIsOneKeyAndOneMethod(t *testing.T) {
 	if _, err := store.Put(t.Context(), key, bytes.NewReader(body), int64(len(body)), PutOptions{ContentType: "text/plain"}); err != nil {
 		t.Fatal(err)
 	}
-	url, err := store.PresignGet(t.Context(), key, PresignOptions{Filename: "notes.txt"})
+	// The disposition is the one a link read asks for (spec 031): a name
+	// outside ASCII, in both of RFC 6266's forms. The store answers it as
+	// the signed URL carried it, which is what makes a redirected link read
+	// a download.
+	const disposition = `attachment; filename="____ notes.txt"; filename*=UTF-8''%E5%AD%A3%E5%BA%A6%E6%8A%A5%E5%91%8A%20notes.txt`
+	url, err := store.PresignGet(t.Context(), key, PresignOptions{Disposition: disposition})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,8 +193,8 @@ func TestStoreAPresignedReadIsOneKeyAndOneMethod(t *testing.T) {
 	if status != http.StatusOK || !bytes.Equal(read, body) {
 		t.Fatalf("the presigned read answered %d %q", status, read)
 	}
-	if got := header.Get("Content-Disposition"); !strings.Contains(got, "notes.txt") {
-		t.Errorf("the download name is %q", got)
+	if got := header.Get("Content-Disposition"); got != disposition {
+		t.Errorf("the store answered the disposition %q, want %q", got, disposition)
 	}
 	// The signature covers the method and the key, so neither can be
 	// swapped for another.

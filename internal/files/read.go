@@ -72,7 +72,7 @@ func (s *Service) read(w http.ResponseWriter, r *http.Request, headOnly bool) {
 		return
 	}
 
-	if err := s.serve(w, r, t, row, headOnly); err != nil {
+	if err := s.serve(w, r, t, row, headOnly, false); err != nil {
 		api.WriteError(w, r, err)
 	}
 }
@@ -86,8 +86,10 @@ func (s *Service) read(w http.ResponseWriter, r *http.Request, headOnly bool) {
 // and asking file.read after it would ask a second question about a caller
 // that carries no claim at all: every answer would be a deny and the route
 // would serve nothing. What follows the question is this spec's, and it is
-// the same half an owner's own read runs, so the two cannot answer one
-// object differently.
+// the half an owner's own read runs, with one difference: a read through a
+// link is always an attachment (spec 031). A URL alone opens it in a
+// browser, so the streamed answer names the file in its disposition and a
+// redirect asks the bucket for the same one.
 //
 // A path that is not one, and a path that names nothing live, are refused as
 // a missing object, which is byte for byte what the route answers for a
@@ -102,17 +104,25 @@ func (s *Service) ServeObject(w http.ResponseWriter, r *http.Request, owner, pat
 	if err != nil {
 		return err
 	}
-	return s.serve(w, r, t, row, false)
+	return s.serve(w, r, t, row, false, true)
 }
 
 // serve is the half of a read that follows the question: the conditional
 // headers of spec 013 and the size rule of spec 005. It writes its own
 // refusals through the handlers it calls and answers an error only where the
 // caller has not been written to yet.
-func (s *Service) serve(w http.ResponseWriter, r *http.Request, t Target, row store.File, headOnly bool) error {
+//
+// link is a read through a link token, which is an attachment whatever the
+// request asks. Its disposition is set before the conditional check, so a
+// 304 carries the one the 200 it revalidates carried, and a cache that
+// refreshes its stored headers from the 304 keeps the file's name.
+func (s *Service) serve(w http.ResponseWriter, r *http.Request, t Target, row store.File, headOnly, link bool) error {
 	pre, err := api.Conditions(r)
 	if err != nil {
 		return err
+	}
+	if link {
+		w.Header().Set(api.HeaderContentDisposition, api.Attachment(lastSegment(t.Path)))
 	}
 	api.SetETag(w, row.Checksum)
 	if pre.Fresh(row.Checksum) {
@@ -124,21 +134,31 @@ func (s *Service) serve(w http.ResponseWriter, r *http.Request, t Target, row st
 		w.WriteHeader(http.StatusOK)
 		return nil
 	}
+	download, err := attachment(r, link)
+	if err != nil {
+		return err
+	}
 	// A public object is readable without this server in the path, so a read
 	// of one is a redirect whatever its size: the URL is the point of making
 	// it public. With ARCA_PUBLIC_CDN_URL set the redirect is to a base that
 	// caches and carries no expiry; without it, to the ordinary presigned
 	// URL, which is the fallback spec 003 names for a store that offers
 	// bucket policies instead of object ACLs.
+	//
+	// An attachment is never sent to the base. Its URL is unsigned, a store
+	// refuses a response override on an anonymous read, and the base would
+	// answer the object under the type it was written with, rendered on the
+	// base's host. So a download, and every read through a link, is presigned
+	// with the disposition instead (spec 031).
 	if row.IsPublic {
-		if s.cfg.PublicCDNURL != "" {
+		if s.cfg.PublicCDNURL != "" && !download {
 			http.Redirect(w, r, s.cfg.PublicCDNURL+"/"+row.ObjectID.Key(s.cfg.BucketPrefix), http.StatusFound)
 			return nil
 		}
-		s.presign(w, r, row.ObjectID, t.Path, false)
+		s.presign(w, r, row.ObjectID, t.Path, download)
 		return nil
 	}
-	s.answer(w, r, row.ObjectID, row.SizeBytes, row.ContentType, t.Path)
+	s.answer(w, r, row.ObjectID, row.SizeBytes, row.ContentType, t.Path, download)
 	return nil
 }
 
@@ -168,8 +188,13 @@ func (s *Service) readVersion(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, r, err)
 		return
 	}
+	download, err := attachment(r, false)
+	if err != nil {
+		api.WriteError(w, r, err)
+		return
+	}
 	api.SetETag(w, v.Checksum)
-	s.answer(w, r, v.ObjectID, v.SizeBytes, v.ContentType, t.Path)
+	s.answer(w, r, v.ObjectID, v.SizeBytes, v.ContentType, t.Path, download)
 }
 
 // answer is the size rule of spec 005 applied to one object: the bytes at or
@@ -179,18 +204,20 @@ func (s *Service) readVersion(w http.ResponseWriter, r *http.Request) {
 // boundary, because invariant 4 of spec 001 is not a default a caller
 // waives. ?inline=0 asks for the redirect at any size, for a client that
 // would rather not hold a connection open.
-func (s *Service) answer(w http.ResponseWriter, r *http.Request, id object.ID, size int64, media, path string) {
+//
+// A download is an attachment under the path's last segment at every size:
+// the streamed answer carries the disposition, and the redirect asks the
+// bucket for the same one.
+func (s *Service) answer(w http.ResponseWriter, r *http.Request, id object.ID, size int64, media, path string, download bool) {
 	wants, err := mode(r)
 	if err != nil {
 		api.WriteError(w, r, err)
 		return
 	}
-	download, err := flag(r, paramDownload)
-	if err != nil {
-		api.WriteError(w, r, err)
-		return
-	}
 	if size <= s.cfg.InlineBytes && wants != asRedirect {
+		if download {
+			w.Header().Set(api.HeaderContentDisposition, api.Attachment(lastSegment(path)))
+		}
 		s.stream(w, r, id.Key(s.cfg.BucketPrefix), media, size)
 		return
 	}
@@ -198,13 +225,15 @@ func (s *Service) answer(w http.ResponseWriter, r *http.Request, id object.ID, s
 }
 
 // presign answers the redirect half of a read: one signed URL for one key,
-// one method and five minutes, with the path's last segment as the file name
-// when the caller asked for a download.
+// one method and five minutes, asking the bucket for an attachment under the
+// path's last segment when the read is a download. The disposition is the
+// one a streamed download carries, rendered here, so the store passes a
+// header value through and never renders a name.
 func (s *Service) presign(w http.ResponseWriter, r *http.Request, id object.ID, path string, download bool) {
 	ctx := r.Context()
 	options := blob.PresignOptions{}
 	if download {
-		options.Filename = lastSegment(path)
+		options.Disposition = api.Attachment(lastSegment(path))
 	}
 	url, err := s.bucket.PresignGet(ctx, id.Key(s.cfg.BucketPrefix), options)
 	if err != nil {
@@ -252,12 +281,16 @@ func (s *Service) stream(w http.ResponseWriter, r *http.Request, key, media stri
 	}
 }
 
-// headers are what a read and a head both answer about an object.
+// headers are what a read and a head both answer about an object. nosniff
+// holds a browser to the type the object was written with, so bytes the
+// server holds for somebody else are never guessed into a type their writer
+// did not state (spec 031).
 func (s *Service) headers(w http.ResponseWriter, media string, size int64, modified time.Time) {
 	if media == "" {
 		media = blob.DefaultContentType
 	}
 	w.Header().Set(api.HeaderContentType, media)
+	w.Header().Set(api.HeaderContentTypeOptions, api.NoSniff)
 	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 	if !modified.IsZero() {
 		w.Header().Set("Last-Modified", modified.UTC().Format(http.TimeFormat))
@@ -340,6 +373,16 @@ func mode(r *http.Request) (readMode, error) {
 		return bySize, api.Refuse(api.CodeInvalidField,
 			"inline is %q; it is 0 or 1", raw).About(paramInline)
 	}
+}
+
+// attachment reports whether a read is a download: always through a link
+// (spec 031), and on an owner's own read when it asks with ?download=1.
+func attachment(r *http.Request, link bool) (bool, error) {
+	download, err := flag(r, paramDownload)
+	if err != nil {
+		return false, err
+	}
+	return download || link, nil
 }
 
 // flag reads a parameter that is 0 or 1 and absent.
