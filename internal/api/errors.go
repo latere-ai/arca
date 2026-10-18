@@ -78,7 +78,7 @@ var errorTable = map[string]row{
 	CodeQuotaExceeded:         {http.StatusRequestEntityTooLarge, "This space has no room left."},
 	CodeUnsupportedMediaType:  {http.StatusUnsupportedMediaType, "Send the body as JSON."},
 	CodeTooManyParts:          {http.StatusUnprocessableEntity, "The object needs more parts than this server allows."},
-	CodeTooManyObjects:        {http.StatusUnprocessableEntity, "The folder holds more objects than one copy accepts."},
+	CodeTooManyObjects:        {http.StatusUnprocessableEntity, "The folder holds more objects than one copy or move accepts."},
 	CodeLinkReadOnly:          {http.StatusUnprocessableEntity, "A link grants reading and nothing more."},
 	CodeRateLimited:           {http.StatusTooManyRequests, "Too many requests; wait and retry."},
 	CodeInternal:              {http.StatusInternalServerError, "Something went wrong on this server."},

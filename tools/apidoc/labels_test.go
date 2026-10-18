@@ -42,7 +42,7 @@ func TestOperationNavigationLabels(t *testing.T) {
 		{"PUT", "/v1/files/{owner}/{path}", "Write file", "Write one object; the body is the bytes."},
 		{"GET", "/v1/files/{owner}/{path}", "Read or list files", "Read one object, its subtree with ?list=1, which carries the space's usage at the plane root, or its versions with ?versions=1."},
 		{"HEAD", "/v1/files/{owner}/{path}", "Get file headers", "The object's headers with no body."},
-		{"POST", "/v1/files/{owner}/{path}", "Move, copy or restore", "Move the object with move_to, copy it with copy_to, copy a folder with copy_to and recursive, or bring a version forward with restore_version."},
+		{"POST", "/v1/files/{owner}/{path}", "Move, copy or restore", "Move the object with move_to, move a folder with move_to and recursive, copy it with copy_to, copy a folder with copy_to and recursive, or bring a version forward with restore_version."},
 		{"DELETE", "/v1/files/{owner}/{path}", "Delete file or folder", "Trash the object; ?permanent=1 removes it, ?version=N prunes one version, and ?recursive=1 deletes every object under the folder."},
 		{"GET", "/v1/files/materialize", "Get space manifest", "A folder of one space, named with ?prefix=, as a manifest of presigned URLs."},
 		{"GET", "/v1/trash", "List trash", "What is trashed and still restorable, newest first."},

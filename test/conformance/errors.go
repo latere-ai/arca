@@ -75,7 +75,7 @@ var codeTable = map[string]row{
 	CodeQuotaExceeded:         {413, "This space has no room left."},
 	CodeUnsupportedMediaType:  {415, "Send the body as JSON."},
 	CodeTooManyParts:          {422, "The object needs more parts than this server allows."},
-	CodeTooManyObjects:        {422, "The folder holds more objects than one copy accepts."},
+	CodeTooManyObjects:        {422, "The folder holds more objects than one copy or move accepts."},
 	CodeLinkReadOnly:          {422, "A link grants reading and nothing more."},
 	CodeRateLimited:           {429, "Too many requests; wait and retry."},
 	CodeInternal:              {500, "Something went wrong on this server."},

@@ -43,7 +43,7 @@ func Table() []api.Route {
 			Method: http.MethodPost, Path: "/v1/files/{owner}/{path...}",
 			Action: authorizer.ActionFileWrite, Status: http.StatusOK,
 			Summary:     "Move, copy or restore",
-			Description: "Move the object with move_to, copy it with copy_to, copy a folder with copy_to and recursive, or bring a version forward with restore_version.",
+			Description: "Move the object with move_to, move a folder with move_to and recursive, copy it with copy_to, copy a folder with copy_to and recursive, or bring a version forward with restore_version.",
 		},
 		{
 			Method: http.MethodDelete, Path: "/v1/files/{owner}/{path...}",

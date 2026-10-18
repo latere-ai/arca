@@ -250,7 +250,7 @@ paths:
     post:
       operationId: postV1FilesByOwnerByPath
       summary: Move, copy or restore
-      description: Move the object with move_to, copy it with copy_to, copy a folder with copy_to and recursive, or bring a version forward with restore_version. Asks the authorizer for file.write before it acts.
+      description: Move the object with move_to, move a folder with move_to and recursive, copy it with copy_to, copy a folder with copy_to and recursive, or bring a version forward with restore_version. Asks the authorizer for file.write before it acts.
       parameters:
       - name: owner
         in: path
@@ -1089,7 +1089,7 @@ components:
           schema:
             $ref: "#/components/schemas/Error"
     too_many_objects:
-      description: "422 too_many_objects: The folder holds more objects than one copy accepts."
+      description: "422 too_many_objects: The folder holds more objects than one copy or move accepts."
       content:
         application/json:
           schema:
