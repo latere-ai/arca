@@ -191,7 +191,7 @@ are any.
 | `quota_exceeded` | 413 | the write would take the space past the limit the authorizer named |
 | `unsupported_media_type` | 415 | a JSON route received another content type |
 | `too_many_parts` | 422 | the object needs more upload parts than allowed |
-| `too_many_objects` | 422 | the folder holds more objects than one copy accepts; copy its subfolders |
+| `too_many_objects` | 422 | the folder holds more objects than one copy or move accepts; copy or move its subfolders |
 | `link_read_only` | 422 | a link was asked for a permission above `read` |
 | `rate_limited` | 429 | the caller is over its rate; wait and retry |
 | `internal` | 500 | a fault in the server |
@@ -224,7 +224,7 @@ path. [What an answer may limit](#what-an-answer-may-limit) has the rules.
 | PUT | `/v1/files/{owner}/{path}` | `file.write` | write one object; the body is the bytes; `201` with the object when it creates one, `200` when it overwrites |
 | GET | `/v1/files/{owner}/{path}` | `file.read` | read one object; see the query parameters below |
 | HEAD | `/v1/files/{owner}/{path}` | `file.read` | the object's headers, no body |
-| POST | `/v1/files/{owner}/{path}` | `file.write` or `file.restore` | `{"move_to": "<path>"}` moves the object; `{"copy_to": "<path>"}` copies it, or with `"recursive": true` the [folder](#folders); `{"restore_version": N}` makes version N current again; exactly one of the three |
+| POST | `/v1/files/{owner}/{path}` | `file.write` or `file.restore` | `{"move_to": "<path>"}` moves the object, or with `"recursive": true` the [folder](#folders); `{"copy_to": "<path>"}` copies it, or with `"recursive": true` the folder; `{"restore_version": N}` makes version N current again; exactly one of the three |
 | DELETE | `/v1/files/{owner}/{path}` | `file.delete` | delete the object; `?permanent=1` skips the trash; `?version=N` removes one old version; `?recursive=1` deletes the [folder](#folders) |
 | GET | `/v1/files/materialize` | `file.list` | a whole space, or the folder `?prefix=` names below `files/`, as a manifest of presigned URLs; `?owner=` |
 
@@ -259,8 +259,9 @@ dropped, and the space is charged the difference in size.
 **Moving and copying.** `move_to` and `copy_to` name a path in the same
 space, and a destination that is taken is `409 path_taken`. A move changes
 the object's path and touches no bytes; its versions, its stars, and a
-grant on exactly that path follow it. A move is always one object. A copy
-is one object or a whole folder; see [folders](#folders).
+grant on exactly that path follow it. A move and a copy each take one
+object, or with `"recursive": true` a whole folder; see
+[folders](#folders).
 
 **Deleting.** A delete moves the object to the trash, where it stays
 restorable for `ARCA_TRASH_RETENTION` (30 days by default). With
@@ -322,8 +323,7 @@ whose name begins with it: `files/notes` as a folder holds
 `files/notes/a.md`, and holds neither a file named `files/notes` nor
 `files/notes-archive/b.md`.
 
-Two operations take a folder whole, a delete and a copy. Nothing else does:
-a move is one object, and a folder is renamed by moving its objects.
+Three operations take a folder whole: a delete, a copy, and a move.
 
 **Deleting a folder.**
 
@@ -385,7 +385,7 @@ no links, and no publicity: the copy of a public object is private, and its
 | Request | Answer |
 |---|---|
 | `copy_to` is the source, or for a folder a path inside it | `400 invalid_field` |
-| `recursive` without `copy_to` | `400 invalid_field` |
+| `recursive` without `copy_to` or `move_to` | `400 invalid_field` |
 | more than one of `move_to`, `restore_version`, and `copy_to` | `400 exclusive_fields` |
 | no object at the source, or nothing under the source folder | `404 not_found` |
 | a live object holds any path the copy would write | `409 path_taken`, and nothing is copied |
@@ -396,6 +396,56 @@ no links, and no publicity: the copy of a public object is private, and its
 A copy asks `file.write` once, with both ends on the question, and appends
 one `copy` event at the destination, with the detail
 `{"from": "<source>", "recursive": <bool>, "files": <n>, "bytes": <b>}`.
+
+**Moving a folder.**
+
+```
+POST /v1/files/{owner}/{path}
+{"move_to": "files/archive/2026", "recursive": true}
+```
+
+With `"recursive": true` the source is the folder at the path: every live
+object under it moves to the same path below `move_to`, so
+`files/notes/deep/b.md` moved to `files/archive/2026` is
+`files/archive/2026/deep/b.md`. The answer is `200` with
+`{"path": "<move_to>", "files": <n>, "bytes": <b>}`.
+
+A folder move copies nothing. Each object keeps its bytes where they are
+and only its path changes, so the move is one call at any size up to the
+bound, and the space's usage does not change. It is whole or absent: a
+caller sees every object moved or none.
+
+What goes with each object is what goes with a move of one: its versions,
+its stars, and its publicity. A grant or a link on the folder, or on a
+folder or an object inside it, moves to the same place below `move_to`,
+so the next object written where the folder was does not inherit it. A
+grant on a folder above the source stays where it is.
+
+What stays where it is:
+
+- a trashed object under the folder, which is restored to the path it was
+  trashed from;
+- the object at exactly the folder's path, and a grant on that path;
+- a subtree the authorizer's answer
+  [omits](#leaving-subtrees-out-of-an-enumeration), at either end, with
+  the grants at, under, or above it;
+- an upload in progress under the folder, which writes its object at the
+  path it was opened for.
+
+| Request | Answer |
+|---|---|
+| `move_to` is the folder, or a path inside it | `400 invalid_field` |
+| the path is `files`, the root of the tree | `400 invalid_path` |
+| nothing live under the folder | `404 not_found` |
+| any path the move would take is held, by a live object, a trashed one, or an object of the folder itself | `409 path_taken`, and nothing moves |
+| an object under the folder changed while the move ran | `412 precondition_failed`, and nothing moves; send the request again |
+| the folder holds more than 10,000 objects | `422 too_many_objects`; move its subfolders |
+
+A folder move asks `file.write` once, with the destination as `path`, the
+source as `from`, `recursive: true`, and the bytes under the folder as
+`size`. It appends one `move` event at the destination, with the detail
+`{"from": "<source>", "recursive": true, "files": <n>, "bytes": <b>}`. A
+move of one object keeps the detail `{"from": "<source>"}`.
 
 ### Trash and stars
 
@@ -708,6 +758,7 @@ anything other than the one object asked for honors the member:
 | `GET /v1/stars` | `file.list` | the stars it covers. The page crosses spaces (below) |
 | `DELETE /v1/files/{owner}/{path}?recursive=1` | `file.delete` | the objects it covers are neither trashed nor removed, with their versions. A grant or a link at, under, or above an omitted subtree of the folder stays. The event's counts leave them out, and the call is still `204` |
 | `POST /v1/files/{owner}/{path}` with `copy_to` and `recursive` | `file.write` | an object is not copied when an entry covers its source path or its destination path, and `files` and `bytes` leave it out. A folder all of whose objects are left out is `404 not_found`, as a folder with nothing under it is |
+| `POST /v1/files/{owner}/{path}` with `move_to` and `recursive` | `file.write` | the same as for the copy: an object is not moved when an entry covers its source path or its destination path, nothing is written under an omitted destination, and a grant or a link at, under, or above an omitted subtree stays |
 | `GET /v1/events` | `event.read` | an event whose `path`, or whose `detail.from`, it covers. Both ends of a move and of a copy are read. `next_cursor` is the id of a row the caller read, so the next page passes over every omitted row after it |
 | `GET /v1/shares` | `share.list` | a grant whose `path_prefix` it covers. A grant on a prefix above an omitted subtree is listed |
 | `GET /v1/shares/with-me` | `share.list` | the same. The page crosses spaces (below) |
@@ -719,7 +770,7 @@ Not shaped, each for the reason beside it:
 | Route | Why |
 |---|---|
 | `GET` and `HEAD` on a path, `?version=N`, `?versions=1` | one object. The version listing names one path and cannot span two |
-| `PUT` on a path, `POST` with `move_to`, `restore_version`, or `copy_to` without `recursive` | one object, named by the request |
+| `PUT` on a path, `POST` with `move_to` or `copy_to` without `recursive`, or with `restore_version` | one object, named by the request |
 | `DELETE` of one path, `?version=N`, `DELETE /v1/trash?path=`, `POST /v1/trash/restore`, `PUT` and `DELETE /v1/stars` | one object, named by the request |
 | `POST /v1/uploads`, its complete and its abort | one session. No route lists sessions |
 | `POST /v1/shares`, `GET` and `DELETE /v1/shares/{id}`, `POST /v1/shares/links`, `DELETE /v1/shares/links/{id}` | one grant or one link |

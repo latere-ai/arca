@@ -159,7 +159,7 @@ A `filter` on a list action narrows that list's query.
 | `internal/auth` | the verifier, the authorizer client, the owner policy, the grant lookup, and the reading of an answer's limits |
 | `internal/blob` | the bucket: the S3 client, an in-memory store for tests, server-side copy, and presigning (five minutes for a read, 24 hours for an upload part) |
 | `internal/store` | Postgres: one query set per table, the transaction helper, and the migrations |
-| `internal/files` | the tree of a space: put, get, head, list, move, copy, delete, the folder delete and the folder copy, versions, trash, stars, and materialize |
+| `internal/files` | the tree of a space: put, get, head, list, move, copy, delete, the folder delete, the folder copy and the folder move, versions, trash, stars, and materialize |
 | `internal/uploads` | multipart sessions: open, complete, abort, and the expiry sweep |
 | `internal/shares` | grants and links, token minting, the public-object stamp, and the expired-grant sweep |
 | `internal/events` | the event log, the usage ledger, and `GET /v1/events` |
@@ -220,9 +220,10 @@ expiry is aborted.
 ## Folders
 
 A folder is every row whose path begins with the folder's path and a slash
-(`under` in `internal/store`), never the row at exactly that path. Two
-handlers in `internal/files` take one whole, and both ask the authorizer
-once, with `recursive` on the question.
+(`under` in `internal/store`), never the row at exactly that path. Three
+handlers in `internal/files` take one whole, the delete, the copy and the
+move, and each asks the authorizer once, with `recursive` on the
+question.
 
 **The folder delete** is one statement at any size. The soft form sets
 `deleted_at` on every live row under the folder (`TrashSubtree`). The
@@ -270,9 +271,27 @@ was copied is `precondition_failed`. A copy is bounded at
 `files.MaxCopyObjects`, 10,000, because the request stays open while the
 bucket works, and runs `files.CopyConcurrency` copies at a time.
 
-Both handlers enumerate, so both honor `limits.omit`: an omitted subtree is
-neither trashed, removed, nor copied, and the counts in the answer and in
-the event leave it out.
+**The move** is a rename of rows. A key derives from the object id and
+not the path, so moving a folder changes the `path` of each live row under
+it and nothing else: no bucket call, no new id, no usage change. One
+transaction reads the rows the answer leaves in (one past
+`files.MaxCopyObjects`, the copy's bound), refuses the move as
+`path_taken` when any row, live or trashed, holds a destination
+(`Taken`), renames the rows (`MoveMany`), then their versions and their
+stars, and carries the grants and links whose prefix is the folder or
+under it (`MoveUnder`). The destination check comes first because the
+unique constraint on a path is checked row by row: a destination that is
+an ancestor of the folder can map one row onto another row's current
+path, and refusing that up front keeps the answer independent of the
+order the rows are renamed in. A row deleted or moved by another request
+between the read and the rename leaves the count short, and the
+transaction is refused as `precondition_failed`. A trashed row, the row at
+the folder's own path, and a grant on the path of either stay where they
+are.
+
+All three handlers enumerate, so all three honor `limits.omit`: an omitted
+subtree is neither trashed, removed, copied nor moved, and the counts in
+the answer and in the event leave it out.
 
 ## Events and usage
 
@@ -284,7 +303,8 @@ seams `cmd/arcad` binds:
   mutations append inside their own transaction, so the change and its
   event commit together. File mutations append after their commit, best
   effort, and a failed append is logged rather than returned. A folder
-  delete and a copy append one event each, with the counts in its detail.
+  delete, a copy and a folder move append one event each, with the
+  counts in its detail.
   `GET /v1/events` reads the log by keyset on the serial id. Rows older
   than 30 days are pruned.
 - **The usage ledger.** `space_usage` is charged inside each write's
