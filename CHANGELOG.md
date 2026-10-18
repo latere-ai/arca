@@ -6,6 +6,18 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Fixed
+
+- **A release is published again after the previous release's suite
+  passes.** The previous release's suite runs right after this release's
+  against the same installation and as the same callers, and the two
+  together sent more requests than one caller may send in a minute, so
+  the v0.9.0 release stopped on `429` answers in that suite: its images
+  were built, but nothing was deployed and no GitHub release was
+  published. The second suite now starts a minute after the first. This
+  release carries v0.9.0's changes, every link read as a download among
+  them.
+
 ## v0.9.0 - 2026-10-18
 
 ### Security
