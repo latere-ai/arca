@@ -7,6 +7,7 @@ package e2e
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -366,5 +367,85 @@ func TestE2EAnAuthorizerThatDeniesLinkReadStopsEveryLink(t *testing.T) {
 	code, body, _ = i.sharesCall(t, http.MethodGet, "/v1/shares/links/t0ken-unknown/meta", "", nil)
 	if code != http.StatusNotFound || strings.Contains(body, "t0ken-unknown") {
 		t.Fatalf("an unknown token = %d: %s", code, body)
+	}
+}
+
+// TestE2EALinkIsReadForDownloadOnly is criterion 7 of spec 031 against the
+// running binary: a page a link names is saved under its own name and never
+// rendered, at or below the inline size and through the redirect above it,
+// and the meta, the listing and a refusal carry the same headers.
+func TestE2EALinkIsReadForDownloadOnly(t *testing.T) {
+	i := filesInstallation(t)
+	const page = "<script>alert(1)</script>"
+	name := "季度报告.html"
+	if resp := i.filesPut(t, "files/site/"+url.PathEscape(name), page, "Content-Type", "text/html"); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("the put = %d: %s", resp.StatusCode, filesRead(t, resp))
+	}
+	large := strings.Repeat("x", int(e2ePartSize)) + "tail"
+	i.filesUploadInParts(t, "files/site/bundle.js", large)
+
+	code, body, _ := i.sharesCall(t, http.MethodPost, "/v1/shares/links", filesCaller, map[string]any{
+		"owner": "me", "path_prefix": "files/site",
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("POST /v1/shares/links = %d: %s", code, body)
+	}
+	var minted sharesLink
+	sharesDecodeJSON(t, body, &minted)
+
+	downloadOnly := func(what, disposition string, header http.Header) {
+		t.Helper()
+		for key, want := range map[string]string{
+			"Content-Disposition":     disposition,
+			"X-Content-Type-Options":  "nosniff",
+			"Content-Security-Policy": "sandbox",
+		} {
+			if got := header.Get(key); got != want {
+				t.Errorf("%s answered %s %q, want %q", what, key, got, want)
+			}
+		}
+	}
+
+	named := `attachment; filename="____.html"; filename*=UTF-8''%E5%AD%A3%E5%BA%A6%E6%8A%A5%E5%91%8A.html`
+	code, body, header := i.sharesCall(t, http.MethodGet, minted.URL+"/files/files/site/"+url.PathEscape(name), "", nil)
+	if code != http.StatusOK || body != page {
+		t.Fatalf("the page = %d: %q", code, body)
+	}
+	if got := header.Get("Content-Type"); got != "text/html" {
+		t.Errorf("the page came back as %q; a link read keeps the type it was written with", got)
+	}
+	downloadOnly("the page", named, header)
+
+	// Above the inline size the browser follows the redirect to the bucket,
+	// so the signed URL asks the bucket for the disposition, and the bucket
+	// answers with it.
+	code, _, header = i.sharesCall(t, http.MethodGet, minted.URL+"/files/files/site/bundle.js", "", nil)
+	if code != http.StatusFound {
+		t.Fatalf("the large file = %d", code)
+	}
+	attached := `attachment; filename="bundle.js"; filename*=UTF-8''bundle.js`
+	downloadOnly("the redirect", attached, header)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, header.Get("Location"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fetched, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("follow the redirect: %v", err)
+	}
+	if got := len(filesRead(t, fetched)); fetched.StatusCode != http.StatusOK || got != len(large) {
+		t.Fatalf("the bucket answered %d with %d bytes", fetched.StatusCode, got)
+	}
+	if got := fetched.Header.Get("Content-Disposition"); got != attached {
+		t.Errorf("the bucket answered the disposition %q, want %q", got, attached)
+	}
+
+	for what, path := range map[string]string{
+		"the meta":    minted.URL + "/meta",
+		"the listing": minted.URL,
+		"a refusal":   "/v1/shares/links/t0ken-nobody-minted/files/files/site/bundle.js",
+	} {
+		_, _, header := i.sharesCall(t, http.MethodGet, path, "", nil)
+		downloadOnly(what, "attachment", header)
 	}
 }

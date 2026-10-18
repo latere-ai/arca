@@ -224,9 +224,10 @@ func case008LinkRevoked(t *testing.T, s *session) {
 }
 
 // case008LinkFile: one object under the token's subtree is served through
-// the redemption route to a caller with no bearer, and an object outside the
-// subtree is not. The token names a subtree, so what it reaches is the whole
-// of what it grants and a path that leaves the subtree is a missing object.
+// the redemption route to a caller with no bearer, as a download only, and
+// an object outside the subtree is not. The token names a subtree, so what it
+// reaches is the whole of what it grants and a path that leaves the subtree
+// is a missing object.
 func case008LinkFile(t *testing.T, s *session) {
 	prefix := s.grantPrefix("link-file")
 	inside := prefix + "/inside.txt"
@@ -247,6 +248,17 @@ func case008LinkFile(t *testing.T, s *session) {
 		"a redemption route asked for a bearer, and the token in the URL is the whole of its authorization")
 	expectStatus(t, served, http.StatusOK)
 	failIf(t, string(served.body) != "inside the subtree\n", "the link served %q", served.body)
+	// A link read is download-only (spec 031): a URL alone opens it in a
+	// browser, which saves the file under its name and never renders it as a
+	// page of the installation's origin, never sniffs it into another type,
+	// and sandboxes it should it render anyway.
+	disposition := served.header.Get("Content-Disposition")
+	failIf(t, !strings.HasPrefix(disposition, "attachment;") || !strings.Contains(disposition, "inside.txt"),
+		"a link read answered Content-Disposition %q, and spec 031 makes it an attachment under the file's name", disposition)
+	failIf(t, served.header.Get("X-Content-Type-Options") != "nosniff",
+		"a link read answered X-Content-Type-Options %q, and spec 031 makes it nosniff", served.header.Get("X-Content-Type-Options"))
+	failIf(t, served.header.Get("Content-Security-Policy") != "sandbox",
+		"a link read answered Content-Security-Policy %q, and spec 031 makes it sandbox", served.header.Get("Content-Security-Policy"))
 
 	// A path that leaves the subtree the token names is a missing object,
 	// whether it is a sibling or a traversal. The traversal is sent with its
