@@ -6,6 +6,35 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Added
+
+- **A folder is moved in one call.** `POST /v1/files/{owner}/{path}` with
+  `{"move_to": "files/...", "recursive": true}` moves every object under
+  the folder to the same path below `move_to`, all of them or none, and
+  answers the number of files and bytes moved. No bytes are copied and
+  the space's usage does not change. Each object keeps its versions, its
+  stars and its public link, and a share or a link on the folder or
+  inside it moves with the folder. A trashed object under the folder
+  stays where it was. Any path the move would take that is already held,
+  by a live or a trashed object, is `409` `path_taken` and nothing moves;
+  a folder of more than 10,000 objects is `422` `too_many_objects`, as
+  for a copy. The authorizer is asked `file.write` once, with both
+  folders and `recursive: true`, and the event log records one `move`
+  with the counts.
+
+### Changed
+
+- **`move_to` with `recursive: true` is a folder move.** It answered
+  `400` `invalid_field` before. The `too_many_objects` message now reads
+  "The folder holds more objects than one copy or move accepts."
+
+### Fixed
+
+- **A folder copy a few objects past the limit is refused whole.** When
+  the authorizer's answer left some destination paths out, a folder just
+  over 10,000 objects could copy its first 10,000 and answer as if it
+  had copied everything. It is now `422` `too_many_objects`.
+
 ## v0.7.0 - 2026-10-18
 
 ### Added
