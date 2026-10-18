@@ -883,11 +883,11 @@ type sharesOf struct {
 	failMoveUnder error
 }
 
-func (s *sharesOf) MoveUnder(_ context.Context, _ store.Querier, owner, from, to string, omit []string) (int64, error) {
+func (s *sharesOf) MoveUnder(_ context.Context, _ store.Querier, owner, from, to string, omit, moved []string) (int64, error) {
 	if s.failMoveUnder != nil {
 		return 0, s.failMoveUnder
 	}
-	s.movedUnder = append(s.movedUnder, owner+" "+from+" -> "+to+" "+strings.Join(omit, ","))
+	s.movedUnder = append(s.movedUnder, owner+" "+from+" -> "+to+" "+strings.Join(omit, ",")+" "+strings.Join(moved, ","))
 	return 1, nil
 }
 

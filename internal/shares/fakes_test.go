@@ -134,7 +134,7 @@ func (t *table) DeleteUnder(context.Context, store.Querier, string, string, []st
 
 // MoveUnder is the folder move's statement, which no route of this package
 // reaches either: internal/files runs it, and the store tier proves it.
-func (t *table) MoveUnder(context.Context, store.Querier, string, string, string, []string) (int64, error) {
+func (t *table) MoveUnder(context.Context, store.Querier, string, string, string, []string, []string) (int64, error) {
 	return 0, nil
 }
 

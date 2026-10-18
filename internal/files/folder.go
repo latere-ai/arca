@@ -505,6 +505,7 @@ func (s *Service) moveFolder(w http.ResponseWriter, r *http.Request, to string) 
 		// What keys on a path follows it, as on the move of one object, and
 		// the grants and links under the folder follow the folder: left on a
 		// path the move freed, one would cover the next object written there.
+		// One that would cover a row the move did not write stays.
 		_, err = s.versions.MoveMany(ctx, q, from.Owner, moves)
 		switch {
 		case errors.Is(err, store.ErrConflict):
@@ -515,7 +516,7 @@ func (s *Service) moveFolder(w http.ResponseWriter, r *http.Request, to string) 
 		if _, err := s.stars.MoveMany(ctx, q, from.Owner, moves); err != nil {
 			return fault(ctx, "move the bookmarks", err)
 		}
-		if _, err := s.shares.MoveUnder(ctx, q, from.Owner, from.Path, dest.Path, limits.Omit); err != nil {
+		if _, err := s.shares.MoveUnder(ctx, q, from.Owner, from.Path, dest.Path, limits.Omit, paths); err != nil {
 			return fault(ctx, "move the grants", err)
 		}
 		out.Files, out.Bytes = len(items), bytes

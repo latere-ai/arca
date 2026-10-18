@@ -127,7 +127,7 @@ func TestAFolderMoveRenamesTheRowsAndTouchesNoBytes(t *testing.T) {
 			t.Errorf("a bookmark stayed at %q", s.Path)
 		}
 	}
-	if want := []string{h.owner + " files/notes -> files/archive/2026 "}; !slices.Equal(h.grants.movedUnder, want) {
+	if want := []string{h.owner + " files/notes -> files/archive/2026  files/archive/2026/a.md,files/archive/2026/deep/b.md"}; !slices.Equal(h.grants.movedUnder, want) {
 		t.Errorf("the folder move carried the grants as %v, want %v", h.grants.movedUnder, want)
 	}
 	if len(h.grants.moved) != 0 {
@@ -335,7 +335,7 @@ func TestAFolderMoveLeavesOutWhatTheAnswerOmitsAtBothEnds(t *testing.T) {
 	if e := h.last(t); e.Action != EventMove || e.Detail["files"] != 2 {
 		t.Errorf("the event is %+v", e)
 	}
-	if want := []string{h.owner + " files/team -> files/moved " + omittedPrefix}; !slices.Equal(h.grants.movedUnder, want) {
+	if want := []string{h.owner + " files/team -> files/moved " + omittedPrefix + " files/moved/payroll-notes.md,files/moved/plan.md"}; !slices.Equal(h.grants.movedUnder, want) {
 		t.Errorf("the grants were carried as %v, want %v", h.grants.movedUnder, want)
 	}
 	// The size was counted before the answer, so it is the whole folder's.

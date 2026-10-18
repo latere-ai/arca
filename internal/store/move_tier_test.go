@@ -111,7 +111,7 @@ func TestStoreAFolderMoveRenamesTheRowsAndWhatKeysOnThem(t *testing.T) {
 		if counts[2], err = stars.MoveMany(t.Context(), q, owner, moves); err != nil {
 			return err
 		}
-		counts[3], err = shares.MoveUnder(t.Context(), q, owner, "files/notes", "files/archive/notes", nil)
+		counts[3], err = shares.MoveUnder(t.Context(), q, owner, "files/notes", "files/archive/notes", nil, dests)
 		return err
 	})
 	// Three live rows, one version, a star of each subject, and four grants:
@@ -164,8 +164,10 @@ func TestStoreAFolderMoveRenamesTheRowsAndWhatKeysOnThem(t *testing.T) {
 
 // TestStoreAFolderMoveLeavesTheGrantsAnOmissionKeeps: under an omission a
 // grant at, under or above the omitted subtree stays, at the source end and
-// at the destination end, and a grant on the path of an object at the
-// folder's own path stays with that object.
+// at the destination end, a grant on the path of an object at the folder's
+// own path stays with that object, and a grant whose new prefix would cover
+// a row the move did not write stays where it is: a move never widens what
+// a grant covers.
 func TestStoreAFolderMoveLeavesTheGrantsAnOmissionKeeps(t *testing.T) {
 	db := tier(t)
 	q := db.Querier()
@@ -173,7 +175,7 @@ func TestStoreAFolderMoveLeavesTheGrantsAnOmissionKeeps(t *testing.T) {
 
 	t.Run("at the source end", func(t *testing.T) {
 		owner, grants := moveFixture(t, db)
-		if _, err := shares.MoveUnder(t.Context(), q, owner, "files/notes", "files/archive/notes", []string{"files/notes/secret"}); err != nil {
+		if _, err := shares.MoveUnder(t.Context(), q, owner, "files/notes", "files/archive/notes", []string{"files/notes/secret"}, nil); err != nil {
 			t.Fatal(err)
 		}
 		for prefix, want := range map[string]string{
@@ -188,7 +190,7 @@ func TestStoreAFolderMoveLeavesTheGrantsAnOmissionKeeps(t *testing.T) {
 	})
 	t.Run("at the destination end", func(t *testing.T) {
 		owner, grants := moveFixture(t, db)
-		if _, err := shares.MoveUnder(t.Context(), q, owner, "files/notes", "files/archive/notes", []string{"files/archive/notes/deep"}); err != nil {
+		if _, err := shares.MoveUnder(t.Context(), q, owner, "files/notes", "files/archive/notes", []string{"files/archive/notes/deep"}, nil); err != nil {
 			t.Fatal(err)
 		}
 		for prefix, want := range map[string]string{
@@ -204,7 +206,7 @@ func TestStoreAFolderMoveLeavesTheGrantsAnOmissionKeeps(t *testing.T) {
 	t.Run("an object at the folder's own path", func(t *testing.T) {
 		owner, grants := moveFixture(t, db)
 		reaperFile(t, db, owner, "files/notes", 5)
-		if _, err := shares.MoveUnder(t.Context(), q, owner, "files/notes", "files/archive/notes", nil); err != nil {
+		if _, err := shares.MoveUnder(t.Context(), q, owner, "files/notes", "files/archive/notes", nil, nil); err != nil {
 			t.Fatal(err)
 		}
 		if got := prefixOf(t, db, grants["files/notes"]); got != "files/notes" {
@@ -212,6 +214,43 @@ func TestStoreAFolderMoveLeavesTheGrantsAnOmissionKeeps(t *testing.T) {
 		}
 		if got := prefixOf(t, db, grants["files/notes/deep"]); got != "files/archive/notes/deep" {
 			t.Errorf("the grant on a folder inside moved to %q", got)
+		}
+	})
+	t.Run("a destination that already holds an object", func(t *testing.T) {
+		owner, grants := moveFixture(t, db)
+		// Live or trashed, a row the move did not write would come under the
+		// folder's grant at its new prefix.
+		reaperFile(t, db, owner, "files/archive/notes/held.md", 1)
+		reaperFile(t, db, owner, "files/archive/notes/deep/gone.md", 1)
+		reaperTrash(t, db, owner, "files/archive/notes/deep/gone.md", time.Now())
+		moved := []string{"files/archive/notes/a.md", "files/archive/notes/secret/s.md"}
+		for _, path := range []string{"files/notes/a.md", "files/notes/secret/s.md"} {
+			exec(t, db, `UPDATE files SET path = 'files/archive/' || substring(path FROM 7) WHERE owner = $1 AND path = $2`, owner, path)
+		}
+		if _, err := shares.MoveUnder(t.Context(), q, owner, "files/notes", "files/archive/notes", nil, moved); err != nil {
+			t.Fatal(err)
+		}
+		for prefix, want := range map[string]string{
+			"files/notes":        "files/notes",
+			"files/notes/deep":   "files/notes/deep",
+			"files/notes/a.md":   "files/archive/notes/a.md",
+			"files/notes/secret": "files/archive/notes/secret",
+		} {
+			if got := prefixOf(t, db, grants[prefix]); got != want {
+				t.Errorf("the grant on %q is on %q, want %q", prefix, got, want)
+			}
+		}
+	})
+	t.Run("a destination above the folder", func(t *testing.T) {
+		owner, grants := moveFixture(t, db)
+		// files/notes/deep moves to files/notes, which holds a.md: carried
+		// there, the grant on the folder inside would cover its parent.
+		exec(t, db, `UPDATE files SET path = 'files/notes/b.md' WHERE owner = $1 AND path = 'files/notes/deep/b.md'`, owner)
+		if _, err := shares.MoveUnder(t.Context(), q, owner, "files/notes/deep", "files/notes", nil, []string{"files/notes/b.md"}); err != nil {
+			t.Fatal(err)
+		}
+		if got := prefixOf(t, db, grants["files/notes/deep"]); got != "files/notes/deep" {
+			t.Errorf("the grant on the folder moved to %q, its parent", got)
 		}
 	})
 }

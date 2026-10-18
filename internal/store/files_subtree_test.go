@@ -444,10 +444,12 @@ func TestTakenNamesTheFirstPathARowHolds(t *testing.T) {
 // TestMovingTheGrantsUnderAFolderLeavesWhatStaysBehind: the statement takes
 // a grant on the folder or under it to the same prefix below the
 // destination, and leaves one at, under or above an omitted subtree at
-// either end and one on the path of an object still there.
+// either end, one on the path of an object still there, and one whose new
+// prefix covers a row the move did not write.
 func TestMovingTheGrantsUnderAFolderLeavesWhatStaysBehind(t *testing.T) {
 	q := &fakeQuerier{tag: pgconn.NewCommandTag("UPDATE 2")}
-	n, err := NewShares().MoveUnder(t.Context(), q, "space", "files/team", "files/archive/team", []string{"files/team/payroll"})
+	n, err := NewShares().MoveUnder(t.Context(), q, "space", "files/team", "files/archive/team",
+		[]string{"files/team/payroll"}, []string{"files/archive/team/plan.md"})
 	if err != nil || n != 2 {
 		t.Fatalf("MoveUnder = %d, %v", n, err)
 	}
@@ -458,6 +460,8 @@ func TestMovingTheGrantsUnderAFolderLeavesWhatStaysBehind(t *testing.T) {
 		"starts_with(omitted.prefix, path_prefix || '/')",
 		"starts_with(omitted.prefix, ($3::text || substring(path_prefix FROM char_length($2::text) + 1)) || '/')",
 		"f.path = shares.path_prefix",
+		"f.path <> ALL($6::text[])",
+		"starts_with(f.path, ($3::text || substring(path_prefix FROM char_length($2::text) + 1)) || '/')",
 	} {
 		if !strings.Contains(statement, want) {
 			t.Errorf("the statement does not hold %q:\n%s", want, statement)
@@ -465,17 +469,20 @@ func TestMovingTheGrantsUnderAFolderLeavesWhatStaysBehind(t *testing.T) {
 	}
 	args := q.args[0]
 	if args[1] != "files/team" || args[2] != "files/archive/team" || args[3] != `files/team/%` ||
-		!slices.Equal(args[4].([]string), []string{"files/team/payroll"}) {
+		!slices.Equal(args[4].([]string), []string{"files/team/payroll"}) ||
+		!slices.Equal(args[5].([]string), []string{"files/archive/team/plan.md"}) {
 		t.Errorf("the statement bound %v", args)
 	}
 	none := &fakeQuerier{}
-	if _, err := NewShares().MoveUnder(t.Context(), none, "space", "files/team", "files/archive/team", nil); err != nil {
+	if _, err := NewShares().MoveUnder(t.Context(), none, "space", "files/team", "files/archive/team", nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got, ok := none.args[0][4].([]string); !ok || got == nil || len(got) != 0 {
-		t.Errorf("an answer with no omission bound %#v", none.args[0][4])
+	for i, what := range map[int]string{4: "omission", 5: "moved path"} {
+		if got, ok := none.args[0][i].([]string); !ok || got == nil || len(got) != 0 {
+			t.Errorf("a move with no %s bound %#v", what, none.args[0][i])
+		}
 	}
-	if _, err := NewShares().MoveUnder(t.Context(), &fakeQuerier{execErr: errFault}, "space", "files/team", "files/b", nil); err == nil {
+	if _, err := NewShares().MoveUnder(t.Context(), &fakeQuerier{execErr: errFault}, "space", "files/team", "files/b", nil, nil); err == nil {
 		t.Error("a failed move reported success")
 	}
 }
