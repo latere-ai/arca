@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.7.0 - 2026-10-18
+
 ### Added
 
 - **A folder listing finds files by name and answers the newest ones.**
