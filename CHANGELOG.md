@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.10.0 - 2026-10-19
+
 ### Added
 
 - **An authorizer question names everyone who holds a share on the
