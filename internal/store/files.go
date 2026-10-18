@@ -96,6 +96,10 @@ type Files interface {
 	TrashSubtree(ctx context.Context, q Querier, owner, folder string, omit []string) (Subtree, error)
 	DropSubtree(ctx context.Context, q Querier, owner, folder string, omit []string) (Subtree, error)
 	Unreferenced(ctx context.Context, q Querier, ids []object.ID) ([]object.ID, error)
+
+	// The two of a folder move of spec 030, in files_subtree.go too.
+	Taken(ctx context.Context, q Querier, owner string, paths []string) (string, bool, error)
+	MoveMany(ctx context.Context, q Querier, owner string, moves []Rename) (int64, error)
 }
 
 // files is the query set over Postgres.

@@ -51,6 +51,10 @@ type memory struct {
 	// one case drives every handler against a database that answers nothing
 	// and none of them reads an outage as a verdict.
 	failAll error
+	// failRename is the fault one statement of a folder move meets, keyed
+	// by the table it renames in, so a case reaches each one's own failure
+	// after the reads before it answered.
+	failRename map[string]error
 	// nextID counts the rows the store has written, so an id is stable and
 	// a test can read one.
 	nextID int
@@ -343,6 +347,56 @@ func (m *memory) Move(_ context.Context, _ store.Querier, owner, from, to string
 	return true, nil
 }
 
+// Taken answers the first of the paths, in path order, that a row holds,
+// live or trashed.
+func (m *memory) Taken(_ context.Context, _ store.Querier, owner string, paths []string) (string, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.fault(); err != nil {
+		return "", false, err
+	}
+	sorted := slices.Sorted(slices.Values(paths))
+	for _, path := range sorted {
+		if _, held := m.files[key(owner, path)]; held {
+			return path, true, nil
+		}
+	}
+	return "", false, nil
+}
+
+// MoveMany renames every live row at a source path to its destination, all
+// or none, as one statement does: a destination a row holds is a conflict
+// and nothing is renamed.
+func (m *memory) MoveMany(_ context.Context, _ store.Querier, owner string, moves []store.Rename) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.fault(); err != nil {
+		return 0, err
+	}
+	if err := m.failRename["files"]; err != nil {
+		return 0, err
+	}
+	var live []store.Rename
+	for _, mv := range moves {
+		if held, ok := m.files[key(owner, mv.From)]; ok && held.DeletedAt == nil {
+			live = append(live, mv)
+		}
+	}
+	for _, mv := range live {
+		if _, taken := m.files[key(owner, mv.To)]; taken {
+			return 0, fmt.Errorf("memory: %q is taken: %w", mv.To, store.ErrConflict)
+		}
+	}
+	now := time.Now()
+	for _, mv := range live {
+		row := m.files[key(owner, mv.From)]
+		delete(m.files, key(owner, mv.From))
+		row.Path, row.UpdatedAt = mv.To, now
+		m.files[key(owner, mv.To)] = row
+	}
+	return int64(len(live)), nil
+}
+
 // ListPrefix answers the live rows under a prefix, ordered by path, without
 // the subtrees the answer left out.
 func (m *memory) ListPrefix(_ context.Context, _ store.Querier, owner, prefix, cursor string, limit int, omit []string) ([]store.File, string, error) {
@@ -601,6 +655,40 @@ func (m *memory) MoveVersions(_ context.Context, _ store.Querier, owner, from, t
 	return moved, nil
 }
 
+// MoveManyVersions carries the history of many paths to their new paths. A
+// destination whose history holds the same number is a conflict.
+func (m *memory) MoveManyVersions(_ context.Context, _ store.Querier, owner string, moves []store.Rename) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.fault(); err != nil {
+		return 0, err
+	}
+	if err := m.failRename["versions"]; err != nil {
+		return 0, err
+	}
+	to := map[string]string{}
+	for _, mv := range moves {
+		to[mv.From] = mv.To
+	}
+	moved := map[string]store.Version{}
+	for k, v := range m.versions {
+		if dst, ok := to[v.Path]; ok && v.Owner == owner {
+			v.Path = dst
+			moved[k] = v
+		}
+	}
+	for k, v := range moved {
+		if _, taken := m.versions[key(owner, v.Path, fmt.Sprint(v.VersionNo))]; taken {
+			return 0, fmt.Errorf("memory: version %d of %q is taken: %w", v.VersionNo, v.Path, store.ErrConflict)
+		}
+		delete(m.versions, k)
+	}
+	for _, v := range moved {
+		m.versions[key(owner, v.Path, fmt.Sprint(v.VersionNo))] = v
+	}
+	return int64(len(moved)), nil
+}
+
 // Add stars a path.
 func (m *memory) Add(_ context.Context, _ store.Querier, subject, owner, path string) error {
 	m.mu.Lock()
@@ -677,6 +765,35 @@ func (m *memory) MoveStars(_ context.Context, _ store.Querier, owner, from, to s
 	return moved, nil
 }
 
+// MoveManyStars carries the bookmarks of many paths to their new paths,
+// leaving one per subject and path as MoveStars does.
+func (m *memory) MoveManyStars(_ context.Context, _ store.Querier, owner string, moves []store.Rename) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.fault(); err != nil {
+		return 0, err
+	}
+	if err := m.failRename["stars"]; err != nil {
+		return 0, err
+	}
+	to := map[string]string{}
+	for _, mv := range moves {
+		to[mv.From] = mv.To
+	}
+	var moved []store.Star
+	for k, s := range m.stars {
+		if dst, ok := to[s.Path]; ok && s.Owner == owner {
+			delete(m.stars, k)
+			s.Path = dst
+			moved = append(moved, s)
+		}
+	}
+	for _, s := range moved {
+		m.stars[key(s.Subject, owner, s.Path)] = s
+	}
+	return int64(len(moved)), nil
+}
+
 // Referenced answers the reference check of spec 004 over the maps: an
 // object a file row or a version row still names may not be deleted. The
 // third table of the union is the upload sessions of spec 007, which this
@@ -734,6 +851,10 @@ func (v versionsOf) Move(ctx context.Context, q store.Querier, owner, from, to s
 	return v.MoveVersions(ctx, q, owner, from, to)
 }
 
+func (v versionsOf) MoveMany(ctx context.Context, q store.Querier, owner string, moves []store.Rename) (int64, error) {
+	return v.MoveManyVersions(ctx, q, owner, moves)
+}
+
 func (s starsOf) List(ctx context.Context, q store.Querier, subject string, owners []string, cursor store.StarCursor, limit int, omit []string) ([]store.Star, error) {
 	return s.ListStars(ctx, q, subject, owners, cursor, limit, omit)
 }
@@ -742,16 +863,32 @@ func (s starsOf) Move(ctx context.Context, q store.Querier, owner, from, to stri
 	return s.MoveStars(ctx, q, owner, from, to)
 }
 
-// sharesOf is the grants table at the unit tier. Two statements are reached
-// from this package: a move carries a grant on the exact path the object
-// leaves, and a permanent folder delete removes the grants under the folder.
-// What each was asked is what a case reads. The rest of the query set
-// belongs to internal/shares, so the embedded interface is left nil and any
-// other call panics rather than answering something invented.
+func (s starsOf) MoveMany(ctx context.Context, q store.Querier, owner string, moves []store.Rename) (int64, error) {
+	return s.MoveManyStars(ctx, q, owner, moves)
+}
+
+// sharesOf is the grants table at the unit tier. Three statements are
+// reached from this package: a move carries a grant on the exact path the
+// object leaves, a folder move carries the grants under the folder, and a
+// permanent folder delete removes them. What each was asked is what a case
+// reads. The rest of the query set belongs to internal/shares, so the
+// embedded interface is left nil and any other call panics rather than
+// answering something invented.
 type sharesOf struct {
 	store.Shares
-	moved   []string
-	removed []string
+	moved      []string
+	movedUnder []string
+	removed    []string
+	// failMoveUnder is the fault the folder move's statement meets.
+	failMoveUnder error
+}
+
+func (s *sharesOf) MoveUnder(_ context.Context, _ store.Querier, owner, from, to string, omit []string) (int64, error) {
+	if s.failMoveUnder != nil {
+		return 0, s.failMoveUnder
+	}
+	s.movedUnder = append(s.movedUnder, owner+" "+from+" -> "+to+" "+strings.Join(omit, ","))
+	return 1, nil
 }
 
 func (s *sharesOf) DeleteUnder(_ context.Context, _ store.Querier, owner, folder string, omit []string) (int64, error) {

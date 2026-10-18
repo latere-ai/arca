@@ -96,6 +96,11 @@ type Shares interface {
 	// object written there inherits none. A grant that still covers
 	// something an omission left in place stays.
 	DeleteUnder(ctx context.Context, q Querier, owner, folder string, omit []string) (int64, error)
+	// MoveUnder carries every grant and link whose prefix is a folder or
+	// under it to the same prefix below the folder's destination, which a
+	// folder move of spec 030 runs after it renames the rows. One that still
+	// covers or names something the move left in place stays.
+	MoveUnder(ctx context.Context, q Querier, owner, from, to string, omit []string) (int64, error)
 	// ListSpace answers one page of the grants on a space, ordered by id,
 	// narrowed to one subtree when prefix is not empty. Revoked grants are
 	// not answered.
@@ -344,14 +349,37 @@ func (shares) DeleteUnder(ctx context.Context, q Querier, owner, folder string, 
 	tag, err := q.Exec(ctx, `
 		DELETE FROM shares
 		 WHERE owner = $1 AND (path_prefix = $2 OR path_prefix LIKE $3 ESCAPE '\')
-		   AND NOT EXISTS (
-		    SELECT 1 FROM unnest($4::text[]) AS omitted(prefix)
-		     WHERE path_prefix = omitted.prefix
-		        OR starts_with(path_prefix, omitted.prefix || '/')
-		        OR starts_with(omitted.prefix, path_prefix || '/'))`,
+		   AND `+untouched("path_prefix", 4),
 		owner, folder, under(folder), omitted(omit))
 	if err != nil {
 		return 0, classify(fmt.Sprintf("remove the grants under %q of %q", folder, owner), err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// MoveUnder carries the grants and links of a folder move: one whose prefix
+// is the folder or under it moves to the same prefix below to, for the
+// reason Move carries an exact-path grant. Left on a path the move freed, it
+// would cover the next object written there, which its owner never shared.
+//
+// Two kinds stay. One at, under or above a subtree the omission covers, at
+// either end of the move, still covers something the move left in place,
+// as under DeleteUnder. One whose prefix is the path of an object still
+// there goes on naming that object: a trashed one, or the one at the
+// folder's own path, neither of which a folder move takes. The statement
+// runs after the rows are renamed in the same transaction, so a path a
+// moved object left is free by then and its grant moves.
+func (shares) MoveUnder(ctx context.Context, q Querier, owner, from, to string, omit []string) (int64, error) {
+	moved := `($3::text || substring(path_prefix FROM char_length($2::text) + 1))`
+	tag, err := q.Exec(ctx, `
+		UPDATE shares SET path_prefix = `+moved+`
+		 WHERE owner = $1 AND (path_prefix = $2 OR path_prefix LIKE $4 ESCAPE '\')
+		   AND `+untouched("path_prefix", 5)+`
+		   AND `+untouched(moved, 5)+`
+		   AND NOT EXISTS (SELECT 1 FROM files f WHERE f.owner = $1 AND f.path = shares.path_prefix)`,
+		owner, from, to, under(from), omitted(omit))
+	if err != nil {
+		return 0, classify(fmt.Sprintf("move the grants under %q of %q", from, owner), err)
 	}
 	return tag.RowsAffected(), nil
 }

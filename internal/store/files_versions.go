@@ -63,6 +63,10 @@ type Versions interface {
 	// Move carries a path's history to a new path, inside the transaction
 	// that moves the file.
 	Move(ctx context.Context, q Querier, owner, from, to string) (int64, error)
+	// MoveMany carries the history of each source path of a folder move to
+	// its destination, inside the transaction that renames the rows
+	// (spec 030).
+	MoveMany(ctx context.Context, q Querier, owner string, moves []Rename) (int64, error)
 }
 
 // versions is the query set over Postgres.
@@ -196,6 +200,22 @@ func (versions) Move(ctx context.Context, q Querier, owner, from, to string) (in
 		`UPDATE file_versions SET path = $3 WHERE owner = $1 AND path = $2`, owner, from, to)
 	if err != nil {
 		return 0, classify(fmt.Sprintf("move the versions of %q of %q", from, owner), err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// MoveMany carries the history of many paths to their new paths in one
+// statement. A destination whose history already holds a version of the
+// same number is ErrConflict.
+func (versions) MoveMany(ctx context.Context, q Querier, owner string, moves []Rename) (int64, error) {
+	from, to := ends(moves)
+	tag, err := q.Exec(ctx, `
+		UPDATE file_versions v SET path = m.dst
+		  FROM `+renames+`
+		 WHERE v.owner = $1 AND v.path = m.src`,
+		owner, from, to)
+	if err != nil {
+		return 0, classify(fmt.Sprintf("move the versions of %d paths of %q", len(moves), owner), err)
 	}
 	return tag.RowsAffected(), nil
 }

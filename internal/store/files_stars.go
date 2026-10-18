@@ -50,6 +50,9 @@ type Stars interface {
 	// Move carries a path's stars to a new path, inside the transaction that
 	// moves the file, so a bookmark follows what it bookmarked.
 	Move(ctx context.Context, q Querier, owner, from, to string) (int64, error)
+	// MoveMany carries the stars of each source path of a folder move to its
+	// destination, by Move's rule (spec 030).
+	MoveMany(ctx context.Context, q Querier, owner string, moves []Rename) (int64, error)
 }
 
 // stars is the query set over Postgres.
@@ -142,6 +145,32 @@ func (stars) Move(ctx context.Context, q Querier, owner, from, to string) (int64
 		`UPDATE stars SET path = $3 WHERE owner = $1 AND path = $2`, owner, from, to)
 	if err != nil {
 		return 0, classify(fmt.Sprintf("move the stars of %q of %q", from, owner), err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// MoveMany carries the stars of many paths to their new paths. A subject
+// that had starred a destination as well as its source keeps one star, as
+// Move leaves: the one on the destination is dropped first, so the rename
+// meets no row of the same subject and path.
+func (stars) MoveMany(ctx context.Context, q Querier, owner string, moves []Rename) (int64, error) {
+	from, to := ends(moves)
+	what := fmt.Sprintf("move the stars of %d paths of %q", len(moves), owner)
+	if _, err := q.Exec(ctx, `
+		DELETE FROM stars d
+		 USING `+renames+`
+		 WHERE d.owner = $1 AND d.path = m.dst
+		   AND EXISTS (SELECT 1 FROM stars s WHERE s.owner = $1 AND s.path = m.src AND s.subject = d.subject)`,
+		owner, from, to); err != nil {
+		return 0, classify(what, err)
+	}
+	tag, err := q.Exec(ctx, `
+		UPDATE stars s SET path = m.dst
+		  FROM `+renames+`
+		 WHERE s.owner = $1 AND s.path = m.src`,
+		owner, from, to)
+	if err != nil {
+		return 0, classify(what, err)
 	}
 	return tag.RowsAffected(), nil
 }

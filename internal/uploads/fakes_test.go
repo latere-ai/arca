@@ -207,6 +207,16 @@ func (m *memory) Move(context.Context, store.Querier, string, string, string) (b
 	return false, nil
 }
 
+// Taken and MoveMany are the folder move's statements, which no route of
+// this package reaches.
+func (m *memory) Taken(context.Context, store.Querier, string, []string) (string, bool, error) {
+	return "", false, nil
+}
+
+func (m *memory) MoveMany(context.Context, store.Querier, string, []store.Rename) (int64, error) {
+	return 0, nil
+}
+
 func (m *memory) ListPrefix(context.Context, store.Querier, string, string, string, int, []string) ([]store.File, string, error) {
 	return nil, "", nil
 }
@@ -260,6 +270,10 @@ func (m *memory) MoveVersions(context.Context, store.Querier, string, string, st
 	return 0, nil
 }
 
+func (m *memory) MoveManyVersions(context.Context, store.Querier, string, []store.Rename) (int64, error) {
+	return 0, nil
+}
+
 // The stars table, which no route of this package reaches.
 
 func (m *memory) Add(context.Context, store.Querier, string, string, string) error { return nil }
@@ -271,6 +285,10 @@ func (m *memory) ListStars(context.Context, store.Querier, string, []string, sto
 }
 
 func (m *memory) MoveStars(context.Context, store.Querier, string, string, string) (int64, error) {
+	return 0, nil
+}
+
+func (m *memory) MoveManyStars(context.Context, store.Querier, string, []store.Rename) (int64, error) {
 	return 0, nil
 }
 
@@ -393,12 +411,20 @@ func (v versionsOf) Move(ctx context.Context, q store.Querier, owner, from, to s
 	return v.MoveVersions(ctx, q, owner, from, to)
 }
 
+func (v versionsOf) MoveMany(ctx context.Context, q store.Querier, owner string, moves []store.Rename) (int64, error) {
+	return v.MoveManyVersions(ctx, q, owner, moves)
+}
+
 func (s starsOf) List(ctx context.Context, q store.Querier, subject string, owners []string, cursor store.StarCursor, limit int, _ []string) ([]store.Star, error) {
 	return s.ListStars(ctx, q, subject, owners, cursor, limit)
 }
 
 func (s starsOf) Move(ctx context.Context, q store.Querier, owner, from, to string) (int64, error) {
 	return s.MoveStars(ctx, q, owner, from, to)
+}
+
+func (s starsOf) MoveMany(ctx context.Context, q store.Querier, owner string, moves []store.Rename) (int64, error) {
+	return s.MoveManyStars(ctx, q, owner, moves)
 }
 
 func (s sessionsOf) Insert(ctx context.Context, q store.Querier, held store.Session) (store.Session, error) {

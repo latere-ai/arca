@@ -4,6 +4,7 @@
 package store
 
 import (
+	"errors"
 	"io/fs"
 	"regexp"
 	"slices"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"latere.ai/x/arca/internal/store/migrations"
@@ -312,5 +314,168 @@ func TestNoColumnHoldsALimit(t *testing.T) {
 	}
 	if columns < 40 {
 		t.Fatalf("the test read %d columns out of the migrations, which is not the schema", columns)
+	}
+}
+
+// The unit half of the folder move of spec 030: what each statement binds,
+// what it answers, and that every failure reaches the caller.
+
+// moves is the folder move the cases below rename.
+var moves = []Rename{
+	{From: "files/notes/a.md", To: "files/archive/a.md"},
+	{From: "files/notes/deep/b.md", To: "files/archive/deep/b.md"},
+}
+
+// TestAFolderMoveBindsEachSourceBesideItsDestination: every statement of a
+// folder move joins on the moves as two arrays in one order, so the n-th
+// source is renamed to the n-th destination and no other.
+func TestAFolderMoveBindsEachSourceBesideItsDestination(t *testing.T) {
+	from, to := ends(moves)
+	if !slices.Equal(from, []string{"files/notes/a.md", "files/notes/deep/b.md"}) ||
+		!slices.Equal(to, []string{"files/archive/a.md", "files/archive/deep/b.md"}) {
+		t.Fatalf("the moves split into %v and %v", from, to)
+	}
+	for name, run := range map[string]func(Querier) (int64, error){
+		"files":    func(q Querier) (int64, error) { return NewFiles().MoveMany(t.Context(), q, "space", moves) },
+		"versions": func(q Querier) (int64, error) { return NewVersions().MoveMany(t.Context(), q, "space", moves) },
+		"stars":    func(q Querier) (int64, error) { return NewStars().MoveMany(t.Context(), q, "space", moves) },
+	} {
+		q := &steps{tags: []pgconn.CommandTag{pgconn.NewCommandTag("UPDATE 2"), pgconn.NewCommandTag("UPDATE 2")}}
+		if _, err := run(q); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		for i, statement := range q.statements {
+			if !strings.Contains(statement, renames) || !strings.Contains(statement, "m.src") || !strings.Contains(statement, "m.dst") {
+				t.Errorf("%s statement %d does not join on the moves:\n%s", name, i, statement)
+			}
+			args := q.args[i]
+			if args[0] != "space" || !slices.Equal(args[1].([]string), from) || !slices.Equal(args[2].([]string), to) {
+				t.Errorf("%s statement %d bound %v", name, i, args)
+			}
+		}
+	}
+}
+
+// TestAFolderMoveRenamesLiveRowsAndSaysWhenADestinationIsTaken: the rename
+// touches live rows at the path that was read, answers how many it took, and
+// reads a unique violation as the conflict it is.
+func TestAFolderMoveRenamesLiveRowsAndSaysWhenADestinationIsTaken(t *testing.T) {
+	renamed := &fakeQuerier{tag: pgconn.NewCommandTag("UPDATE 2")}
+	n, err := NewFiles().MoveMany(t.Context(), renamed, "space", moves)
+	if err != nil || n != 2 {
+		t.Fatalf("MoveMany = %d, %v", n, err)
+	}
+	statement := renamed.statements[0]
+	for _, want := range []string{"f.path = m.src", "deleted_at IS NULL", "updated_at = now()"} {
+		if !strings.Contains(statement, want) {
+			t.Errorf("the rename does not hold %q:\n%s", want, statement)
+		}
+	}
+	if strings.Contains(statement, "object_id") {
+		t.Errorf("the rename touches the object a row names:\n%s", statement)
+	}
+	for name, run := range map[string]func(Querier) (int64, error){
+		"files":    func(q Querier) (int64, error) { return NewFiles().MoveMany(t.Context(), q, "space", moves) },
+		"versions": func(q Querier) (int64, error) { return NewVersions().MoveMany(t.Context(), q, "space", moves) },
+	} {
+		if _, err := run(&fakeQuerier{execErr: conflictError}); !errors.Is(err, ErrConflict) {
+			t.Errorf("%s onto a taken destination = %v", name, err)
+		}
+		if _, err := run(&fakeQuerier{execErr: errFault}); err == nil || errors.Is(err, ErrConflict) {
+			t.Errorf("%s against a failed connection = %v", name, err)
+		}
+	}
+	history := &fakeQuerier{tag: pgconn.NewCommandTag("UPDATE 5")}
+	if n, err := NewVersions().MoveMany(t.Context(), history, "space", moves); err != nil || n != 5 {
+		t.Errorf("the history moved %d, %v", n, err)
+	}
+}
+
+// TestAFolderMoveCarriesTheStarsAndLeavesOnePerSubject: the colliding star
+// goes first, then the rename, and a failure of either reaches the caller.
+func TestAFolderMoveCarriesTheStarsAndLeavesOnePerSubject(t *testing.T) {
+	moved := &steps{tags: []pgconn.CommandTag{
+		pgconn.NewCommandTag("DELETE 1"), pgconn.NewCommandTag("UPDATE 3"),
+	}}
+	n, err := NewStars().MoveMany(t.Context(), moved, "space", moves)
+	if err != nil || n != 3 {
+		t.Fatalf("MoveMany = %d, %v", n, err)
+	}
+	if len(moved.statements) != 2 || !strings.HasPrefix(strings.TrimSpace(moved.statements[0]), "DELETE") ||
+		!strings.Contains(moved.statements[0], "s.subject = d.subject") {
+		t.Fatalf("the colliding bookmark is not dropped first:\n%v", moved.statements)
+	}
+	firstFailed := &steps{errs: []error{errFault}}
+	if _, err := NewStars().MoveMany(t.Context(), firstFailed, "space", moves); err == nil {
+		t.Error("a failed drop reported success")
+	}
+	secondFailed := &steps{tags: []pgconn.CommandTag{pgconn.NewCommandTag("DELETE 0")}, errs: []error{nil, errFault}}
+	if _, err := NewStars().MoveMany(t.Context(), secondFailed, "space", moves); err == nil {
+		t.Error("a failed rename reported success")
+	}
+}
+
+// TestTakenNamesTheFirstPathARowHolds: the check reads live and trashed rows
+// alike, answers the first held path in path order, tells no row from a
+// fault, and surfaces the fault.
+func TestTakenNamesTheFirstPathARowHolds(t *testing.T) {
+	paths := []string{"files/archive/a.md", "files/archive/deep/b.md"}
+	held := &fakeQuerier{row: values("files/archive/a.md")}
+	path, taken, err := NewFiles().Taken(t.Context(), held, "space", paths)
+	if err != nil || !taken || path != "files/archive/a.md" {
+		t.Fatalf("Taken = %q, %t, %v", path, taken, err)
+	}
+	statement := held.statements[0]
+	if strings.Contains(statement, "deleted_at") || !strings.Contains(statement, "ORDER BY path") {
+		t.Errorf("the check does not read every row in path order:\n%s", statement)
+	}
+	if !slices.Equal(held.args[0][1].([]string), paths) {
+		t.Errorf("the check bound %v", held.args[0])
+	}
+	free := &fakeQuerier{row: failing(pgx.ErrNoRows)}
+	if path, taken, err := NewFiles().Taken(t.Context(), free, "space", paths); err != nil || taken || path != "" {
+		t.Errorf("no row holding a destination = %q, %t, %v", path, taken, err)
+	}
+	if _, taken, err := NewFiles().Taken(t.Context(), &fakeQuerier{row: failing(errFault)}, "space", paths); err == nil || taken {
+		t.Errorf("a failed check = %t, %v", taken, err)
+	}
+}
+
+// TestMovingTheGrantsUnderAFolderLeavesWhatStaysBehind: the statement takes
+// a grant on the folder or under it to the same prefix below the
+// destination, and leaves one at, under or above an omitted subtree at
+// either end and one on the path of an object still there.
+func TestMovingTheGrantsUnderAFolderLeavesWhatStaysBehind(t *testing.T) {
+	q := &fakeQuerier{tag: pgconn.NewCommandTag("UPDATE 2")}
+	n, err := NewShares().MoveUnder(t.Context(), q, "space", "files/team", "files/archive/team", []string{"files/team/payroll"})
+	if err != nil || n != 2 {
+		t.Fatalf("MoveUnder = %d, %v", n, err)
+	}
+	statement := q.statements[0]
+	for _, want := range []string{
+		"path_prefix = $2 OR path_prefix LIKE $4",
+		"$3::text || substring(path_prefix FROM char_length($2::text) + 1)",
+		"starts_with(omitted.prefix, path_prefix || '/')",
+		"starts_with(omitted.prefix, ($3::text || substring(path_prefix FROM char_length($2::text) + 1)) || '/')",
+		"f.path = shares.path_prefix",
+	} {
+		if !strings.Contains(statement, want) {
+			t.Errorf("the statement does not hold %q:\n%s", want, statement)
+		}
+	}
+	args := q.args[0]
+	if args[1] != "files/team" || args[2] != "files/archive/team" || args[3] != `files/team/%` ||
+		!slices.Equal(args[4].([]string), []string{"files/team/payroll"}) {
+		t.Errorf("the statement bound %v", args)
+	}
+	none := &fakeQuerier{}
+	if _, err := NewShares().MoveUnder(t.Context(), none, "space", "files/team", "files/archive/team", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := none.args[0][4].([]string); !ok || got == nil || len(got) != 0 {
+		t.Errorf("an answer with no omission bound %#v", none.args[0][4])
+	}
+	if _, err := NewShares().MoveUnder(t.Context(), &fakeQuerier{execErr: errFault}, "space", "files/team", "files/b", nil); err == nil {
+		t.Error("a failed move reported success")
 	}
 }

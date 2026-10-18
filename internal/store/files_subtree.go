@@ -58,6 +58,20 @@ func Omitted(omit []string, path string) bool {
 	return false
 }
 
+// untouched is the predicate that keeps a grant or a link out of a folder
+// statement while it still covers part of an omitted subtree: the column is
+// one of the prefixes the text array parameter holds, under one, or above
+// one, matched on whole segments. A prefix above an omitted subtree covers
+// it, so a statement that leaves the subtree in place leaves that grant too.
+func untouched(column string, parameter int) string {
+	return fmt.Sprintf(`NOT EXISTS (
+		    SELECT 1 FROM unnest($%d::text[]) AS omitted(prefix)
+		     WHERE %s = omitted.prefix
+		        OR starts_with(%s, omitted.prefix || '/')
+		        OR starts_with(omitted.prefix, %s || '/'))`,
+		parameter, column, column, column)
+}
+
 // Subtree is what a statement over a folder changed: the rows, and the bytes
 // they counted.
 type Subtree struct {
@@ -197,3 +211,61 @@ const unreferencedSQL = `
 	 WHERE NOT EXISTS (SELECT 1 FROM files WHERE object_id = candidate)
 	   AND NOT EXISTS (SELECT 1 FROM file_versions WHERE object_id = candidate)
 	   AND NOT EXISTS (SELECT 1 FROM upload_sessions WHERE object_id = candidate)`
+
+// Rename is one path of a folder move and the path it moves to (spec 030).
+type Rename struct {
+	From, To string
+}
+
+// ends splits the moves into the two arrays a statement binds, in one
+// order, so the n-th source pairs with the n-th destination.
+func ends(moves []Rename) (from, to []string) {
+	from, to = make([]string, len(moves)), make([]string, len(moves))
+	for i, m := range moves {
+		from[i], to[i] = m.From, m.To
+	}
+	return from, to
+}
+
+// renames is the relation every statement of a folder move joins on: one
+// row per move, its source beside its destination, bound as $2 and $3.
+const renames = `unnest($2::text[], $3::text[]) AS m(src, dst)`
+
+// Taken answers the first of the paths, in path order, that a row of the
+// space holds, live or trashed, and false when none does. A path holds one
+// row whatever its state, so a folder move refuses a destination either
+// kind holds before it renames anything.
+func (files) Taken(ctx context.Context, q Querier, owner string, paths []string) (string, bool, error) {
+	var path string
+	err := q.QueryRow(ctx, `
+		SELECT path FROM files WHERE owner = $1 AND path = ANY($2::text[])
+		 ORDER BY path LIMIT 1`, owner, paths).Scan(&path)
+	switch {
+	case missing(err):
+		return "", false, nil
+	case err != nil:
+		return "", false, fmt.Errorf("store: read which of %d paths of %q are taken: %w", len(paths), owner, err)
+	}
+	return path, true, nil
+}
+
+// MoveMany renames every live row at a source path to its destination, in
+// one statement, and answers how many it renamed. The id, the object id,
+// the size and the checksum stay: a key derives from the object id, so the
+// bytes are where they were (spec 003).
+//
+// A row is renamed only where it is still live at the path the caller read,
+// so a count short of the moves is a row another request deleted or moved
+// in between. A destination a row holds is ErrConflict.
+func (files) MoveMany(ctx context.Context, q Querier, owner string, moves []Rename) (int64, error) {
+	from, to := ends(moves)
+	tag, err := q.Exec(ctx, `
+		UPDATE files f SET path = m.dst, updated_at = now()
+		  FROM `+renames+`
+		 WHERE f.owner = $1 AND f.path = m.src AND f.deleted_at IS NULL`,
+		owner, from, to)
+	if err != nil {
+		return 0, classify(fmt.Sprintf("move %d paths of %q", len(moves), owner), err)
+	}
+	return tag.RowsAffected(), nil
+}
