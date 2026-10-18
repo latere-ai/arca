@@ -140,10 +140,11 @@ The rules, each held by the check rather than by review:
 ### Built
 
 **2026-10-18.** `TestPreviousSuitePasses` is
-`test/conformance/previous_tier_test.go`, under the `tiers` tag; what it
-decides is in `test/conformance/superseded_test.go`, which the unit run
-holds: the previous tag, the superseded list and its rules, the cases
-read from a suite's source, the skip pattern and the evidence. The
+`test/conformance/previous_tier_test.go`, under the `tiers` tag. What it
+decides is in `test/conformance/superseded_test.go` and held by the unit
+run in `previous_test.go`: the previous tag, the superseded list and its
+rules, the cases read from a suite's source, the skip pattern and the
+evidence. The
 `conformance` job of `.github/workflows/release.yml` runs it after this
 release's suite, with the tag being cut in `ARCA_RELEASE_TAG`, and
 appends its evidence to `release-evidence/conformance.md`. The job's
@@ -152,8 +153,12 @@ checkout fetches the tags, which the previous tag is read from.
 It runs outside a release too: with `ARCA_RELEASE_TAG` set to the next
 tag, the stack's variables and `ARCA_BINARY`, the previous driver starts
 an installation of that binary on the stack, which is what this change
-was exercised against. The first release that runs it is what moves this
-spec to `testing`.
+was exercised against on 2026-10-18: `v0.7.0`'s suite, fetched through
+the proxy, against the binary of the folder move. With the list empty it
+logged `52 passed, 1 failed` and `failed: [028/FolderCopy]`, and the
+check failed; with the entry, the case did not run, the rest passed, and
+the evidence named it under its reason. The first release that runs it
+is what moves this spec to `testing`.
 
 ## Acceptance criteria
 
