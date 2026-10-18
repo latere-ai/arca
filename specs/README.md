@@ -78,6 +78,7 @@ spec once every spec in its `depends_on` is at `testing` or later, not
 | [028](028-one-tree.md) | One tree: a space is one tree of files and folders, workspaces are removed, a folder is deleted or copied in one call, and an answer's limits turn versions and the trash off and leave subtrees out of an enumeration | complete |
 | [029](029-finding-files.md) | Finding files: a folder listing narrowed to names that contain a text, and the newest files under a folder | complete |
 | [030](030-moving-a-folder.md) | Moving a folder: every object under a folder renamed below a destination in one call and one transaction, with no byte copied | complete |
+| [031](031-download-only-link-reads.md) | Download-only link reads: every answer of the three link routes is an attachment, never sniffed and sandboxed, and a link's redirect asks the bucket for the attachment | drafted |
 
 The order of building is the order of the numbers except where a spec's
 `depends_on` says otherwise, and 019 runs alongside all of them: each
