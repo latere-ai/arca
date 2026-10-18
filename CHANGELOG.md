@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.8.0 - 2026-10-18
+
 ### Added
 
 - **A folder is moved in one call.** `POST /v1/files/{owner}/{path}` with
