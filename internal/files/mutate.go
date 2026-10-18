@@ -18,7 +18,8 @@ import (
 // body is what a POST on a path carries: exactly one of move_to,
 // restore_version and copy_to, because a move, a restore and a copy are
 // three operations and a request that named two named none. recursive goes
-// with copy_to alone: a move stays one object (spec 028).
+// with copy_to and with move_to and makes the path a folder (specs 028 and
+// 030); a restore acts on one object.
 type body struct {
 	MoveTo         string `json:"move_to"`
 	RestoreVersion int    `json:"restore_version"`
@@ -50,9 +51,11 @@ func (s *Service) post(w http.ResponseWriter, r *http.Request) {
 	case len(named) > 1:
 		api.WriteError(w, r, api.Refuse(api.CodeExclusiveFields,
 			"move_to renames a path, restore_version brings a version forward and copy_to copies; a request names one").About(named...))
-	case in.Recursive && in.CopyTo == "":
+	case in.Recursive && in.CopyTo == "" && in.MoveTo == "":
 		api.WriteError(w, r, api.Refuse(api.CodeInvalidField,
-			"recursive goes with copy_to; a move and a restore act on one object").About("recursive"))
+			"recursive goes with copy_to or move_to; a restore acts on one object").About("recursive"))
+	case in.MoveTo != "" && in.Recursive:
+		s.moveFolder(w, r, in.MoveTo)
 	case in.MoveTo != "":
 		s.move(w, r, in.MoveTo)
 	case in.CopyTo != "" && in.Recursive:

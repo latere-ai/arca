@@ -563,3 +563,94 @@ func TestStoreAPermanentFolderDeleteLeavesBothStoresEmpty(t *testing.T) {
 		t.Errorf("the folder delete left %d versions", versions)
 	}
 }
+
+// TestStoreAFolderMoveMakesNoBucketCallAndCarriesWhatKeysOnThePath is spec
+// 030 against the real stores: every live object under the folder moves in
+// one call with its id, its object and its key, no bucket call is made, the
+// history, the bookmarks and the grants under the folder follow, a trashed
+// object and a grant above the folder stay, and a second move onto the same
+// destination is refused whole.
+func TestStoreAFolderMoveMakesNoBucketCallAndCarriesWhatKeysOnThePath(t *testing.T) {
+	h, stores := tier(t)
+	h.seed(t, "files/notes/a.md", "one")
+	h.seed(t, "files/notes/a.md", "two")
+	h.seed(t, "files/notes/deep/b.md", "nested")
+	h.seed(t, "files/notes/old.md", "in the trash")
+	if w := h.call(t, http.MethodDelete, h.object("files/notes/old.md"), nil); w.Code != http.StatusNoContent {
+		t.Fatalf("the trash answered %d: %s", w.Code, w.Body)
+	}
+	if w := h.call(t, http.MethodPut, "/v1/stars",
+		strings.NewReader(`{"owner":"me","path":"files/notes/deep/b.md"}`),
+		api.HeaderContentType, api.JSONMediaType); w.Code != http.StatusNoContent {
+		t.Fatalf("the star answered %d: %s", w.Code, w.Body)
+	}
+	folder := stores.grant(t, h.owner, "files/notes")
+	exact := stores.grant(t, h.owner, "files/notes/a.md")
+	trashed := stores.grant(t, h.owner, "files/notes/old.md")
+	parent := stores.grant(t, h.owner, "files")
+	before := map[string]store.File{}
+	for _, rest := range []string{"a.md", "deep/b.md"} {
+		before[rest], _ = stores.row(t, h.owner, "files/notes/"+rest)
+	}
+	keys, calls := len(stores.keys(t)), h.bucket.Total()
+
+	w := h.post(t, "files/notes", `{"move_to":"files/archive/notes","recursive":true}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("the folder move answered %d: %s", w.Code, w.Body)
+	}
+	if got := h.bucket.Total() - calls; got != 0 {
+		t.Fatalf("the folder move made %d bucket calls, and a key derives from an id", got)
+	}
+	if got := len(stores.keys(t)); got != keys {
+		t.Errorf("the bucket holds %d keys after the move, %d before", got, keys)
+	}
+	for rest, row := range before {
+		moved, held := stores.row(t, h.owner, "files/archive/notes/"+rest)
+		if !held || moved.ID != row.ID || moved.ObjectID != row.ObjectID || moved.Checksum != row.Checksum {
+			t.Errorf("%s moved as %+v from %+v", rest, moved, row)
+		}
+		if _, held := stores.row(t, h.owner, "files/notes/"+rest); held {
+			t.Errorf("files/notes/%s still holds a row", rest)
+		}
+	}
+	if row, held := stores.row(t, h.owner, "files/notes/old.md"); !held || row.DeletedAt == nil {
+		t.Errorf("the trashed object is %+v, %t; it stays where it was", row, held)
+	}
+	versions, err := store.NewVersions().List(t.Context(), stores.db.Querier(), h.owner, "files/archive/notes/a.md", 0, 10)
+	if err != nil || len(versions) != 1 {
+		t.Errorf("the history after the folder move is %d rows, %v", len(versions), err)
+	}
+	stars, err := store.NewStars().List(t.Context(), stores.db.Querier(), h.owner, nil, store.StarCursor{}, 10, nil)
+	if err != nil || len(stars) != 1 || stars[0].Path != "files/archive/notes/deep/b.md" {
+		t.Errorf("the bookmarks after the folder move are %v, %v", stars, err)
+	}
+	for _, c := range []struct {
+		grant store.Grant
+		want  string
+	}{
+		{folder, "files/archive/notes"},
+		{exact, "files/archive/notes/a.md"},
+		{trashed, "files/notes/old.md"},
+		{parent, "files"},
+	} {
+		if held := stores.readGrant(t, c.grant.ID); held.PathPrefix != c.want {
+			t.Errorf("the grant on %q is on %q after the folder move, want %q", c.grant.PathPrefix, held.PathPrefix, c.want)
+		}
+	}
+	read := h.call(t, http.MethodGet, h.object("files/archive/notes/a.md"), nil)
+	if read.Code != http.StatusOK || read.Body.String() != "two" {
+		t.Errorf("the moved object reads %d: %q", read.Code, read.Body)
+	}
+
+	// Moved back over a destination one row holds, the folder stays whole
+	// where it is.
+	h.seed(t, "files/notes/deep/b.md", "written where the folder was")
+	if got := code(t, h.post(t, "files/archive/notes", `{"move_to":"files/notes","recursive":true}`)); got != api.CodePathTaken {
+		t.Fatalf("a folder move onto a taken path is %q", got)
+	}
+	for _, rest := range []string{"a.md", "deep/b.md"} {
+		if _, held := stores.row(t, h.owner, "files/archive/notes/"+rest); !held {
+			t.Errorf("a refused folder move took files/archive/notes/%s", rest)
+		}
+	}
+}

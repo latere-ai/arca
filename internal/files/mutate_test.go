@@ -95,7 +95,8 @@ func TestAPostNamesOneOperationAndAPathInThePlane(t *testing.T) {
 		`{"move_to":"files/a.md","restore_version":1}`:    api.CodeExclusiveFields,
 		`{"move_to":"files/a.md","copy_to":"files/b.md"}`: api.CodeExclusiveFields,
 		`{"copy_to":"files/a.md","restore_version":1}`:    api.CodeExclusiveFields,
-		`{"move_to":"files/a.md","recursive":true}`:       api.CodeInvalidField,
+		`{"move_to":"files/plan.md","recursive":true}`:    api.CodeInvalidField,
+		`{"move_to":"files/a.md","recursive":true}`:       api.CodeNotFound,
 		`{"restore_version":1,"recursive":true}`:          api.CodeInvalidField,
 		`{"recursive":true}`:                              api.CodeInvalidField,
 		`{"restore_version":-1}`:                          api.CodeInvalidField,
@@ -105,7 +106,9 @@ func TestAPostNamesOneOperationAndAPathInThePlane(t *testing.T) {
 			t.Errorf("%s is %q, want %q", body, got, want)
 		}
 	}
-	// Nothing above was acted on: the object is where it was, alone.
+	// Nothing above was acted on: the object is where it was, alone. With
+	// recursive the path is a folder (spec 030), and a file is not one, so
+	// a folder move of it finds nothing under it.
 	if _, held := h.read(t, "files/plan.md"); !held || len(h.store.files) != 1 {
 		t.Errorf("a refused request changed the space: %d rows", len(h.store.files))
 	}

@@ -44,14 +44,15 @@ type File struct {
 	Plane string
 	// Size is the object's size in bytes, absent where the question carries
 	// no size: a listing, a folder delete, or a read of an object not yet
-	// looked up. On a copy it is the sum of the bytes to be written.
+	// looked up. On a copy it is the sum of the bytes to be written, and on
+	// a folder move the sum of the bytes under the folder.
 	Size *int64
 	// From is the source path of a move or a copy, absent on every other
 	// question.
 	From string
 	// Recursive reports that Path, and From where there is one, name a
-	// folder and everything under it: a folder delete or a folder copy. It
-	// is absent unless true.
+	// folder and everything under it: a folder delete, a folder copy or a
+	// folder move. It is absent unless true.
 	Recursive bool
 	// Copy reports that From is read and stays where it is. A question that
 	// carries From without it is a move. It is absent unless true.

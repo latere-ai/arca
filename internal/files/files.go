@@ -5,7 +5,7 @@
 // bytes behind it, written, read, listed, moved, copied, deleted, versioned,
 // trashed, restored and starred. A space is one tree (spec 028), so every
 // path of it is this package's, and a folder is a prefix this package
-// deletes or copies in one call.
+// deletes, copies or moves in one call (specs 028 and 030).
 //
 // Two properties of spec 001 shape all of it. A bucket key derives from an
 // object id and never from a path (invariant 8), so a move is one UPDATE and
