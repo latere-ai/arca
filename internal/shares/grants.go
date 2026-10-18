@@ -105,6 +105,13 @@ func (s *Service) CreateGrant(w http.ResponseWriter, r *http.Request) {
 			"a grant names the subject it is for").About("grantee"))
 		return
 	}
+	// A grantee past the bound would make every question about the shared
+	// path carry it, beyond what an authorizer reads.
+	if len(body.Grantee) > authorizer.MaxGranteeBytes {
+		api.WriteError(w, r, api.Refuse(api.CodeInvalidField,
+			"a grantee is at most %d bytes", authorizer.MaxGranteeBytes).About("grantee"))
+		return
+	}
 	permission, err := rung(body.Permission)
 	if err != nil {
 		api.WriteError(w, r, err)

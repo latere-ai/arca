@@ -29,10 +29,20 @@ func Bytes(n int64) *int64 { return new(n) }
 
 // MaxGrants is the most entries the grants member of a question lists. A
 // question about a path more subjects hold a grant on lists the first
-// MaxGrants of them by subject and carries grants_truncated. It bounds the
-// question, which an endpoint reads whole before it decides, at a few
-// kilobytes whatever a space has shared.
+// MaxGrants of them by subject and carries grants_truncated.
 const MaxGrants = 64
+
+// MaxGrantsBytes bounds the bytes of the subjects and rungs the grants
+// member lists, beside MaxGrants: the list stops before the entry that
+// would pass it and carries grants_truncated. With MaxGranteeBytes it keeps
+// the question, which an endpoint reads whole before it decides, far under
+// the 64 KiB an endpoint reads, whatever a space has shared.
+const MaxGrantsBytes = 16 << 10
+
+// MaxGranteeBytes bounds the grantee a share names: a rendered subject
+// "<issuer>|<sub>" is an issuer's URL and an identifier, each well under
+// half of it.
+const MaxGranteeBytes = 512
 
 // Holder is one subject's rung on a resource, an entry of the grants member
 // of [File] and [Upload].

@@ -121,10 +121,20 @@ func holdersOn(ctx context.Context, grants GrantLookup, owner string, res authz.
 		list = []authorizer.Holder{}
 	}
 	slices.SortFunc(list, func(a, b authorizer.Holder) int { return strings.Compare(a.Subject, b.Subject) })
-	if len(list) > authorizer.MaxGrants {
-		return list[:authorizer.MaxGrants], true, nil
+	truncated := len(list) > authorizer.MaxGrants
+	if truncated {
+		list = list[:authorizer.MaxGrants]
 	}
-	return list, false, nil
+	// The bytes are bounded too, so subjects of any length a table holds
+	// cannot carry the question past what an endpoint reads.
+	bytes := 0
+	for i, h := range list {
+		bytes += len(h.Subject) + len(h.Permission)
+		if bytes > authorizer.MaxGrantsBytes {
+			return list[:i], true, nil
+		}
+	}
+	return list, truncated, nil
 }
 
 // GrantField is the member of the resource the rung is sent as, the name

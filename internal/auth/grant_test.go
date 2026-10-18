@@ -527,6 +527,34 @@ func TestTheHoldersAreBoundedAndMarkedTruncated(t *testing.T) {
 	}
 }
 
+// TestTheHoldersAreBoundedByTheirBytes: subjects long enough to pass
+// MaxGrantsBytes before MaxGrants entries cut the list there, marked
+// truncated, so a question never grows past what an endpoint reads.
+func TestTheHoldersAreBoundedByTheirBytes(t *testing.T) {
+	long := make([]authorizer.Holder, 0, 40)
+	for i := range 40 {
+		long = append(long, authorizer.Holder{Subject: fmt.Sprintf("https://issuer.example|%03d|%s", i, strings.Repeat("s", authorizer.MaxGranteeBytes-40)), Permission: "read"})
+	}
+	s := endpoint(t)
+	s.Allow(stub.Rule{Subject: "*", Action: "*", Resource: "*", Allow: true})
+	a := asking(t, s, nil).WithGrants(&lookup{holders: long})
+	if _, err := a.Decide(serving(carol), authorizer.ActionFileRead, aFile("01J8R4")); err != nil {
+		t.Fatalf("the question was refused: %v", err)
+	}
+	got := sent(t, s)
+	holders, _ := wireGrants(t, got)
+	bytes := 0
+	for _, h := range holders {
+		bytes += len(h.Subject) + len(h.Permission)
+	}
+	if len(holders) == 0 || len(holders) >= len(long) || bytes > authorizer.MaxGrantsBytes {
+		t.Fatalf("the question names %d holders of %d bytes; want fewer than %d within %d", len(holders), bytes, len(long), authorizer.MaxGrantsBytes)
+	}
+	if flag := got.Fields[auth.GrantsTruncatedField]; flag != true {
+		t.Errorf("grants_truncated is %v, want true", flag)
+	}
+}
+
 // TestAGrantsTableThatCannotListTheHoldersStopsTheQuestion: a read of the
 // holders that fails is no decision, as a read of the caller's own rung
 // is: the request is authorizer_unavailable and the endpoint is not asked

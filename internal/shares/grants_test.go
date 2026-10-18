@@ -132,6 +132,7 @@ func TestACreateRefusesWhatIsNotAGrant(t *testing.T) {
 		{"an absolute path", body("/files/reports", carol, "read"), api.CodeInvalidPath},
 		{"an empty segment", body("files//reports", carol, "read"), api.CodeInvalidPath},
 		{"no grantee", body("files/reports", "", "read"), api.CodeMissingField},
+		{"a grantee past the bound", body("files/reports", strings.Repeat("g", authorizer.MaxGranteeBytes+1), "read"), api.CodeInvalidField},
 		{"no permission", body("files/reports", carol, ""), api.CodeMissingField},
 		{"a rung off the ladder", body("files/reports", carol, "own"), api.CodeInvalidField},
 		{"an expiry that is not a time", map[string]any{

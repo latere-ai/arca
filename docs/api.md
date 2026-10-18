@@ -515,7 +515,7 @@ and none on the other allows neither.
 
 | Method | Path | Action | What it does |
 |---|---|---|---|
-| POST | `/v1/shares` | `share.create` | `{"owner", "path_prefix", "grantee", "permission", "expires_at"}` grants a subject a rung on a subtree; `expires_at` is optional; `201` |
+| POST | `/v1/shares` | `share.create` | `{"owner", "path_prefix", "grantee", "permission", "expires_at"}` grants a subject a rung on a subtree; `grantee` is at most 512 bytes; `expires_at` is optional; `201` |
 | GET | `/v1/shares` | `share.list` | the grants on a space; `?owner=`, `?path_prefix=` |
 | GET | `/v1/shares/{id}` | `share.read` | one grant |
 | DELETE | `/v1/shares/{id}` | `share.revoke` | revoke a grant; `204` |
