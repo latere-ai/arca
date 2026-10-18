@@ -154,8 +154,8 @@ table was twenty-three actions over seven kinds before.
 
 | Kind | Actions | Resource fields |
 |---|---|---|
-| `File` | `file.read`, `file.write`, `file.delete`, `file.list`, `file.restore` | `id` (absent on a write that creates, on a restore from trash and on a question about a folder), `owner`, `path`, `plane` (always `files`), `size` (absent on a listing, on a restore from trash and on a folder delete; on a copy the sum of the bytes to be written; on a folder move the sum of the bytes under the folder), `recursive` (present and true on a folder delete, a folder copy and a folder move, absent otherwise), `copy` (present and true on a copy, absent otherwise), `grant` (absent where the caller holds none) |
-| `Upload` | `upload.write` | `owner`, `path`, `size`, `grant` (absent where the caller holds none) |
+| `File` | `file.read`, `file.write`, `file.delete`, `file.list`, `file.restore` | `id` (absent on a write that creates, on a restore from trash and on a question about a folder), `owner`, `path`, `plane` (always `files`), `size` (absent on a listing, on a restore from trash and on a folder delete; on a copy the sum of the bytes to be written; on a folder move the sum of the bytes under the folder), `recursive` (present and true on a folder delete, a folder copy and a folder move, absent otherwise), `copy` (present and true on a copy, absent otherwise), `grant` (absent where the caller holds none), `grants` (absent on the caller's own space and on an anonymous question, an empty list where nobody holds a grant), `grants_truncated` (present and true when more subjects hold a grant than `grants` lists, absent otherwise) |
+| `Upload` | `upload.write` | `owner`, `path`, `size`, `grant` (absent where the caller holds none), `grants` and `grants_truncated` (on the terms of a `File`) |
 | `Share` | `share.create`, `share.read`, `share.list`, `share.revoke` | `id`, `owner`, `path`, `grantee`, `permission` |
 | `Link` | `link.create`, `link.read`, `link.revoke` | `id`, `owner`, `path` |
 | `Event` | `event.read` | `owner` |

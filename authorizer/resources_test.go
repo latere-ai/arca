@@ -20,12 +20,17 @@ var filled = map[string]interface{ Resource() authz.Resource }{
 		ID: "01J8R4", Owner: "https://issuer.example|9ab3", Path: "files/reports/q3.pdf",
 		Plane: "files", Size: Bytes(48213), From: "files/drafts/q3.pdf", Grant: "write",
 		Recursive: true, Copy: true,
+		Grants:          []Holder{{Subject: "https://issuer.example|4c1d", Permission: "write"}},
+		GrantsTruncated: true,
 	},
-	KindUpload: Upload{Owner: "https://issuer.example|9ab3", Path: "files/video/keynote.mp4", Size: Bytes(1 << 30), Grant: "write"},
-	KindShare:  Share{ID: "01J8R5", Owner: "https://issuer.example|9ab3", Path: "files/reports", Grantee: "https://issuer.example|4c1d", Permission: "read"},
-	KindLink:   Link{ID: "01J8R6", Owner: "https://issuer.example|9ab3", Path: "files/reports"},
-	KindEvent:  Event{Owner: "https://issuer.example|9ab3"},
-	KindSpace:  Space{Owner: "https://issuer.example|9ab3"},
+	KindUpload: Upload{
+		Owner: "https://issuer.example|9ab3", Path: "files/video/keynote.mp4", Size: Bytes(1 << 30), Grant: "write",
+		Grants: []Holder{{Subject: "https://issuer.example|4c1d", Permission: "write"}}, GrantsTruncated: true,
+	},
+	KindShare: Share{ID: "01J8R5", Owner: "https://issuer.example|9ab3", Path: "files/reports", Grantee: "https://issuer.example|4c1d", Permission: "read"},
+	KindLink:  Link{ID: "01J8R6", Owner: "https://issuer.example|9ab3", Path: "files/reports"},
+	KindEvent: Event{Owner: "https://issuer.example|9ab3"},
+	KindSpace: Space{Owner: "https://issuer.example|9ab3"},
 }
 
 // extras are the members a kind renders that spec 006's table column does not
@@ -177,5 +182,50 @@ func TestRecursiveAndCopyAreSentOnlyWhenTrue(t *testing.T) {
 	removed := File{Owner: "o", Path: "files/a", Plane: "files", Recursive: true}.Resource()
 	if got := wireKeys(t, removed); !slices.Equal(got, []string{"owner", "path", "plane", "recursive"}) {
 		t.Errorf("a folder delete carries %v; it carries no id and no size", got)
+	}
+}
+
+// TestGrantsAreSentAsAListOfHolders: the grants member is an array of
+// {subject, permission} objects in the order given, an empty list is sent
+// as one, and a nil list and an untruncated one send nothing, so an
+// endpoint tells "nobody holds a grant" from "this question does not say".
+func TestGrantsAreSentAsAListOfHolders(t *testing.T) {
+	listed := File{Owner: "o", Path: "files/a", Grants: []Holder{
+		{Subject: "https://issuer.example|4c1d", Permission: "read"},
+		{Subject: "https://issuer.example|9ab3", Permission: "manage"},
+	}}.Resource()
+	raw, err := json.Marshal(listed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire struct {
+		Grants []map[string]string `json:"grants"`
+	}
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatal(err)
+	}
+	want := []map[string]string{
+		{"subject": "https://issuer.example|4c1d", "permission": "read"},
+		{"subject": "https://issuer.example|9ab3", "permission": "manage"},
+	}
+	if !slices.EqualFunc(wire.Grants, want, maps.Equal) {
+		t.Errorf("grants went out as %v, want %v", wire.Grants, want)
+	}
+	if _, present := listed.Fields["grants_truncated"]; present {
+		t.Error("a list that is whole carries grants_truncated")
+	}
+
+	none := Upload{Owner: "o", Path: "files/a", Grants: []Holder{}}.Resource()
+	if got := wireKeys(t, none); !slices.Equal(got, []string{"grants", "owner", "path"}) {
+		t.Errorf("a question nobody holds a grant on carries %v; it sends an empty grants", got)
+	}
+	if got, ok := none.Fields["grants"].([]any); !ok || len(got) != 0 {
+		t.Errorf("an empty list renders as %#v", none.Fields["grants"])
+	}
+	if got := wireKeys(t, File{Owner: "o", Path: "files/a"}.Resource()); slices.Contains(got, "grants") {
+		t.Errorf("a question that resolved no grants carries %v", got)
+	}
+	if Holders(nil) != nil {
+		t.Error("nil holders render as a list")
 	}
 }

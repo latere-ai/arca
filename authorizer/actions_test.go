@@ -177,8 +177,10 @@ func TestTheLabelsAreTheVocabularysOwn(t *testing.T) {
 }
 
 var (
-	// backticked matches one backticked token of a table cell.
-	backticked = regexp.MustCompile("`([a-zA-Z.]+)`")
+	// backticked matches one backticked token of a table cell: an action,
+	// a kind, or a field, whose wire name may join two words with an
+	// underscore.
+	backticked = regexp.MustCompile("`([a-zA-Z._]+)`")
 	// parenthesised matches an aside in a cell, which names values and
 	// conditions rather than fields: "(absent on a write that creates)".
 	parenthesised = regexp.MustCompile(`\([^)]*\)`)
