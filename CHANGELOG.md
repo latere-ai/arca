@@ -28,6 +28,12 @@ refused before it is pushed.
 - **`move_to` with `recursive: true` is a folder move.** It answered
   `400` `invalid_field` before. The `too_many_objects` message now reads
   "The folder holds more objects than one copy or move accepts."
+- **The conformance suite moves a folder.** `030/FolderMove` is a new
+  case. v0.7.0's suite expects the refusal above in its `028/FolderCopy`
+  case, so a run of that suite against this release fails that one
+  case; skip it with `Options.Skip`. The release pipeline now runs the
+  previous release's suite against each new release and lists every case
+  it skips this way, with the reason, in the release notes.
 
 ### Fixed
 
