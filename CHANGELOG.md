@@ -6,6 +6,39 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Security
+
+- **A file read through a link is always a download.** Every answer of
+  the three link routes, `GET /v1/shares/links/{token}`, its `/meta` and
+  its `/files/{path}`, refusals included, carries
+  `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`
+  and `Content-Security-Policy: sandbox`, so a browser that opens a link
+  saves the file and never renders it as a page of the server's origin.
+  The file route names the file, `attachment; filename="..."; filename*=UTF-8''...`,
+  with a name outside ASCII carried exactly and no name able to break the
+  header. Above the inline size the redirect asks the bucket for the same
+  disposition whatever `?download=` says, and a public object read
+  through its link is presigned rather than sent to `ARCA_PUBLIC_CDN_URL`,
+  whose address cannot ask for one. A page that frames a link's file now
+  saves it; an `img` element and `fetch` read it as before.
+
+### Changed
+
+- **An owner's read is never sniffed, and `?download=1` works at every
+  size.** `GET` and `HEAD` of an object answer
+  `X-Content-Type-Options: nosniff`. `?download=1` now makes a read at or
+  below the inline size an attachment too, where before only the redirect
+  carried the name, and on a public object it is presigned rather than
+  sent to `ARCA_PUBLIC_CDN_URL`. An owner's read is otherwise unchanged:
+  inline, under the type the object was written with.
+
+### Fixed
+
+- **A download's name outside ASCII reaches the browser intact.** The
+  presigned URL's disposition was written with Go's quoting, which put
+  raw UTF-8 or Go escape sequences in the header. It is now written in
+  both of RFC 6266's forms.
+
 ## v0.8.1 - 2026-10-18
 
 ### Fixed
