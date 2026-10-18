@@ -338,7 +338,11 @@ jobs:
       ARCA_TEST_S3_ENDPOINT: http://localhost:30900
       ARCA_TEST_DATABASE_URL: postgres://arca:arca@localhost:30432/arca?sslmode=disable
     steps:
+      # The whole history, for its tags: the run of the previous release's
+      # suite below reads the previous tag off them (spec 024).
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
@@ -390,6 +394,24 @@ jobs:
             echo '```'
           } > release-evidence/conformance.md
           cat release-evidence/smoke-on-kind.md >> release-evidence/conformance.md
+
+      # Spec 024: the suite of the release before this one, with the driver
+      # it shipped with, fetched as a module and run against the same stack.
+      # The driver reads the target from the ARCA_TEST_* variables of the
+      # job. A case it fails fails the job, unless supersededCases in
+      # test/conformance/superseded_test.go lists it as a refusal this
+      # release turned into an operation, which the run skips and the
+      # evidence names under its reason. A release with no previous tag in
+      # its major says why and passes.
+      - name: Run the previous release's suite against the stack
+        env:
+          ARCA_RELEASE_TAG: ${{ github.ref_name }}
+          ARCA_PREVIOUS_SUITE_MD: release-evidence/previous-suite.md
+        run: |
+          set -euo pipefail
+          go test -v -count=1 -timeout 30m -tags=tiers ./test/conformance/ \
+            -run '^TestPreviousSuitePasses$' 2>&1 | tee previous-suite.log
+          { echo; cat release-evidence/previous-suite.md; } >> release-evidence/conformance.md
 
       # The server's view, only when a step above failed: the client sees a
       # reset, and what reset it is in the pods' logs.
