@@ -344,7 +344,7 @@ without a database constraint, so the closure is a table in
 | Action | Appended by |
 |---|---|
 | `put` | [[005-files]], [[007-uploads]] |
-| `move` | [[005-files]] |
+| `move` | [[005-files]], the folder move of [[030-moving-a-folder]] |
 | `copy` | [[005-files]], the copy of [[028-one-tree]] |
 | `delete` | [[005-files]] |
 | `restore` | [[005-files]] |

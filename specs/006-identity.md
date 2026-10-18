@@ -154,7 +154,7 @@ table was twenty-three actions over seven kinds before.
 
 | Kind | Actions | Resource fields |
 |---|---|---|
-| `File` | `file.read`, `file.write`, `file.delete`, `file.list`, `file.restore` | `id` (absent on a write that creates, on a restore from trash and on a question about a folder), `owner`, `path`, `plane` (always `files`), `size` (absent on a listing, on a restore from trash and on a folder delete; on a copy the sum of the bytes to be written), `recursive` (present and true on a folder delete and a folder copy, absent otherwise), `copy` (present and true on a copy, absent otherwise), `grant` (absent where the caller holds none) |
+| `File` | `file.read`, `file.write`, `file.delete`, `file.list`, `file.restore` | `id` (absent on a write that creates, on a restore from trash and on a question about a folder), `owner`, `path`, `plane` (always `files`), `size` (absent on a listing, on a restore from trash and on a folder delete; on a copy the sum of the bytes to be written; on a folder move the sum of the bytes under the folder), `recursive` (present and true on a folder delete, a folder copy and a folder move, absent otherwise), `copy` (present and true on a copy, absent otherwise), `grant` (absent where the caller holds none) |
 | `Upload` | `upload.write` | `owner`, `path`, `size`, `grant` (absent where the caller holds none) |
 | `Share` | `share.create`, `share.read`, `share.list`, `share.revoke` | `id`, `owner`, `path`, `grantee`, `permission` |
 | `Link` | `link.create`, `link.read`, `link.revoke` | `id`, `owner`, `path` |
@@ -171,10 +171,12 @@ Rules of the table:
   keeps answering.
 - `recursive` says that `path`, and `from` where there is one, name a
   folder and everything under it. An endpoint that does not know the
-  member answers a folder delete as a delete of one path and a folder
-  copy as a move, which is never wider than what was asked; an endpoint
-  that manages folders of its own reads it, because a delete of a folder
-  is a delete of every folder under it ([[028-one-tree]]).
+  member answers a folder delete as a delete of one path, a folder copy
+  as a move, and a folder move as the move of one path, which is never
+  wider than what was asked; an endpoint that manages folders of its own
+  reads it, because a delete of a folder is a delete of every folder
+  under it ([[028-one-tree]]). The folder move joined it on 2026-10-18
+  ([[030-moving-a-folder]]).
 - `file.read` covers get, head, and a version's read; `file.list`
   covers a directory page, a version list, and the trash listing;
   `file.restore` is the one action that brings an object back from

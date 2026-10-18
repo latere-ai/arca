@@ -168,7 +168,8 @@ request or the answer's limits say otherwise, and every path moves. A
 folder is a prefix, deleted with `?recursive=1` and copied with
 `copy_to` and `recursive`; [[028-one-tree]] holds the rules of both and
 of the three answer limits, `limits.versions`, `limits.trash` and
-`limits.omit`.
+`limits.omit`. A folder is moved with `move_to` and `recursive`
+([[030-moving-a-folder]], amended 2026-10-18).
 
 Every handler below authorizes per [[006-identity]] before it acts and
 names the action it asks with. A refusal on a space the caller cannot
@@ -337,6 +338,12 @@ is the lower of the caller's rungs on the two paths ([[006-identity]]).
 
 A test asserts this operation makes zero calls against `blob.Counting`
 ([[003-object-store]]), which is criterion 7 of [[001-architecture]].
+
+**Amended 2026-10-18 ([[030-moving-a-folder]]).** With
+`"recursive": true` the source is a folder, and every live object under
+it moves to the same path below `move_to` in one transaction, each as a
+move of one object moves it, with the grants and links under the folder
+following the folder. [[030-moving-a-folder]] holds the rules.
 
 ### Delete, trash, restore
 

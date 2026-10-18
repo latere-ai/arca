@@ -255,6 +255,7 @@ for honors the member:
 | `GET /v1/stars` | `file.list` | the stars it covers. The page crosses spaces (below) |
 | `DELETE /v1/files/{owner}/{path...}?recursive=1` | `file.delete` | the objects it covers are neither trashed nor removed, with their versions. A grant or a link at, under or above an omitted subtree of the folder stays. The event's counts leave them out |
 | `POST /v1/files/{owner}/{path...}` with `copy_to` and `recursive` | `file.write` | an object is not copied when an entry covers its source path or its destination path, and `files` and `bytes` leave it out |
+| `POST /v1/files/{owner}/{path...}` with `move_to` and `recursive` | `file.write` | an object is not moved when an entry covers its source path or its destination path, a grant or a link at, under or above an omitted subtree stays, and `files` and `bytes` leave it out. Added 2026-10-18 by [[030-moving-a-folder]] |
 | `GET /v1/events` | `event.read` | an event whose `path`, or whose `detail.from`, it covers. Both ends of a move and of a copy are read. `next_cursor` is the id of a row the caller read, so the next page passes over every omitted row after it |
 | `GET /v1/shares` | `share.list` | a grant whose `path_prefix` it covers. A grant on a prefix above an omitted subtree is listed |
 | `GET /v1/shares/with-me` | `share.list` | the same. The page crosses spaces (below) |
@@ -266,7 +267,7 @@ Not shaped, each for the reason beside it:
 | Route | Why |
 |---|---|
 | `GET` and `HEAD` on a path, `?version=N`, `?versions=1` | one object. The version listing names one path and cannot span two |
-| `PUT` on a path, `POST` with `move_to`, `restore_version`, or `copy_to` without `recursive` | one object, named by the request |
+| `PUT` on a path, `POST` with `move_to` or `copy_to` without `recursive`, or with `restore_version` | one object, named by the request |
 | `DELETE` of one path, `?version=N`, `DELETE /v1/trash?path=`, `POST /v1/trash/restore`, `PUT` and `DELETE /v1/stars` | one object, named by the request |
 | `POST /v1/uploads`, its complete and its abort | one session. No route lists sessions |
 | `POST /v1/shares`, `GET` and `DELETE /v1/shares/{id}`, `POST /v1/shares/links`, `DELETE /v1/shares/links/{id}` | one grant or one link |
@@ -429,6 +430,7 @@ taken in one release with no window in which both shapes answer.
 ### Not in this spec
 
 - Moving or renaming a folder in one call. A move stays one object.
+  [[030-moving-a-folder]] added it on 2026-10-18.
 - A mount of any kind. Copy in and sync back, if an installation wants
   it, is built by its client from `materialize`, the object routes and
   the two operations here.

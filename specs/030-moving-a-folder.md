@@ -1,6 +1,6 @@
 ---
 title: "Moving a folder: every object under a folder renamed to the same path below a destination, in one call and one transaction, with no byte copied"
-status: drafted
+status: complete
 track: core
 depends_on:
   - specs/003-object-store.md
@@ -105,6 +105,7 @@ Checked in this order. Nothing is moved on any of them.
 
 | Request | Answer | `fields` |
 |---|---|---|
+| `recursive` with `restore_version`, or with no operation | `400` `invalid_field` | `recursive` |
 | `path` is `files`, the root of the tree | `400` `invalid_path` | `path` |
 | `move_to` is not a path under `files/` | `400` `invalid_path` or `unknown_plane` | `move_to` |
 | `move_to` is the folder itself | `400` `invalid_field` | `move_to` |
@@ -115,7 +116,6 @@ Checked in this order. Nothing is moved on any of them.
 | every object under the folder is left out by `limits.omit` | `404` `not_found`, as a folder with nothing under it | |
 | a row, live or trashed, holds a destination path | `409` `path_taken`, naming the first such path | |
 | an object read for the move changed before it was renamed | `412` `precondition_failed`; the caller retries | |
-| `recursive` with `restore_version`, or with no operation | `400` `invalid_field` | `recursive` |
 
 A destination is taken by a trashed row too, because a path holds one
 row ([[004-metadata-store]] `UNIQUE (owner, path)`) and the move of one
@@ -200,16 +200,80 @@ for every move.
 
 | # | Criterion | Proved by | State |
 |---|---|---|---|
-| 1 | A folder move renames every live object under the folder to the same path below `move_to`, keeping each row's id, object id, size and checksum, makes no bucket call and leaves the usage as it was | | |
-| 2 | Versions and stars of each moved object follow it; a grant and a link under the folder follow it; a grant on an ancestor stays | | |
-| 3 | A trashed object, the object at the folder's own path and a sibling whose name begins with the folder's stay where they are, with their history and an exact-path grant | | |
-| 4 | A destination a live or a trashed row holds, an object this move would move away included, is `path_taken` and nothing moves | | |
-| 5 | `move_to` equal to the folder or inside it is `invalid_field` on `move_to`; the plane root is `invalid_path`; nothing under the folder is `not_found` | | |
-| 6 | The move asks one `file.write` with `path`, `from`, `recursive: true` and the sum as `size`, and no `id` and no `copy`; a refusal is the caller's own answer on its space and `not_found` on another's | | |
-| 7 | An object whose source or destination `limits.omit` covers is neither moved nor written into, a grant at, under or above it stays, and the counts leave it out | | |
-| 8 | A folder past `MaxCopyObjects` is `too_many_objects` before any row changes, for a move and for a copy, whatever the destination omission leaves out | | |
-| 9 | An object deleted or renamed between the read and the rename refuses the move as `precondition_failed`, and every store failure is `storage_unavailable` with nothing moved | | |
-| 10 | One `move` event at the destination carries `from`, `recursive: true`, `files` and `bytes` | | |
-| 11 | The statements rename in Postgres what the handler asks, under an omission and at a destination that is an ancestor of the folder | | |
-| 12 | `arcad` as a process moves a folder against the real stores: same object ids and keys, the bytes read at the new paths, the history at a new path, usage unchanged, a second move onto the destination refused | | |
-| 13 | The `POST` row of the document names the folder move, and the committed document is current | | |
+| 1 | A folder move renames every live object under the folder to the same path below `move_to`, keeping each row's id, object id, size and checksum, makes no bucket call and leaves the usage as it was | `internal/files` `TestAFolderMoveRenamesTheRowsAndTouchesNoBytes` with `blob.Counting`, and `TestStoreAFolderMoveMakesNoBucketCallAndCarriesWhatKeysOnThePath` against MinIO and Postgres; `internal/store` `TestStoreAFolderMoveRenamesTheRowsAndWhatKeysOnThem` | built |
+| 2 | Versions and stars of each moved object follow it; a grant and a link under the folder follow it; a grant on an ancestor stays | `TestAFolderMoveRenamesTheRowsAndTouchesNoBytes`; `TestStoreAFolderMoveMakesNoBucketCallAndCarriesWhatKeysOnThePath`; `internal/store` `TestStoreAFolderMoveRenamesTheRowsAndWhatKeysOnThem`, `TestAFolderMoveCarriesTheStarsAndLeavesOnePerSubject` | built |
+| 3 | A trashed object, the object at the folder's own path and a sibling whose name begins with the folder's stay where they are, with their history and an exact-path grant | `TestAFolderMoveRenamesTheRowsAndTouchesNoBytes`; `internal/store` `TestStoreAFolderMoveRenamesTheRowsAndWhatKeysOnThem`, `TestStoreAFolderMoveLeavesTheGrantsAnOmissionKeeps` | built |
+| 4 | A destination a live or a trashed row holds, an object this move would move away included, is `path_taken` and nothing moves | `TestAFolderMoveOntoATakenPathMovesNothing`; `internal/store` `TestStoreAFolderMoveRefusesADestinationAnyRowHolds`, `TestTakenNamesTheFirstPathARowHolds` | built |
+| 5 | `move_to` equal to the folder or inside it is `invalid_field` on `move_to`; the plane root is `invalid_path`; nothing under the folder is `not_found` | `TestAFolderMoveRefusesWhatIsNotAMoveOfAFolder`, `TestAPostNamesOneOperationAndAPathInThePlane` | built |
+| 6 | The move asks one `file.write` with `path`, `from`, `recursive: true` and the sum as `size`, and no `id` and no `copy`; a refusal is the caller's own answer on its space and `not_found` on another's | `TestAFolderMoveAsksOnceWithBothEnds`, `TestAFolderMoveNeedsAGrantOnBothEnds` | built |
+| 7 | An object whose source or destination `limits.omit` covers is neither moved nor written into, a grant at, under or above it stays, and the counts leave it out | `TestAFolderMoveLeavesOutWhatTheAnswerOmitsAtBothEnds`; `internal/store` `TestStoreAFolderMoveLeavesTheGrantsAnOmissionKeeps`, `TestMovingTheGrantsUnderAFolderLeavesWhatStaysBehind` | built |
+| 8 | A folder past `MaxCopyObjects` is `too_many_objects` before any row changes, for a move and for a copy, whatever the destination omission leaves out | `TestAFolderMoveIsBounded`, `TestAThinnedPageIsNotTakenForTheWholeFolder` | built |
+| 9 | An object deleted or renamed between the read and the rename refuses the move as `precondition_failed`, and every store failure is `storage_unavailable` with nothing moved | `TestAFolderMoveThatCannotBeRecordedMovesNothing`; `internal/store` `TestAFolderMoveRenamesLiveRowsAndSaysWhenADestinationIsTaken`, `TestAFolderMoveBindsEachSourceBesideItsDestination` | built |
+| 10 | One `move` event at the destination carries `from`, `recursive: true`, `files` and `bytes` | `TestAFolderMoveRenamesTheRowsAndTouchesNoBytes`; `test/e2e` `TestE2EAFolderMoveRenamesItsRowsAndLeavesTheBucketAlone` | built |
+| 11 | The statements rename in Postgres what the handler asks, under an omission and at a destination that is an ancestor of the folder | `internal/store` `TestStoreAFolderMoveRenamesTheRowsAndWhatKeysOnThem`, `TestStoreAFolderMoveLeavesTheGrantsAnOmissionKeeps`, `TestStoreAFolderMoveRefusesADestinationAnyRowHolds` | built |
+| 12 | `arcad` as a process moves a folder against the real stores: same object ids and keys, the bytes read at the new paths, the history at a new path, usage unchanged, a second move onto the destination refused | `test/e2e` `TestE2EAFolderMoveRenamesItsRowsAndLeavesTheBucketAlone` | built |
+| 13 | The `POST` row of the document names the folder move, and the committed document is current | `tools/apidoc` `TestTheCommittedDocumentIsCurrent` and the `POST` row of its labels table | built |
+
+## Outcome
+
+Complete on 2026-10-18. The handler is `internal/files/folder.go`
+`moveFolder`, reached from `post` in `mutate.go` when `move_to` carries
+`recursive`. It shares the copy's plan, `folderPlan`, its answer shape,
+`folderAnswer`, and its destination rule, `destination`, which now names
+the field it read. The statements are `internal/store`
+`Files.Taken` and `Files.MoveMany` (`files_subtree.go`),
+`Versions.MoveMany`, `Stars.MoveMany`, and `Shares.MoveUnder`, which
+shares the predicate `untouched` with `DeleteUnder`. Every criterion above
+has a passing test in its tier. The store halves of criteria 1 to 4, 7
+and 11 run in the store tier and criterion 12 in the e2e tier,
+`make test-store` and `make test-e2e`, which the gate does not run; both
+were run against the stack for this change.
+
+That a folder move is a rename of rows was checked in the code, not only
+in [[003-object-store]]: `object.ID.Key` builds the key from the prefix,
+the shard and the id and from nothing else, and `MoveMany` sets `path`
+and `updated_at` and no other column. The tiers hold it from outside: no
+bucket call through `blob.Counting`, and in the e2e tier the same object
+id and the same key in MinIO before and after.
+
+Built where the design was silent, each a choice to review:
+
+- **Grants under the folder follow it.** The move of one object carries
+  only a grant on its exact path. A folder move carries every grant and
+  link whose prefix is the folder or under it, because the folder's path
+  is what the move frees. One at, under or above an omitted subtree
+  stays, by `DeleteUnder`'s rule, and one on the path of an object still
+  there stays with that object. The alternative, carrying exact-path
+  grants only, leaves a grant on an emptied folder to cover whatever is
+  written there next.
+- **A trashed object stays.** The request names live objects. A trashed
+  one keeps its path, its history and an exact-path grant, and is
+  restored where it was trashed from. The alternative, moving it with the
+  folder as migration `0006` moved trashed workspace rows, would restore
+  it into the folder's new place; it is not built.
+- **A destination is taken by any row.** A trashed row at a destination
+  is `path_taken`, as for the move of one object, and so is an object of
+  this move at a destination when `move_to` is an ancestor of the
+  folder.
+- **The bound counts the page before the destination omission.** Found
+  while building, in the copy, and fixed beside it: the plan read one row
+  past the bound, left out the rows whose destination the answer omits,
+  and then compared the rest with the bound. A folder a few rows past the
+  bound, with a few of its first rows omitted at the destination, fitted
+  under it, and the copy wrote the first page and answered as if it were
+  the whole folder. The bound is now read off the page the statement
+  answers, for the copy and the move alike.
+- **`too_many_objects` names a move.** Its sentence is "The folder holds
+  more objects than one copy or move accepts." in [[013-api]]'s table,
+  the code and the suite's copy of the table.
+- **A history at a destination with no row there** is `path_taken`, and
+  so is a row written at a destination after the check; neither is a
+  `503`.
+
+Not built:
+
+- **A conformance case.** The suite's `case028FolderCopy` now reads a
+  move with `recursive` on an object as `not_found` instead of
+  `invalid_field`; a case that moves a folder for another installation
+  to run is left for when one needs it. The previous release's suite
+  still asserts `invalid_field` there.
