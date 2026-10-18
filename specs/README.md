@@ -71,7 +71,7 @@ spec once every spec in its `depends_on` is at `testing` or later, not
 | [021](021-transactional-audit-events.md) | Transactional audit events: the append that commits with the mutation it records | validated |
 | [022](022-api-response-validation.md) | API response validation: the e2e tier checked against the served OpenAPI document | validated |
 | [023](023-merged-coverage-floor.md) | Merged coverage floor: the 90% bar judged over the unit, store and e2e profiles together | validated |
-| [024](024-conformance-against-a-published-release.md) | N-1 conformance: the previous release's suite run against this release's binary | validated |
+| [024](024-conformance-against-a-published-release.md) | N-1 conformance: the previous release's suite run against this release's binary | in-progress |
 | [025](025-observability-follow-ups.md) | Observability follow-ups: the request span, the redaction handler, the label sweep, the stored-bytes gauge | validated |
 | [026](026-installation-verification-jobs.md) | Installation verification jobs: the candidate, the deploy archive, the install walk, and the clean-runner check of a published release | validated |
 | [027](027-serving-under-the-capability-prefix.md) | Serving under the capability prefix: the base path, the second audience, and the one batch that moves both callers | complete |
