@@ -279,7 +279,8 @@ transaction reads the rows the answer leaves in (one past
 `path_taken` when any row, live or trashed, holds a destination
 (`Taken`), renames the rows (`MoveMany`), then their versions and their
 stars, and carries the grants and links whose prefix is the folder or
-under it (`MoveUnder`). The destination check comes first because the
+under it (`MoveUnder`), except one whose new prefix would cover a row the
+move did not write, which stays so that no grant widens. The destination check comes first because the
 unique constraint on a path is checked row by row: a destination that is
 an ancestor of the folder can map one row onto another row's current
 path, and refusing that up front keeps the answer independent of the

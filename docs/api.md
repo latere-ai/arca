@@ -419,7 +419,10 @@ What goes with each object is what goes with a move of one: its versions,
 its stars, and its publicity. A grant or a link on the folder, or on a
 folder or an object inside it, moves to the same place below `move_to`,
 so the next object written where the folder was does not inherit it. A
-grant on a folder above the source stays where it is.
+move never widens a grant: when the place below `move_to` already holds
+objects the grant would then cover, live or in the trash, the grant
+stays where it was, and the moved objects leave it. A grant on a folder
+above the source stays where it is.
 
 What stays where it is:
 
