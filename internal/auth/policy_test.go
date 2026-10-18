@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -53,6 +54,47 @@ func (t table) Covering(_ context.Context, _ store.Querier, owner, path string) 
 		}
 	}
 	return out, nil
+}
+
+// Holders is the query the grants member reads: each subject grant's
+// highest rung on the path, and the lower of two when there is a source.
+func (t table) Holders(ctx context.Context, q store.Querier, owner, path, from string, limit int) ([]store.Holding, error) {
+	highest := func(path string) (map[string]auth.Permission, error) {
+		covering, err := t.Covering(ctx, q, owner, path)
+		if err != nil {
+			return nil, err
+		}
+		out := map[string]auth.Permission{}
+		for _, g := range covering {
+			if g.GranteeKind == store.GranteeSubject && !auth.Admits(out[g.Grantee], auth.Permission(g.Permission)) {
+				out[g.Grantee] = auth.Permission(g.Permission)
+			}
+		}
+		return out, nil
+	}
+	held, err := highest(path)
+	if err != nil {
+		return nil, err
+	}
+	if from != "" {
+		source, err := highest(from)
+		if err != nil {
+			return nil, err
+		}
+		for grantee, rung := range held {
+			switch {
+			case source[grantee] == auth.PermissionNone:
+				delete(held, grantee)
+			case !auth.Admits(source[grantee], rung):
+				held[grantee] = source[grantee]
+			}
+		}
+	}
+	var out []store.Holding
+	for _, grantee := range slices.Sorted(maps.Keys(held)) {
+		out = append(out, store.Holding{Grantee: grantee, Permission: string(held[grantee])})
+	}
+	return out[:min(len(out), limit)], nil
 }
 
 // Live is the query the link step runs.

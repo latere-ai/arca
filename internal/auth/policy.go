@@ -101,6 +101,15 @@ func Admits(held, need Permission) bool { return rung(held) >= rung(need) }
 // not consulted.
 type GrantLookup interface {
 	Permission(ctx context.Context, owner, subject, path string) (Permission, error)
+	// Holders answers, in one read, every subject holding a live subject
+	// grant on a prefix of path in owner's space, each with the highest
+	// permission it holds there, ordered by subject in byte order, at most
+	// limit of them. With from not empty, a subject is answered only when
+	// it holds a grant on a prefix of each path, with the lower of its two
+	// permissions, which is the rule [GrantLookup.Permission]'s reading of
+	// a question with a source applies. It fills the grants member of a
+	// question (spec 006), and no decision of this core reads it.
+	Holders(ctx context.Context, owner, path, from string, limit int) ([]authorizer.Holder, error)
 }
 
 // LinkResolver answers the link step: whether id names a live public link on

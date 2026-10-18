@@ -12,6 +12,7 @@ import (
 
 	"latere.ai/x/pkg/authkit/issuertest"
 
+	"latere.ai/x/arca/authorizer"
 	"latere.ai/x/arca/internal/api"
 	"latere.ai/x/arca/internal/auth"
 	"latere.ai/x/arca/internal/store"
@@ -36,6 +37,26 @@ func (g *grantsOf) Permission(_ context.Context, _, subject, path string) (auth.
 		}
 	}
 	return best, nil
+}
+
+// Holders answers the one grantee the table holds a rung for, on both
+// paths when the question names a source, as the table's Permission reads
+// them.
+func (g *grantsOf) Holders(ctx context.Context, owner, path, from string, _ int) ([]authorizer.Holder, error) {
+	held, err := g.Permission(ctx, owner, g.grantee, path)
+	if err != nil || held == auth.PermissionNone {
+		return nil, err
+	}
+	if from != "" {
+		source, err := g.Permission(ctx, owner, g.grantee, from)
+		if err != nil || source == auth.PermissionNone {
+			return nil, err
+		}
+		if !auth.Admits(source, held) {
+			held = source
+		}
+	}
+	return []authorizer.Holder{{Subject: g.grantee, Permission: string(held)}}, nil
 }
 
 // underTheOwnerPolicy mounts the surface on the built-in owner policy over a

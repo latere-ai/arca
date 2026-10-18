@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 
+	"latere.ai/x/arca/authorizer"
 	"latere.ai/x/arca/internal/auth"
 	"latere.ai/x/arca/internal/store"
 )
@@ -62,6 +63,25 @@ func (g grants) Permission(ctx context.Context, owner, subject, path string) (au
 		}
 	}
 	return auth.PermissionNone, nil
+}
+
+// Holders answers every subject's rung on path, and on from beside it, in
+// one read of the table: the grants member of a question (spec 006). Like
+// [grants.Permission] it reads subject grants alone, so no token grant is
+// ever named as a holder.
+func (g grants) Holders(ctx context.Context, owner, path, from string, limit int) ([]authorizer.Holder, error) {
+	if owner == "" || path == "" {
+		return nil, nil
+	}
+	held, err := g.queries.Holders(ctx, g.db.Querier(), owner, path, from, limit)
+	if err != nil {
+		return nil, fmt.Errorf("the holders of a grant: %w", err)
+	}
+	out := make([]authorizer.Holder, 0, len(held))
+	for _, h := range held {
+		out = append(out, authorizer.Holder{Subject: h.Grantee, Permission: h.Permission})
+	}
+	return out, nil
 }
 
 // links is the link step over the table.

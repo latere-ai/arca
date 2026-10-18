@@ -7,6 +7,8 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
+	"strings"
 
 	"latere.ai/x/pkg/authz"
 
@@ -34,6 +36,13 @@ import (
 // reads; that step is what the policy decides on, and folding one into the
 // other would make the policy's answer depend on a field the policy itself
 // filled in.
+//
+// Beside the caller's rung the question carries every holder's, as grants
+// (amended 2026-10-18). An endpoint may decide a question as a subject
+// other than the caller, such as an agent's question decided as the person
+// the agent acts for, and Arca cannot know which subject that is without
+// reading a claim for meaning. So it names them all, bounded, and the
+// endpoint picks the one it decides as.
 
 // WithGrants binds the grants table the decide path resolves the resource's
 // grant through, and answers the authorizer so a node builds it in one
@@ -44,10 +53,12 @@ func (a *Authorizer) WithGrants(g GrantLookup) *Authorizer {
 	return a
 }
 
-// granted answers the resource with the caller's rung on it, and the
-// resource unchanged where there is no rung to add: a kind no grant reaches,
-// a question that names no path, an anonymous caller, a caller asking about
-// its own space, or a caller who holds nothing here.
+// granted answers the resource with the caller's rung on it and every
+// holder's, and the resource unchanged where there is nothing to add: a
+// kind no grant reaches, a question that names no path, an anonymous
+// caller, or a caller asking about its own space. A caller who holds
+// nothing here gets no grant, and the holders are sent all the same, an
+// empty list where nobody holds one.
 //
 // A caller's own space is settled without reading the table, which is spec
 // 006's sentence that ownership is not a grant. It is also the question this
@@ -74,20 +85,59 @@ func (a *Authorizer) granted(ctx context.Context, res authz.Resource) (authz.Res
 	if err != nil {
 		return res, fmt.Errorf("the grants of %s: %w", owner, err)
 	}
-	if held == PermissionNone {
-		return res, nil
+	holders, truncated, err := holdersOn(ctx, a.grants, owner, res)
+	if err != nil {
+		return res, fmt.Errorf("the holders of a grant in %s: %w", owner, err)
 	}
 	fields := maps.Clone(res.Fields)
 	if fields == nil {
 		fields = map[string]any{}
 	}
-	fields[GrantField] = string(held)
+	if held != PermissionNone {
+		fields[GrantField] = string(held)
+	}
+	fields[GrantsField] = authorizer.Holders(holders)
+	if truncated {
+		fields[GrantsTruncatedField] = true
+	}
 	return authz.NewResource(res.Kind, res.ID, fields), nil
+}
+
+// holdersOn answers every subject's rung on a resource of owner's space,
+// ordered by subject and at most [authorizer.MaxGrants] of them, and
+// whether more hold one than the list names.
+//
+// The table is asked for one more than the bound, so a list that fills it
+// is told apart from one that was cut without a count. The order is sorted
+// again here, in byte order, because it is part of the wire: the client
+// caches an answer by the bytes of its question, and one set of holders in
+// two orders would be two questions.
+func holdersOn(ctx context.Context, grants GrantLookup, owner string, res authz.Resource) ([]authorizer.Holder, bool, error) {
+	list, err := grants.Holders(ctx, owner, grantPath(res), res.String(FromField), authorizer.MaxGrants+1)
+	if err != nil {
+		return nil, false, err
+	}
+	if list == nil {
+		list = []authorizer.Holder{}
+	}
+	slices.SortFunc(list, func(a, b authorizer.Holder) int { return strings.Compare(a.Subject, b.Subject) })
+	if len(list) > authorizer.MaxGrants {
+		return list[:authorizer.MaxGrants], true, nil
+	}
+	return list, false, nil
 }
 
 // GrantField is the member of the resource the rung is sent as, the name
 // spec 006's table gives it and `authorizer.File.Grant` renders.
 const GrantField = "grant"
+
+// GrantsField and GrantsTruncatedField are the members every holder's
+// rung is sent as, the names spec 006's table gives them and
+// `authorizer.File.Grants` and `authorizer.File.GrantsTruncated` render.
+const (
+	GrantsField          = "grants"
+	GrantsTruncatedField = "grants_truncated"
+)
 
 // FromField is the member of the resource that names a second path, the
 // source of an operation whose resource path is its destination.

@@ -5,6 +5,7 @@ package shares_test
 
 import (
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -278,5 +279,64 @@ func TestTheStepsAnswerNothingForAQuestionThatNamesNothing(t *testing.T) {
 		if err != nil || live {
 			t.Errorf("Live(%q, %q) = %t, %v", c.id, c.owner, live, err)
 		}
+	}
+}
+
+// TestTheHoldersAreReadFromTheTable: the grants member of a question is
+// every subject grant covering the path, each subject at its highest rung
+// and, on a question with a source, at the lower of its rungs on the two
+// ends, in subject order and within the limit. A link names no subject and
+// is not a holder, and a table that cannot answer is an error and never an
+// empty list.
+func TestTheHoldersAreReadFromTheTable(t *testing.T) {
+	tbl := newTable()
+	for _, g := range []struct{ prefix, grantee, permission string }{
+		{"files/reports", stranger, "read"},
+		{"files/reports/q3.pdf", stranger, "manage"},
+		{"files", grantee, "write"},
+		{"files/inbox", stranger, "read"},
+	} {
+		tbl.put(store.Grant{
+			Owner: owner, PathPrefix: g.prefix, GranteeKind: store.GranteeSubject,
+			Grantee: g.grantee, Permission: g.permission, CreatedBy: owner,
+		})
+	}
+	tbl.put(store.Grant{
+		Owner: owner, PathPrefix: "files/reports", GranteeKind: store.GranteeLink,
+		Permission: "read", Token: linkToken, CreatedBy: owner,
+	})
+	grants := shares.Grants(&database{table: tbl}, tbl)
+
+	got, err := grants.Holders(t.Context(), owner, "files/reports/q3.pdf", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []authorizer.Holder{{Subject: grantee, Permission: "write"}, {Subject: stranger, Permission: "manage"}}
+	if !slices.Equal(got, want) {
+		t.Errorf("the holders of the file are %v, want %v", got, want)
+	}
+
+	moved, err := grants.Holders(t.Context(), owner, "files/inbox/q3.pdf", "files/reports/q3.pdf", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = []authorizer.Holder{{Subject: grantee, Permission: "write"}, {Subject: stranger, Permission: "read"}}
+	if !slices.Equal(moved, want) {
+		t.Errorf("the holders of both ends are %v, want %v", moved, want)
+	}
+
+	if first, err := grants.Holders(t.Context(), owner, "files/reports/q3.pdf", "", 1); err != nil || len(first) != 1 || first[0].Subject != grantee {
+		t.Errorf("one holder is %v, %v", first, err)
+	}
+	for _, c := range []struct{ owner, path string }{{"", "files/reports"}, {owner, ""}} {
+		if none, err := grants.Holders(t.Context(), c.owner, c.path, "", 10); err != nil || none != nil {
+			t.Errorf("Holders(%q, %q) = %v, %v", c.owner, c.path, none, err)
+		}
+	}
+
+	boom := errors.New("the connection went away")
+	tbl.failHolders = boom
+	if _, err := grants.Holders(t.Context(), owner, "files/reports/q3.pdf", "", 10); !errors.Is(err, boom) {
+		t.Errorf("a table that cannot answer = %v", err)
 	}
 }

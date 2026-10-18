@@ -6,6 +6,8 @@ package auth_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -34,6 +36,20 @@ type lookup struct {
 	by    map[string]auth.Permission
 	err   error
 	asked []string
+	// holders is what the read of every holder answers, and holdersErr its
+	// failure. They are recorded apart from asked, so a case about the
+	// caller's own rung states the reads that rung took and no others.
+	holders    []authorizer.Holder
+	holdersErr error
+	listed     []string
+}
+
+func (l *lookup) Holders(_ context.Context, owner, path, from string, limit int) ([]authorizer.Holder, error) {
+	l.listed = append(l.listed, fmt.Sprintf("%s %s %s %d", owner, path, from, limit))
+	if l.holdersErr != nil {
+		return nil, l.holdersErr
+	}
+	return slices.Clone(l.holders), nil
 }
 
 func (l *lookup) Permission(_ context.Context, owner, subject, path string) (auth.Permission, error) {
@@ -169,8 +185,12 @@ func TestNoGrantsTableIsNoGrant(t *testing.T) {
 	if _, err := a.Decide(serving(carol), authorizer.ActionFileRead, aFile("01J8R4")); err != nil {
 		t.Fatalf("the question was refused: %v", err)
 	}
-	if _, present := sent(t, s).Fields[auth.GrantField]; present {
+	got := sent(t, s)
+	if _, present := got.Fields[auth.GrantField]; present {
 		t.Error("a node that reads no grants table sent a grant anyway")
+	}
+	if _, present := got.Fields[auth.GrantsField]; present {
+		t.Error("a node that reads no grants table sent the holders anyway")
 	}
 }
 
@@ -360,4 +380,167 @@ func (f *failingOn) Permission(_ context.Context, _, _, path string) (auth.Permi
 		return auth.PermissionNone, errors.New("the database is gone")
 	}
 	return f.held, nil
+}
+
+func (f *failingOn) Holders(_ context.Context, _, path, from string, _ int) ([]authorizer.Holder, error) {
+	if path == f.path || from == f.path {
+		return nil, errors.New("the database is gone")
+	}
+	return nil, nil
+}
+
+// wireGrants reads the grants member of a question as the endpoint decoded
+// it, an array of {subject, permission} objects, and whether it was sent.
+func wireGrants(t *testing.T, res authz.Resource) ([]authorizer.Holder, bool) {
+	t.Helper()
+	raw, present := res.Fields[auth.GrantsField]
+	if !present {
+		return nil, false
+	}
+	list, ok := raw.([]any)
+	if !ok {
+		t.Fatalf("grants went out as %T, want an array", raw)
+	}
+	out := []authorizer.Holder{}
+	for _, entry := range list {
+		h, ok := entry.(map[string]any)
+		if !ok || len(h) != 2 {
+			t.Fatalf("an entry of grants went out as %#v, want {subject, permission}", entry)
+		}
+		subject, _ := h["subject"].(string)
+		permission, _ := h["permission"].(string)
+		out = append(out, authorizer.Holder{Subject: subject, Permission: permission})
+	}
+	return out, true
+}
+
+// TestTheQuestionCarriesEveryHoldersGrant: beside the caller's own rung, a
+// question about another's space names every subject's, so an endpoint
+// that decides as someone other than the caller reads that subject's rung.
+// The list is sorted by subject whatever order the table answered in, an
+// empty list is sent where nobody holds a grant, and the questions that
+// carry no grant carry no list either.
+func TestTheQuestionCarriesEveryHoldersGrant(t *testing.T) {
+	const dave = "https://issuer.example|dave"
+	unsorted := []authorizer.Holder{{Subject: dave, Permission: "write"}, {Subject: bob, Permission: "read"}}
+	sorted := []authorizer.Holder{{Subject: bob, Permission: "read"}, {Subject: dave, Permission: "write"}}
+	moved := authorizer.File{
+		ID: "01J8R4", Owner: alice, Path: "files/inbox/q3.pdf", Plane: "files", From: "files/reports/q3.pdf",
+	}.Resource()
+	for _, c := range []struct {
+		name     string
+		resource authz.Resource
+		subject  string
+		holders  []authorizer.Holder
+		want     []authorizer.Holder
+		sent     bool
+		listed   string
+	}{
+		{"a stranger's read names the holders", aFile("01J8R4"), carol, unsorted, sorted, true,
+			alice + " files/reports/q3.pdf  65"},
+		{"a multipart write names them", anUpload(), carol, unsorted, sorted, true,
+			alice + " files/reports/q3.pdf  65"},
+		{"a move reads both ends in one read", moved, carol, unsorted, sorted, true,
+			alice + " files/inbox/q3.pdf files/reports/q3.pdf 65"},
+		{"nobody holds a grant", aFile("01J8R4"), carol, nil, []authorizer.Holder{}, true,
+			alice + " files/reports/q3.pdf  65"},
+		{"the space's own owner", aFile("01J8R4"), alice, unsorted, nil, false, ""},
+		{"an anonymous caller", aFile("01J8R4"), "", unsorted, nil, false, ""},
+		{"a share", aShare("01J8R5"), carol, unsorted, nil, false, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			s := endpoint(t)
+			s.Allow(stub.Rule{Subject: "*", Action: "*", Resource: "*", Allow: true})
+			table := &lookup{held: auth.PermissionRead, holders: c.holders}
+			a := asking(t, s, nil).WithGrants(table)
+
+			action := authorizer.ActionFileRead
+			switch {
+			case c.resource.Kind == authorizer.KindShare:
+				action = authorizer.ActionShareRead
+			case c.resource.Kind == authorizer.KindUpload:
+				action = authorizer.ActionUploadWrite
+			case c.resource.String(auth.FromField) != "":
+				action = authorizer.ActionFileWrite
+			}
+			if _, err := a.Decide(serving(c.subject), action, c.resource); err != nil {
+				t.Fatalf("the question was refused: %v", err)
+			}
+			got := sent(t, s)
+			holders, present := wireGrants(t, got)
+			if present != c.sent {
+				t.Fatalf("grants is present=%v, want %v", present, c.sent)
+			}
+			if !slices.Equal(holders, c.want) {
+				t.Errorf("the question names the holders %v, want %v", holders, c.want)
+			}
+			if _, truncated := got.Fields[auth.GrantsTruncatedField]; truncated {
+				t.Error("a list within the bound is marked truncated")
+			}
+			if listed := strings.Join(table.listed, "; "); listed != c.listed {
+				t.Errorf("the holders were read as %q, want %q", listed, c.listed)
+			}
+		})
+	}
+}
+
+// TestTheHoldersAreBoundedAndMarkedTruncated: a path more subjects hold a
+// grant on than the bound names the first MaxGrants by subject and says
+// the list was cut, so an endpoint that does not find its subject there
+// refuses rather than read it as none. A list exactly at the bound is
+// whole.
+func TestTheHoldersAreBoundedAndMarkedTruncated(t *testing.T) {
+	many := func(n int) []authorizer.Holder {
+		out := make([]authorizer.Holder, 0, n)
+		for i := n - 1; i >= 0; i-- {
+			out = append(out, authorizer.Holder{Subject: fmt.Sprintf("https://issuer.example|%03d", i), Permission: "read"})
+		}
+		return out
+	}
+	for _, c := range []struct {
+		name      string
+		answered  int
+		truncated bool
+	}{
+		{"at the bound", authorizer.MaxGrants, false},
+		{"one past the bound", authorizer.MaxGrants + 1, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			s := endpoint(t)
+			s.Allow(stub.Rule{Subject: "*", Action: "*", Resource: "*", Allow: true})
+			a := asking(t, s, nil).WithGrants(&lookup{holders: many(c.answered)})
+			if _, err := a.Decide(serving(carol), authorizer.ActionFileRead, aFile("01J8R4")); err != nil {
+				t.Fatalf("the question was refused: %v", err)
+			}
+			got := sent(t, s)
+			holders, _ := wireGrants(t, got)
+			if len(holders) != authorizer.MaxGrants {
+				t.Fatalf("the question names %d holders, want %d", len(holders), authorizer.MaxGrants)
+			}
+			if first, last := holders[0].Subject, holders[len(holders)-1].Subject; first != "https://issuer.example|000" || last != fmt.Sprintf("https://issuer.example|%03d", authorizer.MaxGrants-1) {
+				t.Errorf("the list runs from %s to %s; it is the first by subject", first, last)
+			}
+			if flag, present := got.Fields[auth.GrantsTruncatedField]; present != c.truncated || (present && flag != true) {
+				t.Errorf("grants_truncated is %v, present=%v, want present=%v", flag, present, c.truncated)
+			}
+		})
+	}
+}
+
+// TestAGrantsTableThatCannotListTheHoldersStopsTheQuestion: a read of the
+// holders that fails is no decision, as a read of the caller's own rung
+// is: the request is authorizer_unavailable and the endpoint is not asked
+// a question that says nobody holds a grant when the table did not say so.
+func TestAGrantsTableThatCannotListTheHoldersStopsTheQuestion(t *testing.T) {
+	s := endpoint(t)
+	s.Allow(stub.Rule{Subject: "*", Action: "*", Resource: "*", Allow: true})
+	a := asking(t, s, nil).WithGrants(&lookup{held: auth.PermissionRead, holdersErr: errors.New("the database is gone")})
+
+	_, err := a.Decide(serving(carol), authorizer.ActionFileRead, aFile("01J8R4"))
+	if auth.CodeOf(err) != auth.CodeAuthorizerUnavailable {
+		t.Errorf("a table that cannot list the holders gave %v, want %s", err, auth.CodeAuthorizerUnavailable)
+	}
+	if seen := s.Requests(); len(seen) != 0 {
+		t.Errorf("the endpoint was asked %d questions with the holders unresolved", len(seen))
+	}
 }
