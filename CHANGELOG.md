@@ -6,6 +6,21 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Security
+
+- **A public object is read on a site apart from the platform's.** An
+  owner's read of a public object redirects to `ARCA_PUBLIC_CDN_URL`,
+  whose host answers the object under the type it was written with, so a
+  page someone stored runs there. The production overlay's base was on the
+  origin's registrable domain, where such a page is same-site with the
+  console and sign-in: `SameSite` cookies do not keep it out, and it can
+  set cookies for the whole domain. The base is now a host on a
+  registrable domain of its own, in front of the same CDN, so a key reads
+  the same object there and an address already handed out on the old
+  host keeps working. A deploy test fails the overlay when the base and
+  `ARCA_PUBLIC_URL` share a registrable domain, and the configuration
+  reference says to keep the base apart from the installation's own site.
+
 ## v0.9.1 - 2026-10-18
 
 ### Fixed

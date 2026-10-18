@@ -4,6 +4,7 @@
 package deploy
 
 import (
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -495,6 +496,44 @@ func TestProdServesPublicObjectsThroughTheCDN(t *testing.T) {
 	}
 }
 
+// TestProdServesPublicObjectsFromAnotherSite: the base answers a public
+// object under the type it was written with, so a page someone stored runs
+// on the base's host. On the origin's registrable domain that page would be
+// same-site with the console and sign-in beside it: SameSite cookies would
+// not keep it out, it could set cookies for the whole domain, and it would
+// pass allowlists written for the domain.
+func TestProdServesPublicObjectsFromAnotherSite(t *testing.T) {
+	base, found := prodServerEnv(t, "ARCA_PUBLIC_CDN_URL")
+	if !found {
+		t.Fatal("deploy/prod sets no ARCA_PUBLIC_CDN_URL")
+	}
+	origin, found := prodServerEnv(t, "ARCA_PUBLIC_URL")
+	if !found {
+		t.Fatal("deploy/prod sets no ARCA_PUBLIC_URL")
+	}
+	if site(base) == "" || site(origin) == "" {
+		t.Fatalf("cannot read the hosts of ARCA_PUBLIC_CDN_URL %q and ARCA_PUBLIC_URL %q", base, origin)
+	}
+	if site(base) == site(origin) {
+		t.Errorf("ARCA_PUBLIC_CDN_URL %q is on %s, the origin's registrable domain; a page stored there would be same-site with the origin",
+			base, site(origin))
+	}
+}
+
+// site is the registrable domain of an https URL's host, read as its last
+// two labels, which is what it is for every host this overlay names.
+func site(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" {
+		return ""
+	}
+	labels := strings.Split(strings.TrimSuffix(u.Hostname(), "."), ".")
+	if len(labels) < 2 {
+		return ""
+	}
+	return strings.Join(labels[len(labels)-2:], ".")
+}
+
 // TestProdIsDeclaredToTheGate proves the two entries that make the overlay
 // legal are both present. Either one alone is wrong: skip without overlays
 // stops the gate reading the addresses, so a document naming one is
@@ -541,13 +580,11 @@ func TestProdNamesOnlyAddressesTheFamilyAlreadyUses(t *testing.T) {
 		"api.latere.ai",
 		// platformd's internal Service, which no ingress names.
 		"platformd-internal.latere.svc.cluster.local",
-		// The bucket's CDN edge, which a public object redirects to. No
-		// manifest of the family serves it because DigitalOcean does: it is
-		// the Spaces CDN in front of the same bucket this installation
-		// reads, and it is the address the replaced service already
-		// redirected to, read from its live configuration rather than
-		// chosen here.
-		"cdn.latere.ai",
+		// The host a public object redirects to. The platform's ingress
+		// answers it and passes each request to the Spaces CDN in front of
+		// the bucket this installation reads, on a registrable domain apart
+		// from the origin's (TestProdServesPublicObjectsFromAnotherSite).
+		"files.latere.site",
 	}
 	seen := map[string]bool{}
 	err := filepath.WalkDir(filepath.Join(root(t), "deploy/prod"), func(p string, e os.DirEntry, err error) error {
@@ -583,8 +620,8 @@ func TestProdNamesOnlyAddressesTheFamilyAlreadyUses(t *testing.T) {
 }
 
 // host matches a name under the company's own domains, in either spelling:
-// the public one and the cluster-internal one.
-var host = regexp.MustCompile(`[A-Za-z0-9.-]*latere\.(ai|svc[A-Za-z0-9.-]*)`)
+// the public ones and the cluster-internal one.
+var host = regexp.MustCompile(`[A-Za-z0-9.-]*latere\.(ai|site|svc[A-Za-z0-9.-]*)`)
 
 // hostsIn returns the company addresses one line names, dropping the
 // registry namespace, which is written with a hyphen and is where images
@@ -593,7 +630,7 @@ func hostsIn(line string) []string {
 	var out []string
 	for _, got := range host.FindAllString(line, -1) {
 		got = strings.TrimSuffix(got, ".")
-		if strings.HasSuffix(got, "-tls") || got == "latere.ai" || got == "latere.svc" {
+		if strings.HasSuffix(got, "-tls") || got == "latere.ai" || got == "latere.site" || got == "latere.svc" {
 			continue
 		}
 		out = append(out, got)

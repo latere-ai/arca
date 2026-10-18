@@ -14,12 +14,18 @@
 # object.
 #
 # ARCA_PUBLIC_CDN_URL is the base a public object's redirect points at.
-# Drive served public objects from this CDN, and an installation that
-# leaves it empty answers the ordinary presigned redirect instead, so
-# dropping it at the cutover would change every public link that already
-# exists without anything failing. It is not a credential and names
-# nothing secret, so it belongs here beside the origin rather than in a
-# Secret. The reaper below does not serve a redirect and does not read it.
+# The host passes each request to the Spaces CDN in front of the bucket, so
+# a key reads the same object there as on the CDN's own name, where Drive
+# served public objects and where an address already handed out keeps
+# working. An object is answered under the type it was written with, so a
+# page someone stored runs on this host. It is on latere.site, a registrable
+# domain apart from the origin's, because on latere.ai such a page would be
+# same-site with the console and sign-in.
+# An installation that leaves the base empty answers the ordinary presigned
+# redirect instead, so dropping it would change every public link without
+# anything failing. It is not a credential and names nothing secret, so it
+# belongs here beside the origin rather than in a Secret. The reaper below
+# does not serve a redirect and does not read it.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -35,7 +41,7 @@ spec:
             - name: ARCA_BUCKET_PREFIX
               value: drive/
             - name: ARCA_PUBLIC_CDN_URL
-              value: https://cdn.latere.ai
+              value: https://files.latere.site
 ---
 # The reconciler reads the same prefix. It is held at zero replicas by the
 # base, but a reconciler that swept a different prefix from the one the
