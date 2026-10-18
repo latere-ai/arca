@@ -80,18 +80,18 @@ func TestAnAttachmentCarriesTheNameExactlyAndNothingElse(t *testing.T) {
 		{"nul\x00.txt", "nul.txt", "nul.txt"},
 		{"tab\tname.txt", "tabname.txt", "tabname.txt"},
 		{"next\u0085line.txt", "nextline.txt", "nextline.txt"},
-		// A right-to-left override would make invoice‮fdp.exe read as a
+		// A right-to-left override would make invoice\u202Efdp.exe read as a
 		// PDF; it is removed, and so are the other format characters and the
 		// separators.
-		{"invoice‮fdp.exe", "invoicefdp.exe", "invoicefdp.exe"},
-		{"zero​width line .txt", "zerowidthline.txt", "zerowidthline.txt"},
+		{"invoice\u202Efdp.exe", "invoicefdp.exe", "invoicefdp.exe"},
+		{"zero\u200Bwidth\u2028line\u2029.txt", "zerowidthline.txt", "zerowidthline.txt"},
 		{"bad\xffutf8.txt", "badutf8.txt", "badutf8.txt"},
 		{"  padded.txt  ", "padded.txt", "padded.txt"},
 		// Nothing to save under is the fallback.
 		{"", FallbackFilename, FallbackFilename},
 		{"..", FallbackFilename, FallbackFilename},
 		{" . . ", FallbackFilename, FallbackFilename},
-		{"‮\r\n", FallbackFilename, FallbackFilename},
+		{"\u202E\r\n", FallbackFilename, FallbackFilename},
 		{strings.Repeat("a", MaxFilenameBytes+1), FallbackFilename, FallbackFilename},
 	}
 	for _, c := range cases {
@@ -140,7 +140,7 @@ func quoted(t *testing.T, header string) string {
 // path holds, the header parses, decodes to the cleaned name, and carries no
 // byte that could end it or confuse a reader of the name.
 func FuzzAttachment(f *testing.F) {
-	for _, seed := range []string{"q3.pdf", "季度报告.xlsx", "a\r\nb", `"\%`, "‮", "", "\xff\xfe"} {
+	for _, seed := range []string{"q3.pdf", "季度报告.xlsx", "a\r\nb", `"\%`, "\u202E", "", "\xff\xfe"} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, name string) {
