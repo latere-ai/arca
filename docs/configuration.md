@@ -33,12 +33,12 @@ changes a database row and no key.
 |---|---|---|---|
 | `ARCA_BUCKET` | yes | none | The bucket. It must exist; Arca never creates one. |
 | `ARCA_BUCKET_REGION` | yes | none | The region requests are signed for, as the provider names it. |
-| `ARCA_BUCKET_ENDPOINT` | no | derived from the region | The S3 endpoint, an absolute `http` or `https` URL. Unset, the SDK derives the AWS endpoint from the region. Set it for every other provider. |
+| `ARCA_BUCKET_ENDPOINT` | no | derived from the region | The S3 endpoint, an absolute `http` or `https` URL. Unset, the SDK derives the AWS endpoint from the region. Set it for every other provider. A presigned redirect sends a browser to this host, and the bucket answers a link's file with the `Content-Disposition: attachment` the URL asks for and with no `X-Content-Type-Options` or `Content-Security-Policy`, which a signed URL cannot ask for. Serve the bucket from a host of its own; if it shares a host with pages, set `X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox` on that host's answers. |
 | `ARCA_BUCKET_PREFIX` | no | `arca/` | The prefix every key carries. A missing trailing slash is added; a leading slash is refused; the value holds letters, digits, and `. _ - /`. Several installations share one bucket by taking a prefix each. |
 | `ARCA_BUCKET_PATH_STYLE` | no | `false` | `true` puts the bucket in the path rather than in the host name. MinIO and any endpoint reached by IP need it. |
 | `ARCA_BUCKET_ACCESS_KEY` | no | unset | The access key id. Set together with `ARCA_BUCKET_SECRET_KEY` or not at all. Both unset, the SDK's credential chain applies: environment, shared files, instance or workload roles. |
 | `ARCA_BUCKET_SECRET_KEY` | no | unset | The secret access key. Keep it in a Secret. |
-| `ARCA_PUBLIC_CDN_URL` | no | unset | A base URL that serves the bucket's public objects, such as a CDN in front of it. A read of an object a public link marked redirects to `<this URL>/<key>`, which carries no expiry. Unset, such a read redirects to an ordinary presigned URL. |
+| `ARCA_PUBLIC_CDN_URL` | no | unset | A base URL that serves the bucket's public objects, such as a CDN in front of it. The owner's read of an object a public link marked redirects to `<this URL>/<key>`, which carries no expiry. Unset, such a read redirects to an ordinary presigned URL. A read through the link itself, and an owner's `?download=1`, are presigned with an attachment disposition instead, because this base cannot be asked for one. The base answers an object under the type it was written with, so serve it from a host that serves no pages. |
 
 ## The database
 

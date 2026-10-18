@@ -233,8 +233,13 @@ path. [What an answer may limit](#what-an-answer-may-limit) has the rules.
 one is a `302` to a presigned URL on the bucket, valid for five minutes, so
 large bytes never pass through the server. `?inline=0` asks for the redirect
 at any size; `?inline=1` asks for the bytes and is honored only up to the
-inline size. `?download=1` makes the presigned URL save the object under its
-own file name. An object a public link marked is always a redirect.
+inline size. `?download=1` makes the read a download saved under the object's
+own file name, at every size: the answer carries `Content-Disposition:
+attachment` with the name, and a redirect asks the bucket for the same header.
+Every read that answers bytes or their headers carries
+`X-Content-Type-Options: nosniff`, so a browser reads the object as the type
+it was written with and never guesses another. An object a public link marked
+is always a redirect.
 
 `GET` also selects another representation of the same path, checked in this
 order:
@@ -535,10 +540,30 @@ routes that redeem a token carry no bearer, answer with
 an anonymous subject, so an operator turns public reading off by denying
 that action.
 
+Anyone who has a link's URL can open it in a browser, so every answer of the
+three routes is a download and is never shown as a page:
+
+```
+Content-Disposition: attachment; filename="q3.pdf"; filename*=UTF-8''q3.pdf
+X-Content-Type-Options: nosniff
+Content-Security-Policy: sandbox
+```
+
+The file route names the file; the meta, the listing and every refusal carry
+`attachment` with no name. A name outside ASCII is carried exactly in
+`filename*`, and `filename` holds an ASCII stand-in for older readers. Above
+the inline size the redirect asks the bucket for the same
+`Content-Disposition`, so the browser that follows it saves the file too. A
+page that previews a linked file reads it with `fetch` or an `img` element,
+neither of which reads the disposition; a frame that loads the file route
+saves the file instead of showing it.
+
 A `public` link whose prefix names one object also marks that object public
-in the bucket, so it can be served without Arca in the path. A read of it
-redirects to `ARCA_PUBLIC_CDN_URL` when the operator set one, and to a
-presigned URL otherwise.
+in the bucket, so it can be served without Arca in the path. The owner's own
+read of it redirects to `ARCA_PUBLIC_CDN_URL` when the operator set one, and
+to a presigned URL otherwise. A read through the link is presigned with the
+download's `Content-Disposition` either way, because the CDN's address cannot
+ask for one.
 
 ## Events
 
