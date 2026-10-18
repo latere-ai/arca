@@ -6,6 +6,37 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Added
+
+- **An authorizer question names everyone who holds a share on the
+  file.** Every `File` and `Upload` question about a path in a space
+  that is not the caller's own now carries `grants`, each subject that
+  holds a share on the path with the highest permission it holds there,
+  as `[{"subject": "...", "permission": "read"}]` sorted by subject, and
+  an empty list when nobody does. On a move or a copy a subject is
+  listed only when it holds a share on both paths, with the lower of the
+  two. An endpoint that decides a question as somebody other than the
+  caller, such as an agent's request decided as the person it acts for,
+  reads that person's permission here; `grant`, the caller's own, is
+  unchanged. The list holds at most 64 entries and 16 KiB of subjects
+  and permissions, the first by subject, and a longer one is cut there
+  and marked `"grants_truncated": true`, so an endpoint that does not
+  find its subject in a cut list refuses.
+  The question about the caller's own space and an anonymous one carry
+  neither. An endpoint that does not read the two members answers as
+  before. A question that carries them costs one more read of the
+  shares table, and a table that cannot answer it is
+  `authorizer_unavailable`, as for `grant`. In Go,
+  `authorizer.File.Grants`, `authorizer.Upload.Grants`,
+  `authorizer.Holder`, `authorizer.MaxGrants` and
+  `authorizer.MaxGrantsBytes` name them.
+
+### Changed
+
+- **A share's grantee is at most 512 bytes.** `POST /v1/shares` refuses
+  a longer `grantee` with `400` `invalid_field`, so no share can make
+  the questions about its path too large for an authorizer to read.
+
 ## v0.9.2 - 2026-10-19
 
 ### Security
