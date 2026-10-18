@@ -6,6 +6,15 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Fixed
+
+- **A release is published again after the previous release's suite
+  passes.** The suite's evidence was written relative to the package's
+  directory, where the release job never looked, so the v0.8.0 release
+  stopped after its suite passed: its images were built, but nothing was
+  deployed and no GitHub release was published. This release carries
+  v0.8.0's changes, the folder move among them.
+
 ## v0.8.0 - 2026-10-18
 
 ### Added

@@ -406,7 +406,9 @@ jobs:
       - name: Run the previous release's suite against the stack
         env:
           ARCA_RELEASE_TAG: ${{ github.ref_name }}
-          ARCA_PREVIOUS_SUITE_MD: release-evidence/previous-suite.md
+          # go test runs in the package's directory, so the path is the
+          # workspace's own, where the step below reads it.
+          ARCA_PREVIOUS_SUITE_MD: ${{ github.workspace }}/release-evidence/previous-suite.md
         run: |
           set -euo pipefail
           go test -v -count=1 -timeout 30m -tags=tiers ./test/conformance/ \
