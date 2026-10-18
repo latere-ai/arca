@@ -6,6 +6,7 @@ package shares_test
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -38,6 +39,7 @@ type table struct {
 	failGet      error
 	failList     error
 	failCovering error
+	failHolders  error
 	failSubtree  error
 	failPublic   error
 }
@@ -202,6 +204,44 @@ func (t *table) Covering(_ context.Context, _ store.Querier, owner, path string)
 		}
 	}
 	slices.SortStableFunc(out, func(a, b store.Grant) int { return rung(b.Permission) - rung(a.Permission) })
+	return out, nil
+}
+
+func (t *table) Holders(_ context.Context, _ store.Querier, owner, path, from string, limit int) ([]store.Holding, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.failHolders != nil {
+		return nil, t.failHolders
+	}
+	highest := func(path string) map[string]int {
+		prefixes := store.PrefixesOf(path)
+		out := map[string]int{}
+		for _, g := range t.grants {
+			if g.Owner == owner && g.GranteeKind == store.GranteeSubject && t.live(g) && slices.Contains(prefixes, g.PathPrefix) {
+				out[g.Grantee] = max(out[g.Grantee], rung(g.Permission))
+			}
+		}
+		return out
+	}
+	held := highest(path)
+	if from != "" {
+		source := highest(from)
+		for grantee, r := range held {
+			if source[grantee] == 0 {
+				delete(held, grantee)
+				continue
+			}
+			held[grantee] = min(r, source[grantee])
+		}
+	}
+	names := []string{"", "read", "write", "manage"}
+	var out []store.Holding
+	for _, grantee := range slices.Sorted(maps.Keys(held)) {
+		out = append(out, store.Holding{Grantee: grantee, Permission: names[held[grantee]]})
+	}
+	if len(out) > limit {
+		out = out[:limit]
+	}
 	return out, nil
 }
 

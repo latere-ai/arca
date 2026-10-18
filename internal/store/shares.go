@@ -116,6 +116,13 @@ type Shares interface {
 	// the whole of the match, so files/reports does not cover
 	// files/reports-archive by construction and not by a filter.
 	Covering(ctx context.Context, q Querier, owner, path string) ([]Grant, error)
+	// Holders answers each grantee subject holding an active, unexpired
+	// subject grant on a prefix of path in owner's space, with the highest
+	// permission it holds there, ordered by grantee in byte order, at most
+	// limit of them. With from not empty a grantee is answered only when it
+	// holds one on a prefix of each path, with the lower of its two
+	// permissions. A token grant names no subject and is not answered.
+	Holders(ctx context.Context, q Querier, owner, path, from string, limit int) ([]Holding, error)
 
 	// ByToken resolves a token to its grant, live ones only (links.go).
 	ByToken(ctx context.Context, q Querier, token string) (Grant, error)
@@ -319,6 +326,77 @@ func (shares) Covering(ctx context.Context, q Querier, owner, path string) ([]Gr
 		   AND (expires_at IS NULL OR expires_at > now())
 		 ORDER BY CASE permission WHEN 'manage' THEN 3 WHEN 'write' THEN 2 ELSE 1 END DESC, id`,
 		owner, prefixes, GrantActive)
+}
+
+// Holding is one grantee's highest permission on a path, a row of
+// [Shares.Holders].
+type Holding struct {
+	// Grantee is the subject the grants name.
+	Grantee string
+	// Permission is the rung: read, write, or manage.
+	Permission string
+}
+
+// Holders answers each grantee's highest permission on path, and on from
+// beside it when the question names one.
+//
+// One statement over the subtree index answers it: the prefixes of both
+// paths are computed here and matched exactly, each grantee's highest rung
+// on each is aggregated, and a grantee missing from either path when there
+// are two is dropped before the limit, so a grantee who holds both ends is
+// never cut for one who holds one. The order is the grantee in the C
+// collation, which is byte order and the order a caller sorts in.
+func (shares) Holders(ctx context.Context, q Querier, owner, path, from string, limit int) ([]Holding, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("store: the holders of %q in %q: the page holds %d rows", path, owner, limit)
+	}
+	onPath := PrefixesOf(path)
+	if len(onPath) == 0 {
+		return nil, nil
+	}
+	// An empty array and not a nil one: a nil slice is sent as NULL, which
+	// no comparison matches and cardinality does not count.
+	onFrom := []string{}
+	if from != "" {
+		if onFrom = PrefixesOf(from); len(onFrom) == 0 {
+			return nil, nil
+		}
+	}
+	what := fmt.Sprintf("the holders of %q in %q", path, owner)
+	rows, err := q.Query(ctx, `
+		SELECT grantee,
+		       CASE LEAST(on_path, COALESCE(on_from, on_path)) WHEN 3 THEN 'manage' WHEN 2 THEN 'write' ELSE 'read' END
+		  FROM (
+		        SELECT grantee,
+		               MAX(CASE permission WHEN 'manage' THEN 3 WHEN 'write' THEN 2 ELSE 1 END)
+		                   FILTER (WHERE path_prefix = ANY($2::text[])) AS on_path,
+		               MAX(CASE permission WHEN 'manage' THEN 3 WHEN 'write' THEN 2 ELSE 1 END)
+		                   FILTER (WHERE path_prefix = ANY($3::text[])) AS on_from
+		          FROM shares
+		         WHERE owner = $1 AND grantee_kind = $4 AND status = $5
+		           AND (expires_at IS NULL OR expires_at > now())
+		           AND (path_prefix = ANY($2::text[]) OR path_prefix = ANY($3::text[]))
+		         GROUP BY grantee
+		       ) held
+		 WHERE on_path IS NOT NULL AND (cardinality($3::text[]) = 0 OR on_from IS NOT NULL)
+		 ORDER BY grantee COLLATE "C"
+		 LIMIT $6`, owner, onPath, onFrom, GranteeSubject, GrantActive, limit)
+	if err != nil {
+		return nil, fmt.Errorf("store: %s: %w", what, err)
+	}
+	defer rows.Close()
+	var out []Holding
+	for rows.Next() {
+		var h Holding
+		if err := rows.Scan(&h.Grantee, &h.Permission); err != nil {
+			return nil, fmt.Errorf("store: %s: %w", what, err)
+		}
+		out = append(out, h)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: %s: %w", what, err)
+	}
+	return out, nil
 }
 
 // Move carries a grant on exactly this path to the path the object moved to.

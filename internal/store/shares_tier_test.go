@@ -14,6 +14,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -153,6 +154,75 @@ func TestStoreSharesCoveringIsActiveUnexpiredAndMatchedBySegment(t *testing.T) {
 	other, err := shares.Covering(t.Context(), db.Querier(), bobby, "files/reports/q3.pdf")
 	if err != nil || len(other) != 0 {
 		t.Fatalf("a space with no grants = %d, %v", len(other), err)
+	}
+}
+
+func TestStoreSharesHoldersAreEachSubjectsRungOnThePath(t *testing.T) {
+	db := tier(t)
+	shares := NewShares()
+	past := time.Now().Add(-time.Hour)
+	// zed sorts before bobby in byte order and after it in most locales, so
+	// the order the page comes back in is the C collation's and no other.
+	const (
+		carol = "https://issuer.example|carol"
+		zed   = "https://issuer.example|Zed"
+	)
+
+	grant(t, db, subjectGrant(alice, "files", bobby, "read"))
+	grant(t, db, subjectGrant(alice, "files/reports", bobby, "manage"))
+	grant(t, db, subjectGrant(alice, "files/reports/q3.pdf", zed, "write"))
+	grant(t, db, subjectGrant(alice, "files/reports-archive", carol, "manage"))
+	expired := subjectGrant(alice, "files/reports", carol, "write")
+	expired.ExpiresAt = &past
+	grant(t, db, expired)
+	revoked := grant(t, db, subjectGrant(alice, "files/reports", carol, "read"))
+	if _, err := shares.Revoke(t.Context(), db.Querier(), revoked.ID); err != nil {
+		t.Fatal(err)
+	}
+	grant(t, db, tokenGrant(alice, "files/reports", GranteeLink, "h0lders-l1nk"))
+	grant(t, db, subjectGrant(bobby, "files/reports", carol, "manage"))
+	// On the destination of a move: bobby writes there, zed holds nothing.
+	grant(t, db, subjectGrant(alice, "files/inbox", bobby, "write"))
+	grant(t, db, subjectGrant(alice, "files/inbox", carol, "read"))
+
+	got, err := shares.Holders(t.Context(), db.Querier(), alice, "files/reports/q3.pdf", "", 10)
+	if err != nil {
+		t.Fatalf("Holders: %v", err)
+	}
+	want := []Holding{{Grantee: zed, Permission: "write"}, {Grantee: bobby, Permission: "manage"}}
+	if !slices.Equal(got, want) {
+		t.Errorf("the holders of the file are %v, want %v", got, want)
+	}
+
+	// A move names both ends: a holder of one end alone is no holder, and
+	// one of both holds the lower rung.
+	moved, err := shares.Holders(t.Context(), db.Querier(), alice, "files/inbox/q3.pdf", "files/reports/q3.pdf", 10)
+	if err != nil {
+		t.Fatalf("Holders with a source: %v", err)
+	}
+	if want := []Holding{{Grantee: bobby, Permission: "write"}}; !slices.Equal(moved, want) {
+		t.Errorf("the holders of both ends are %v, want %v", moved, want)
+	}
+
+	// The limit is applied after the order, so the page is the first by
+	// subject.
+	first, err := shares.Holders(t.Context(), db.Querier(), alice, "files/reports/q3.pdf", "", 1)
+	if err != nil || len(first) != 1 || first[0] != (Holding{Grantee: zed, Permission: "write"}) {
+		t.Errorf("a page of one is %v, %v", first, err)
+	}
+
+	for _, c := range []struct{ owner, path, from string }{
+		{bobby, "files/inbox/q3.pdf", ""},
+		{alice, "", ""},
+		{alice, "files/reports/q3.pdf", "/"},
+	} {
+		none, err := shares.Holders(t.Context(), db.Querier(), c.owner, c.path, c.from, 10)
+		if err != nil || len(none) != 0 {
+			t.Errorf("Holders(%q, %q, %q) = %v, %v", c.owner, c.path, c.from, none, err)
+		}
+	}
+	if _, err := shares.Holders(t.Context(), db.Querier(), alice, "files/reports/q3.pdf", "", 0); err == nil {
+		t.Error("a page of no rows was answered")
 	}
 }
 
