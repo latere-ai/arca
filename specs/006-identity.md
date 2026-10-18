@@ -234,8 +234,11 @@ path, each with the highest rung it holds there, as
 subject in byte order. On a question that names a `from`, a subject is
 listed only when it holds a rung on both paths, with the lower of the
 two, as `grant` is read. The list holds at most `authorizer.MaxGrants`,
-64, entries; past that it lists the first 64 by subject and the question
-carries `grants_truncated: true`. It is sent on the questions that carry
+64, entries and `authorizer.MaxGrantsBytes`, 16 KiB, of subjects and
+permissions; past either it lists the first by subject that fit and the
+question carries `grants_truncated: true`. A share's grantee is at most
+`authorizer.MaxGranteeBytes`, 512 bytes, so the question stays far under
+the 64 KiB an endpoint reads. It is sent on the questions that carry
 `grant`'s conditions, a path, a caller, and a space that is not the
 caller's own, as an empty list where nobody holds a grant, and is absent
 on the rest, so an endpoint tells "nobody holds one" from "this question
@@ -403,7 +406,7 @@ and the owner policy is not consulted.
 | 13 | Every question about a file or an upload that names a path carries the caller's rung as `grant`, absent where they hold none and absent on the caller's own space, in both modes, and a grants table that cannot answer is `authorizer_unavailable` | `internal/auth` grant test |
 | 14 | Under an external authorizer that admits the ladder's actions of `resource.grant`, a grantee reads a shared object and a caller with no grant on it reads a missing one | `test/conformance` `case006Grantee` |
 | 15 | A question that names a `from` carries the lower of the caller's rungs on `path` and on `from`, and the owner policy decides on that rung | `internal/auth` `TestAGrantMustCoverBothEnds`; `internal/files` `TestAMoveNeedsAGrantOnBothEnds` |
-| 16 | A question about a file or an upload that carries `grant`'s conditions carries `grants`: every subject's highest live rung on the path, the lower of two on a question that names a `from`, ordered by subject, an empty list where nobody holds one, at most 64 entries and `grants_truncated` past them; the caller's own space and an anonymous question carry neither; a table that cannot answer is `authorizer_unavailable` | `internal/auth` `TestTheQuestionCarriesEveryHoldersGrant`; `internal/store` `TestStoreSharesHoldersAreEachSubjectsRungOnThePath` |
+| 16 | A question about a file or an upload that carries `grant`'s conditions carries `grants`: every subject's highest live rung on the path, the lower of two on a question that names a `from`, ordered by subject, an empty list where nobody holds one, at most 64 entries and 16 KiB and `grants_truncated` past them; the caller's own space and an anonymous question carry neither; a table that cannot answer is `authorizer_unavailable` | `internal/auth` `TestTheQuestionCarriesEveryHoldersGrant`, `TestTheHoldersAreBoundedByTheirBytes`; `internal/shares` `TestACreateRefusesWhatIsNotAGrant`; `internal/store` `TestStoreSharesHoldersAreEachSubjectsRungOnThePath` |
 
 ## Not in this spec
 
