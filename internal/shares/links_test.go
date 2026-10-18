@@ -628,3 +628,38 @@ func TestARedemptionAnAuthorizerCannotAnswerIsUnavailable(t *testing.T) {
 		t.Errorf("the refusal names the token: %s", body)
 	}
 }
+
+// TestEveryAnswerOfTheLinkRoutesIsDownloadOnly is criterion 1 of spec 031
+// through the service: the meta, the listing and the file a token names, and
+// the refusal each route gives a token that names nothing, carry the three
+// headers. A URL alone opens these routes in a browser.
+func TestEveryAnswerOfTheLinkRoutesIsDownloadOnly(t *testing.T) {
+	h := newHarness(t)
+	link := mint(t, h, "files/reports", "")
+	object := anObject(h, "files/reports/q3.pdf")
+
+	for _, path := range []string{
+		"/v1/shares/links/" + link.Token + "/meta",
+		"/v1/shares/links/" + link.Token,
+		"/v1/shares/links/" + link.Token + "/files/" + object.Path,
+		"/v1/shares/links/t0ken-unknown/meta",
+		"/v1/shares/links/t0ken-unknown",
+		"/v1/shares/links/t0ken-unknown/files/" + object.Path,
+		"/v1/shares/links/" + link.Token + "/files/files/elsewhere/q3.pdf",
+	} {
+		w := h.do(t, http.MethodGet, path, "", nil)
+		header := w.Header()
+		if got := header.Get(api.HeaderContentDisposition); got != api.DispositionAttachment {
+			t.Errorf("%s answered %d with Content-Disposition %q", path, w.Code, got)
+		}
+		if got := header.Get(api.HeaderContentTypeOptions); got != api.NoSniff {
+			t.Errorf("%s answered %d with X-Content-Type-Options %q", path, w.Code, got)
+		}
+		if got := header.Get(api.HeaderContentSecurityPolicy); got != api.PolicySandbox {
+			t.Errorf("%s answered %d with Content-Security-Policy %q", path, w.Code, got)
+		}
+		if got := header.Get(shares.HeaderReferrerPolicy); got != shares.NoReferrer {
+			t.Errorf("%s answered %d with Referrer-Policy %q", path, w.Code, got)
+		}
+	}
+}

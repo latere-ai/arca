@@ -106,10 +106,11 @@ func (NoLedger) Append(context.Context, store.Querier, Event) (int64, error) { r
 // route answers with once the token has resolved and link.read is allowed.
 //
 // It is an interface because the read path is spec 005's: the bytes at or
-// below ARCA_INLINE_BYTES, a redirect to a presigned URL above it, and a
-// redirect to ARCA_PUBLIC_CDN_URL for an object a public grant marked. A
-// link route decides who may read and confines what may be read; what a read
-// looks like once allowed is not this spec's.
+// below ARCA_INLINE_BYTES and a redirect to a presigned URL above it, each
+// an attachment under the file's name, and a public object presigned rather
+// than sent to ARCA_PUBLIC_CDN_URL, because a read through a link is a
+// download (spec 031). A link route decides who may read and confines what
+// may be read; what a read looks like once allowed is not this spec's.
 //
 // A build that binds none answers not_implemented from that one route and
 // serves the other two, which is this phase of spec 019: internal/files
