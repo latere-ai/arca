@@ -194,7 +194,7 @@ for every move.
 | A client that sent `{"move_to", "recursive": true}` | it was `400` `invalid_field` and is now a folder move |
 | A reader of the `too_many_objects` sentence | it names a copy or a move: "The folder holds more objects than one copy or move accepts." |
 | An authorizer endpoint | it may be asked a move that carries `recursive: true` and a `size` that is a sum |
-| The previous release's conformance suite | its `case028FolderCopy` asserts the `400` above, and reads this release as a break ([[024-conformance-against-a-published-release]]). The module is at v0, so the release moves the minor version and the changelog names the change |
+| The previous release's conformance suite | its `case028FolderCopy` asserts the `400` above. The case is listed in the superseded cases of [[024-conformance-against-a-published-release]], so the run of that suite against this release skips it and names it, under its reason, in the release body |
 
 ### Not in this spec
 
@@ -203,7 +203,6 @@ for every move.
 - Moving an open upload session's path.
 - A folder move past the bound, which would need a job with a state of
   its own, as for the copy.
-- A conformance case for another installation to run.
 
 ## Acceptance criteria
 
@@ -222,6 +221,7 @@ for every move.
 | 11 | The statements rename in Postgres what the handler asks, under an omission and at a destination that is an ancestor of the folder | `internal/store` `TestStoreAFolderMoveRenamesTheRowsAndWhatKeysOnThem`, `TestStoreAFolderMoveLeavesTheGrantsAnOmissionKeeps`, `TestStoreAFolderMoveRefusesADestinationAnyRowHolds` | built |
 | 12 | `arcad` as a process moves a folder against the real stores: same object ids and keys, the bytes read at the new paths, the history at a new path, usage unchanged, a second move onto the destination refused | `test/e2e` `TestE2EAFolderMoveRenamesItsRowsAndLeavesTheBucketAlone` | built |
 | 13 | The `POST` row of the document names the folder move, and the committed document is current | `tools/apidoc` `TestTheCommittedDocumentIsCurrent` and the `POST` row of its labels table | built |
+| 14 | The portable suite moves a folder against a running installation, and the previous release's suite, whose folder copy case asserted the refusal this spec removes, passes against this binary with that case skipped under its reason | `test/conformance` `case030FolderMove`; `TestPreviousSuitePasses` with the entry of `supersededCases` ([[024-conformance-against-a-published-release]]) | built |
 
 ## Outcome
 
@@ -281,11 +281,12 @@ Built where the design was silent, each a choice to review:
 - **A history at a destination with no row there** is `path_taken`, and
   so is a row written at a destination after the check; neither is a
   `503`.
-
-Not built:
-
-- **A conformance case.** The suite's `case028FolderCopy` now reads a
-  move with `recursive` on an object as `not_found` instead of
-  `invalid_field`; a case that moves a folder for another installation
-  to run is left for when one needs it. The previous release's suite
-  still asserts `invalid_field` there.
+- **The previous release's suite.** `v0.7.0`'s `case028FolderCopy`
+  asserts `invalid_field` for `move_to` with `recursive`, and fails
+  against this binary for that one assertion. By the owner's decision of
+  2026-10-18 the refusal becomes an operation without a major: the case
+  is the first entry of the superseded list of
+  [[024-conformance-against-a-published-release]], which the run of that
+  suite skips and the release body names. This release's
+  `case028FolderCopy` reads the same request on an object as `not_found`,
+  and `case030FolderMove` drives the folder move.
