@@ -345,7 +345,7 @@ func TestOpenAPIServesNavigationLabelsAndDetails(t *testing.T) {
 	}
 	cases := []struct{ path, summary, description string }{
 		{"/v1/files/{owner}/{path}", "Read or list files", detail + " Asks the authorizer for file.read before it acts."},
-		{"/v1/shares/links/{token}", "List linked files", "A listing of the subtree a link token names. Carries no bearer token: the token in the URL is the whole of the authorization."},
+		{"/v1/shares/links/{token}", "List linked files", "A listing of the subtree a link token names. Answered as a download: `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox`. Carries no bearer token: the token in the URL is the whole of the authorization."},
 	}
 	for _, tc := range cases {
 		op := doc.Paths[tc.path]["get"]

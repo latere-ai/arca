@@ -480,7 +480,7 @@ paths:
     get:
       operationId: getV1SharesLinksByToken
       summary: List linked files
-      description: "A listing of the subtree a link token names. Carries no bearer token: the token in the URL is the whole of the authorization."
+      description: "A listing of the subtree a link token names. Answered as a download: `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox`. Carries no bearer token: the token in the URL is the whole of the authorization."
       parameters:
       - name: token
         in: path
@@ -502,7 +502,7 @@ paths:
     get:
       operationId: getV1SharesLinksByTokenFilesByPath
       summary: Read linked file
-      description: "One object under the subtree a link token names. Carries no bearer token: the token in the URL is the whole of the authorization."
+      description: "One object under the subtree a link token names. Answered as a download: `Content-Disposition: attachment` under the file's name, `X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox`; a redirect above the inline size asks the bucket for the same disposition. Carries no bearer token: the token in the URL is the whole of the authorization."
       parameters:
       - name: token
         in: path
@@ -530,7 +530,7 @@ paths:
     get:
       operationId: getV1SharesLinksByTokenMeta
       summary: Get link metadata
-      description: "What a link token names, before anything is fetched. Carries no bearer token: the token in the URL is the whole of the authorization."
+      description: "What a link token names, before anything is fetched. Answered as a download: `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox`. Carries no bearer token: the token in the URL is the whole of the authorization."
       parameters:
       - name: token
         in: path

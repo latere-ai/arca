@@ -65,7 +65,14 @@ type Links interface {
 // bound, and answers not_implemented in a build that bound none. A row is
 // registered whether or not a build answers it, so the surface has one shape
 // everywhere and a build that cannot answer a row says so.
+//
+// Every answer of the three rows is download-only (spec 031), and the
+// headers are set here, before anything is written, so no handler below and
+// no refusal can answer without them. A URL alone opens these routes in a
+// browser, which would otherwise render what they answer as a page of this
+// server's origin.
 func (a *API) link(w http.ResponseWriter, r *http.Request, h func(Links, http.ResponseWriter, *http.Request)) {
+	DownloadOnly(w)
 	if a.links == nil {
 		WriteError(w, r, Refuse(CodeNotImplemented, "this build binds no shares and links service"))
 		return
@@ -92,21 +99,21 @@ var routeTable = []route{
 		method: http.MethodGet, path: "/v1/shares/links/{token}/meta",
 		public: true, status: http.StatusOK,
 		summary:     "Get link metadata",
-		description: "What a link token names, before anything is fetched.",
+		description: "What a link token names, before anything is fetched. Answered as a download: `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox`.",
 		handler:     func(a *API, w http.ResponseWriter, r *http.Request) { a.link(w, r, Links.LinkMeta) },
 	},
 	{
 		method: http.MethodGet, path: "/v1/shares/links/{token}",
 		public: true, status: http.StatusOK,
 		summary:     "List linked files",
-		description: "A listing of the subtree a link token names.",
+		description: "A listing of the subtree a link token names. Answered as a download: `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox`.",
 		handler:     func(a *API, w http.ResponseWriter, r *http.Request) { a.link(w, r, Links.LinkList) },
 	},
 	{
 		method: http.MethodGet, path: "/v1/shares/links/{token}/files/{path...}",
 		public: true, status: http.StatusOK,
 		summary:     "Read linked file",
-		description: "One object under the subtree a link token names.",
+		description: "One object under the subtree a link token names. Answered as a download: `Content-Disposition: attachment` under the file's name, `X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox`; a redirect above the inline size asks the bucket for the same disposition.",
 		handler:     func(a *API, w http.ResponseWriter, r *http.Request) { a.link(w, r, Links.LinkFile) },
 	},
 }
