@@ -371,16 +371,19 @@ func case028FolderCopy(t *testing.T, s *session) {
 	expectError(t, s.call(t, Alice, http.MethodPost, s.fileRoute(owner, source+"/a.txt"),
 		body(fields{"copy_to": single})), CodePathTaken)
 
-	// recursive goes with copy_to and with nothing else, and a request
-	// names one of the three operations.
+	// recursive goes with copy_to or move_to and with nothing else, and a
+	// request names one of the three operations. With move_to it makes the
+	// path a folder (spec 030), and an object is not one: nothing is under
+	// it to move.
 	elsewhere := s.filePath("copy-elsewhere.txt")
 	for _, alone := range []fields{
 		{"recursive": true},
-		{"move_to": elsewhere, "recursive": true},
 		{"restore_version": 1, "recursive": true},
 	} {
 		expectError(t, s.call(t, Alice, http.MethodPost, s.fileRoute(owner, source+"/a.txt"), body(alone)), CodeInvalidField)
 	}
+	expectError(t, s.call(t, Alice, http.MethodPost, s.fileRoute(owner, source+"/a.txt"),
+		body(fields{"move_to": elsewhere, "recursive": true})), CodeNotFound)
 	for _, two := range []fields{
 		{"move_to": elsewhere, "copy_to": single},
 		{"restore_version": 1, "copy_to": elsewhere},
