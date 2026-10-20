@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.10.1 - 2026-10-20
+
 ### Added
 
 - **The Go runtime's metrics are exported with the rest of the
