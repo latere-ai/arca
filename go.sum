@@ -178,7 +178,7 @@ google.golang.org/protobuf v1.36.12 h1:pJOKDDOyeXErUroCihFAd5LQuwXBSpVnKGrj5o/fw
 google.golang.org/protobuf v1.36.12/go.mod h1:HTf+CrKn2C3g5S8VImy6tdcUvCska2kB7j23XfzDpco=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
 gopkg.in/yaml.v3 v3.0.0-20200313102051-9f266ea9e77c/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
-latere.ai/x/ci-gate v0.54.0 h1:LnrEu0GZbSSInCYZZxRoG3vwUHXO0M8zlbt9YtB9Nrg=
-latere.ai/x/ci-gate v0.54.0/go.mod h1:zDYdDAkxB9ahnbjcbdgtDup4ruowqmGLBqMu29B6wXg=
+latere.ai/x/ci-gate v0.55.0 h1:aiomol8bHtntD3fqjIT5XK+coHjEVDKVIA3VOmXZah8=
+latere.ai/x/ci-gate v0.55.0/go.mod h1:SYUdCY8Ob6oNGc+23pS0u7qoxafBFixY6IrpH2UgHzQ=
 latere.ai/x/pkg v0.106.0 h1:yWeY0YaUcAP9HQIH32Oca4KTI/gxPcvQReWpobpZl6k=
 latere.ai/x/pkg v0.106.0/go.mod h1:3d3Ig2BScdlQ7Re3NCRVQ6jt7HlzmP3aocJfuamMuFo=
