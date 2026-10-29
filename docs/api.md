@@ -154,6 +154,14 @@ No route requires a precondition. A client whose lost update would be
 expensive, such as an agent writing back state it read earlier, sends one.
 Quotes are optional.
 
+A `DELETE` holds to the same headers as a write. A stale `If-Match`, an
+`If-None-Match` that names the object's checksum, and `If-None-Match: *` are
+`412 precondition_failed`, and the object stays where it is. `If-Match: *`
+deletes whatever is there; a path with nothing at it is `404 not_found`
+with or without a precondition. With `?version=N` the headers are compared
+with that version's checksum, the `ETag` a read of it answers. A folder has
+no checksum, so a precondition on `?recursive=1` is `400 invalid_field`.
+
 ### Errors
 
 Every refusal is one JSON body:
@@ -351,6 +359,7 @@ alone.
 | a folder that holds objects, and one that holds none | `204` with no body. A folder with nothing in it and a folder that never existed are the same thing, so the call can be repeated |
 | the path is `files`, the root of the tree | `400 invalid_path`. Emptying a space is not a folder operation |
 | `recursive=1` together with `version=` | `400 exclusive_fields` |
+| an `If-Match` or `If-None-Match` header | `400 invalid_field`. A folder has no checksum to compare; delete its objects one at a time to delete them conditionally |
 
 One call removes a folder of any size, and asks `file.delete` once, for the
 folder. It appends one `delete` event at the folder's path, with the detail
