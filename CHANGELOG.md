@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.10.3 - 2026-10-30
+
 ### Fixed
 
 - **A delete holds to `If-Match` and `If-None-Match`.** A `DELETE` whose
