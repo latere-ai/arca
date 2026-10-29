@@ -78,6 +78,164 @@ func TestPruningOneVersionLeavesTheLiveObjectAlone(t *testing.T) {
 	}
 }
 
+// TestADeleteHoldsToItsPreconditionsAsAWriteDoes: a delete conditioned on a
+// checksum the object no longer carries, because another session wrote it
+// since, is refused with the 412 a write answers and leaves the object
+// where it was, trashed or not; one conditioned on what is there goes to
+// the trash with its bytes.
+func TestADeleteHoldsToItsPreconditionsAsAWriteDoes(t *testing.T) {
+	read := `"` + digest("read") + `"`
+	current := `"` + digest("written since") + `"`
+	for _, c := range []struct {
+		name    string
+		headers []string
+		want    string
+	}{
+		{"a stale If-Match", []string{api.HeaderIfMatch, read}, api.CodePreconditionFailed},
+		{"a list of stale checksums", []string{api.HeaderIfMatch, read + `, "abc"`}, api.CodePreconditionFailed},
+		{"If-None-Match: *", []string{api.HeaderIfNoneMatch, "*"}, api.CodePreconditionFailed},
+		{"an If-None-Match naming what is there", []string{api.HeaderIfNoneMatch, current}, api.CodePreconditionFailed},
+		{"a weak validator", []string{api.HeaderIfMatch, "W/" + current}, api.CodeInvalidField},
+	} {
+		for _, query := range []string{"", "?permanent=1"} {
+			t.Run(c.name+query, func(t *testing.T) {
+				h := newHarness(t)
+				h.seed(t, "files/memory/note.md", "read")
+				row := h.seed(t, "files/memory/note.md", "written since")
+				w := h.call(t, http.MethodDelete, h.object("files/memory/note.md")+query, nil, c.headers...)
+				if got := code(t, w); got != c.want {
+					t.Fatalf("the delete is %q, want %q", got, c.want)
+				}
+				if c.want == api.CodePreconditionFailed {
+					if w.Code != http.StatusPreconditionFailed {
+						t.Errorf("a refused delete answered %d", w.Code)
+					}
+					// The detail names the header and what the path holds,
+					// as a refused write's does.
+					if !strings.Contains(w.Body.String(), c.headers[0]) || !strings.Contains(w.Body.String(), digest("written since")) {
+						t.Errorf("the refusal names neither the header nor the checksum:\n%s", w.Body)
+					}
+				}
+				held, live := h.read(t, "files/memory/note.md")
+				if !live || held.DeletedAt != nil || held.Checksum != row.Checksum {
+					t.Fatalf("a refused delete left the row %+v", held)
+				}
+				if got := len(h.store.versions); got != 1 {
+					t.Errorf("a refused delete left %d versions", got)
+				}
+				if _, ok := h.objects.Bytes(row.ObjectID.Key("arca/")); !ok {
+					t.Error("a refused delete removed the bytes")
+				}
+			})
+		}
+	}
+
+	for _, headers := range [][]string{
+		{api.HeaderIfMatch, current},
+		{api.HeaderIfMatch, read + ", " + current},
+		{api.HeaderIfMatch, "*"},
+		{api.HeaderIfNoneMatch, read},
+	} {
+		h := newHarness(t)
+		h.seed(t, "files/memory/note.md", "read")
+		row := h.seed(t, "files/memory/note.md", "written since")
+		if w := h.call(t, http.MethodDelete, h.object("files/memory/note.md"), nil, headers...); w.Code != http.StatusNoContent {
+			t.Fatalf("a delete with %v answered %d: %s", headers, w.Code, w.Body)
+		}
+		// The delete is the soft one it is without a precondition: the row
+		// is in the trash and the bytes stay for a restore.
+		if got := h.trashed(); !slices.Equal(got, []string{"files/memory/note.md"}) {
+			t.Errorf("a delete with %v left %v in the trash", headers, got)
+		}
+		if _, ok := h.objects.Bytes(row.ObjectID.Key("arca/")); !ok {
+			t.Errorf("a delete with %v removed the bytes", headers)
+		}
+	}
+}
+
+// TestIfMatchStarDeletesOnlyWhatExists: If-Match: * asks for anything that
+// exists, so it deletes a live object and finds nothing at a path that
+// holds none or only a trashed one, as a delete with no precondition does.
+func TestIfMatchStarDeletesOnlyWhatExists(t *testing.T) {
+	h := newHarness(t)
+	h.seed(t, "files/plan.md", "first")
+	star := []string{api.HeaderIfMatch, "*"}
+	if w := h.call(t, http.MethodDelete, h.object("files/plan.md"), nil, star...); w.Code != http.StatusNoContent {
+		t.Fatalf("If-Match: * on a live object answered %d: %s", w.Code, w.Body)
+	}
+	for _, path := range []string{"files/plan.md", "files/never.md"} {
+		for _, query := range []string{"", "?permanent=1"} {
+			if got := code(t, h.call(t, http.MethodDelete, h.object(path)+query, nil, star...)); got != api.CodeNotFound {
+				t.Errorf("If-Match: * on %s%s is %q", path, query, got)
+			}
+		}
+	}
+	if got := h.trashed(); !slices.Equal(got, []string{"files/plan.md"}) {
+		t.Errorf("the trash holds %v", got)
+	}
+}
+
+// TestAPruneHoldsToTheVersionsChecksum: a version's ETag is its own
+// checksum, so a prune conditioned on another is refused and keeps the
+// version, and one conditioned on it removes it.
+func TestAPruneHoldsToTheVersionsChecksum(t *testing.T) {
+	h := newHarness(t)
+	first := h.seed(t, "files/plan.md", "one")
+	h.seed(t, "files/plan.md", "two")
+	target := h.object("files/plan.md") + "?version=1"
+	for _, headers := range [][]string{
+		{api.HeaderIfMatch, `"` + digest("two") + `"`},
+		{api.HeaderIfNoneMatch, `"` + digest("one") + `"`},
+		{api.HeaderIfNoneMatch, "*"},
+	} {
+		w := h.call(t, http.MethodDelete, target, nil, headers...)
+		if got := code(t, w); got != api.CodePreconditionFailed {
+			t.Fatalf("a prune with %v is %q", headers, got)
+		}
+		if !strings.Contains(w.Body.String(), "version 1") {
+			t.Errorf("the refusal does not name the version:\n%s", w.Body)
+		}
+		if got := len(h.store.versions); got != 1 {
+			t.Fatalf("a refused prune left %d versions", got)
+		}
+		if _, ok := h.objects.Bytes(first.ObjectID.Key("arca/")); !ok {
+			t.Fatal("a refused prune removed the version's bytes")
+		}
+	}
+	if w := h.call(t, http.MethodDelete, target, nil, api.HeaderIfMatch, `"`+digest("one")+`"`); w.Code != http.StatusNoContent {
+		t.Fatalf("a prune conditioned on the version answered %d: %s", w.Code, w.Body)
+	}
+	if got := len(h.store.versions); got != 0 {
+		t.Errorf("the prune left %d versions", got)
+	}
+}
+
+// TestAFolderDeleteRefusesAPrecondition: a folder carries no checksum, so a
+// precondition on deleting one is refused rather than ignored, and nothing
+// under the folder moves.
+func TestAFolderDeleteRefusesAPrecondition(t *testing.T) {
+	h := newHarness(t)
+	h.seed(t, "files/notes/a.md", "a")
+	for _, headers := range [][]string{
+		{api.HeaderIfMatch, `"` + digest("a") + `"`},
+		{api.HeaderIfMatch, "*"},
+		{api.HeaderIfNoneMatch, "*"},
+	} {
+		for _, query := range []string{"?recursive=1", "?recursive=1&permanent=1"} {
+			w := h.call(t, http.MethodDelete, h.object("files/notes")+query, nil, headers...)
+			if got := code(t, w); got != api.CodeInvalidField {
+				t.Fatalf("a folder delete %s with %v is %q", query, headers, got)
+			}
+			if !strings.Contains(w.Body.String(), headers[0]) {
+				t.Errorf("the refusal does not name %s:\n%s", headers[0], w.Body)
+			}
+		}
+	}
+	if got := h.live(); !slices.Equal(got, []string{"files/notes/a.md"}) {
+		t.Errorf("a refused folder delete left %v live", got)
+	}
+}
+
 func TestTheTrashListsWhatIsRestorableAndRestoreReturnsTheBytes(t *testing.T) {
 	h := newHarness(t)
 	for _, name := range []string{"a", "b"} {

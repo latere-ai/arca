@@ -356,6 +356,45 @@ func TestStoreTwoConditionalWritersOfOnePathLeaveOneWinner(t *testing.T) {
 	}
 }
 
+// TestStoreAConditionalDeleteAndAConditionalWriteOfOneChecksumLeaveOneWinner:
+// a delete and a write that both read the same checksum race for the path,
+// and the row lock both take first lets exactly one of them act on it. A
+// delete that lost never trashes the content the write put there, and a
+// write that lost never revives the path the delete trashed.
+func TestStoreAConditionalDeleteAndAConditionalWriteOfOneChecksumLeaveOneWinner(t *testing.T) {
+	h, stores := tier(t)
+	seen := `"` + digest("first") + `"`
+	for i := range 10 {
+		path := fmt.Sprintf("files/memory/note-%d.md", i)
+		h.seed(t, path, "first")
+		var deleted, written int
+		var wg sync.WaitGroup
+		wg.Go(func() {
+			deleted = h.call(t, http.MethodDelete, h.object(path), nil, api.HeaderIfMatch, seen).Code
+		})
+		wg.Go(func() {
+			written = h.put(t, path, "second", api.HeaderIfMatch, seen).Code
+		})
+		wg.Wait()
+		row, held := stores.row(t, h.owner, path)
+		if !held {
+			t.Fatalf("the race over %s left no row", path)
+		}
+		switch {
+		case deleted == http.StatusNoContent && written == http.StatusPreconditionFailed:
+			if row.DeletedAt == nil || row.Checksum != digest("first") {
+				t.Fatalf("the delete won and the row is %+v", row)
+			}
+		case written == http.StatusOK && deleted == http.StatusPreconditionFailed:
+			if row.DeletedAt != nil || row.Checksum != digest("second") {
+				t.Fatalf("the write won and the row is %+v", row)
+			}
+		default:
+			t.Fatalf("the delete answered %d and the write %d; one of them must refuse", deleted, written)
+		}
+	}
+}
+
 func TestStoreTheVersionsAndTheTrashRoundTripAgainstBothStores(t *testing.T) {
 	h, _ := tier(t)
 	h.seed(t, "files/plan.md", "one")

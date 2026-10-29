@@ -5,7 +5,10 @@ package files
 
 import (
 	"context"
+	"errors"
 	"net/http"
+
+	"github.com/jackc/pgx/v5"
 
 	"latere.ai/x/arca/authorizer"
 	"latere.ai/x/arca/internal/api"
@@ -21,6 +24,11 @@ import (
 // the request says ?permanent=1 or the answer that admitted it carries
 // limits.trash: false (spec 028). The two narrow and never widen: no answer
 // makes a delete soft that asked to be permanent.
+//
+// If-Match and If-None-Match hold a delete to the object's state as they
+// hold a write (spec 013), and are read after the question for the same
+// reason a write reads them there: a caller the authorizer refused learns
+// nothing of the object's checksum from a 412.
 func (s *Service) remove(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	recursive, err := flag(r, "recursive")
@@ -37,6 +45,10 @@ func (s *Service) remove(w http.ResponseWriter, r *http.Request) {
 		s.removeVersion(w, r)
 		return
 	case recursive:
+		if err := refuseFolderConditions(r); err != nil {
+			api.WriteError(w, r, err)
+			return
+		}
 		s.removeFolder(w, r)
 		return
 	}
@@ -68,9 +80,14 @@ func (s *Service) remove(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, r, fault(ctx, "read the answer's limits", err))
 		return
 	}
+	pre, err := api.Conditions(r)
+	if err != nil {
+		api.WriteError(w, r, err)
+		return
+	}
 
 	if !permanent && !limits.NoTrash {
-		if err := s.trash(ctx, t); err != nil {
+		if err := s.trash(ctx, t, pre); err != nil {
 			api.WriteError(w, r, err)
 			return
 		}
@@ -81,7 +98,7 @@ func (s *Service) remove(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	if err := s.purge(ctx, t); err != nil {
+	if err := s.purge(ctx, t, pre); err != nil {
 		api.WriteError(w, r, err)
 		return
 	}
@@ -94,13 +111,44 @@ func (s *Service) remove(w http.ResponseWriter, r *http.Request) {
 // trash sets deleted_at and charges nothing: trashed bytes count towards the
 // space for the whole retention window, so a space that wants them back
 // empties its trash and a reader of the figure is not surprised later.
-func (s *Service) trash(ctx context.Context, t Target) error {
-	trashed, err := s.files.SoftDelete(ctx, s.db.Querier(), t.Owner, t.Path)
+func (s *Service) trash(ctx context.Context, t Target, pre api.Precondition) error {
+	err := s.db.Tx(ctx, func(q store.Querier) error {
+		if err := s.hold(ctx, q, t, pre); err != nil {
+			return err
+		}
+		trashed, err := s.files.SoftDelete(ctx, q, t.Owner, t.Path)
+		switch {
+		case err != nil:
+			return fault(ctx, "trash the path", err)
+		case !trashed:
+			return api.Refuse(api.CodeNotFound, "there is no object at %q", t.Path)
+		default:
+			return nil
+		}
+	})
+	return Committed(ctx, err)
+}
+
+// hold locks the live row a delete removes and reads the request's
+// preconditions against it, inside the delete's transaction. Every write
+// takes the same lock first (Commit), so a write cannot land between the
+// check and the delete, and a delete conditioned on what a session read
+// never removes what another session wrote since.
+//
+// A path nothing live holds is not found whatever the request asked, as it
+// is with no precondition at all: If-Match: * asks for anything that
+// exists, and there is nothing.
+func (s *Service) hold(ctx context.Context, q store.Querier, t Target, pre api.Precondition) error {
+	row, err := s.files.GetForUpdate(ctx, q, t.Owner, t.Path)
 	switch {
-	case err != nil:
-		return fault(ctx, "trash the path", err)
-	case !trashed:
+	case errors.Is(err, pgx.ErrNoRows):
 		return api.Refuse(api.CodeNotFound, "there is no object at %q", t.Path)
+	case err != nil:
+		return fault(ctx, "read the path", err)
+	case row.DeletedAt != nil:
+		return api.Refuse(api.CodeNotFound, "there is no object at %q", t.Path)
+	case !pre.Allows(row.Checksum):
+		return refusePrecondition(pre, row.Checksum)
 	default:
 		return nil
 	}
@@ -109,9 +157,12 @@ func (s *Service) trash(ctx context.Context, t Target) error {
 // purge removes the row and its history, then the bytes of both. Rows go
 // first, so a failure between the two leaves bytes the reaper finds and
 // never a row whose object is gone (spec 001, invariant 1).
-func (s *Service) purge(ctx context.Context, t Target) error {
+func (s *Service) purge(ctx context.Context, t Target, pre api.Precondition) error {
 	var gone []object.ID
 	err := s.db.Tx(ctx, func(q store.Querier) error {
+		if err := s.hold(ctx, q, t, pre); err != nil {
+			return err
+		}
 		row, removed, err := s.files.HardDelete(ctx, q, t.Owner, t.Path)
 		switch {
 		case err != nil:
@@ -146,6 +197,11 @@ func (s *Service) purge(ctx context.Context, t Target) error {
 // removeVersion prunes one version: the row first, then the bytes, and only
 // when nothing else names them, because a restore moves an object back onto
 // the live row.
+//
+// A version's validator is its own checksum, the ETag a read of it answers,
+// so a prune's preconditions are read against the version it removes. A
+// number pruned from the top of a history is the next capture's, so If-Match
+// is what keeps a prune to the content its caller read.
 func (s *Service) removeVersion(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	t, n, err := s.versionTarget(ctx, r)
@@ -164,6 +220,11 @@ func (s *Service) removeVersion(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, r, s.Refused(err, "there is no object at %q", t.Path))
 		return
 	}
+	pre, err := api.Conditions(r)
+	if err != nil {
+		api.WriteError(w, r, err)
+		return
+	}
 
 	var pruned store.Version
 	err = s.db.Tx(ctx, func(q store.Querier) error {
@@ -173,6 +234,9 @@ func (s *Service) removeVersion(w http.ResponseWriter, r *http.Request) {
 			return fault(ctx, "remove the version", err)
 		case !removed:
 			return api.Refuse(api.CodeNotFound, "%q has no version %d", t.Path, n)
+		case !pre.Allows(v.Checksum):
+			// The refusal rolls the removal back, so the version stays.
+			return refuseVersion(pre, n, v.Checksum)
 		}
 		if _, err := s.ledger.Release(ctx, q, t.Owner, v.SizeBytes); err != nil {
 			return fault(ctx, "record what the space holds", err)
@@ -190,4 +254,34 @@ func (s *Service) removeVersion(w http.ResponseWriter, r *http.Request) {
 		Detail: map[string]any{"version_no": n},
 	})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// refuseVersion says which header refused a prune and what the version
+// holds, as refusePrecondition says it for the live object.
+func refuseVersion(pre api.Precondition, n int, stored string) error {
+	switch {
+	case pre.CreateOnly:
+		return api.Refuse(api.CodePreconditionFailed,
+			"If-None-Match asked for a version nothing holds, and version %d holds %s", n, stored)
+	case len(pre.IfMatch) > 0:
+		return api.Refuse(api.CodePreconditionFailed,
+			"If-Match named %v; version %d holds %s", pre.IfMatch, n, stored)
+	default:
+		return api.Refuse(api.CodePreconditionFailed,
+			"If-None-Match named the checksum version %d holds, %s", n, stored)
+	}
+}
+
+// refuseFolderConditions refuses a precondition on a folder delete. A
+// folder carries no checksum, so neither header has anything to be read
+// against, and a delete that ignored one would remove what its caller asked
+// to keep.
+func refuseFolderConditions(r *http.Request) error {
+	for _, header := range []string{api.HeaderIfMatch, api.HeaderIfNoneMatch} {
+		if r.Header.Get(header) != "" {
+			return api.Refuse(api.CodeInvalidField,
+				"%s holds a delete to a checksum, and a folder carries none; delete the objects under it one at a time to delete them conditionally", header).About(header)
+		}
+	}
+	return nil
 }
