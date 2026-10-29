@@ -6,6 +6,17 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Fixed
+
+- **A delete holds to `If-Match` and `If-None-Match`.** A `DELETE` whose
+  `If-Match` names a checksum the object no longer carries, because
+  something wrote it since, is now `412 precondition_failed` and the object
+  stays, as a refused write does. Before, the object was deleted whatever
+  its version. `If-None-Match` refuses a delete of what it names, and
+  `If-Match: *` deletes whatever is there. `?version=N` compares the headers
+  with that version's checksum, and a folder delete with either header is
+  `400 invalid_field`, since a folder has no checksum.
+
 ## v0.10.2 - 2026-10-21
 
 ### Fixed
