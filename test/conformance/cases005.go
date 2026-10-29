@@ -40,7 +40,7 @@ func cases005() []testCase {
 		{name: "MoveKeepsTheETag", group: GroupFiles, routes: move,
 			codes: []string{CodeNotFound, CodePathTaken}, run: case005MoveKeepsTheETag},
 		{name: "Conditional", group: GroupConditional, routes: object, codes: []string{
-			CodePreconditionFailed, CodeInvalidField, CodeLengthRequired,
+			CodePreconditionFailed, CodeInvalidField, CodeLengthRequired, CodeNotFound,
 		}, run: case005Conditional},
 		{name: "Bytes", group: GroupBytes, routes: object, run: case005Bytes},
 		{name: "Versions", group: GroupVersions, routes: move,
@@ -186,9 +186,10 @@ func case005MoveKeepsTheETag(t *testing.T, s *session) {
 
 // case005Conditional: a conditional write with the current ETag applies, one
 // with a stale ETag is refused, a create-only write onto an existing path is
-// refused, and a write with neither header succeeds on every path. No route
-// requires a precondition, so the caller whose lost update would be silent
-// opts into the round trip and every other caller does not pay for it.
+// refused, and a write with neither header succeeds on every path. A delete
+// holds to the same headers. No route requires a precondition, so the caller
+// whose lost update would be silent opts into the round trip and every other
+// caller does not pay for it.
 func case005Conditional(t *testing.T, s *session) {
 	owner := s.subject(t, Alice)
 	path := s.filePath("conditional.txt")
@@ -229,8 +230,24 @@ func case005Conditional(t *testing.T, s *session) {
 
 	// A write with neither header succeeds, on a path that holds something
 	// and on one that does not.
-	expectAWrite(t, s.put(t, Alice, path, "six\n", "text/plain"))
+	sixth := s.put(t, Alice, path, "six\n", "text/plain")
+	expectAWrite(t, sixth)
 	expectAWrite(t, s.put(t, Alice, s.filePath("unconditional.txt"), "seven\n", "text/plain"))
+
+	// A delete that names a checksum the object no longer carries, or that
+	// asks for nothing to be there, is refused and the object stays
+	// readable; one that names the current checksum deletes it. The deletes
+	// are permanent so the run leaves nothing in the trash.
+	route := s.fileRoute(owner, path)
+	for _, header := range []map[string]string{{"If-Match": `"` + stale + `"`}, {"If-None-Match": "*"}} {
+		expectError(t, s.do(t, request{method: http.MethodDelete, path: route + "?permanent=1", subject: Alice, header: header}),
+			CodePreconditionFailed)
+	}
+	kept := expectStatus(t, s.call(t, Alice, http.MethodGet, route+"?inline=1", ""), http.StatusOK)
+	failIf(t, string(kept.body) != "six\n", "a refused delete left %q", kept.body)
+	expectStatus(t, s.do(t, request{method: http.MethodDelete, path: route + "?permanent=1", subject: Alice,
+		header: map[string]string{"If-Match": sixth.header.Get("ETag")}}), http.StatusNoContent)
+	expectError(t, s.call(t, Alice, http.MethodGet, route, ""), CodeNotFound)
 
 	// A put of object bytes with no Content-Length cannot be admitted before
 	// the first byte is written, so it is refused rather than guessed at.
