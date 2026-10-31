@@ -101,7 +101,6 @@ depcheck:
         github.com/aws/aws-sdk-go-v2/feature/ec2/imds: the instance metadata credentials of the chain
         github.com/aws/aws-sdk-go-v2/internal/configsources: shared endpoint resolution, reached by the S3 client
         github.com/aws/aws-sdk-go-v2/internal/endpoints/v2: shared endpoint resolution, reached by the S3 client
-        github.com/aws/aws-sdk-go-v2/internal/ini: the credential file parser of the chain
         github.com/aws/aws-sdk-go-v2/internal/v4a: an S3 signing variant, reached by the S3 client
         github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding: response decoding, reached by the S3 client
         github.com/aws/aws-sdk-go-v2/service/internal/checksum: the trailing sha256 a put carries over TLS (spec 003)
