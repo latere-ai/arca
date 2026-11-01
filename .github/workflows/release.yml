@@ -51,7 +51,7 @@ jobs:
   # and attested. Nothing here reaches a cluster, and no image gets the tag
   # before publish.
   build:
-    uses: latere-ai/ci/.github/workflows/image-build.yml@c3fcc1bda62305ca978a5474dd29a898564baa42
+    uses: latere-ai/ci/.github/workflows/image-build.yml@v1
     # The stage reads the verify runs of the tagged commit, pushes the
     # images, signs them with the job's OIDC token and attests them; a
     # calling job that grants less fails before it starts.
@@ -373,7 +373,7 @@ jobs:
     # skipped whenever a job above it in the graph is, so each result is
     # named here.
     if: ${{ always() && needs.build.result == 'success' && needs.conformance.result == 'success' && needs.deploy.result != 'failure' && needs.deploy.result != 'cancelled' }}
-    uses: latere-ai/ci/.github/workflows/image-publish.yml@c3fcc1bda62305ca978a5474dd29a898564baa42
+    uses: latere-ai/ci/.github/workflows/image-publish.yml@v1
     permissions:
       contents: write
       packages: write
@@ -393,7 +393,7 @@ jobs:
     # deploy sits above this job in the graph and is skipped on a fork, so
     # the result this job waits on is named, as on publish.
     if: ${{ always() && needs.publish.result == 'success' }}
-    uses: latere-ai/ci/.github/workflows/release-verify.yml@c3fcc1bda62305ca978a5474dd29a898564baa42
+    uses: latere-ai/ci/.github/workflows/release-verify.yml@v1
     permissions:
       contents: read
       packages: read
