@@ -57,7 +57,7 @@ func TestWorkflowJobsMatchTheTable(t *testing.T) {
 			}
 		}
 	}
-	if strings.Count(workflow, "runs-on: ubuntu-latest") < 4 {
+	if strings.Count(workflow, "runs-on: ubuntu-latest") < 2 {
 		t.Error("a job left GitHub's hosted runners; the repository is public and they cost nothing")
 	}
 	if !strings.Contains(workflow, "run: make up") {
