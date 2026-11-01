@@ -225,7 +225,7 @@ what each gave up is carried verbatim by
 | 6 | Narrowed to the line, which carries both keys: `TestTheRequestLineCarriesTheIdsAndNothingSecret`. The trace id is the empty string until there is a request span, so the ids on the line and the ids on the spans are criterion 4 of [[025-observability-follow-ups]] |
 | 7 | Narrowed to the call site, which is the structural rule and holds: no attribute of the line is a token, a credential, a presigned URL or a path. The handler around both paths of the tee is criterion 5 of [[025-observability-follow-ups]]; see the divergence above for why it is not reachable from here |
 | 8 | Narrowed to the request, which holds: `TestOneLineAndOneObservationPerRequest`. The stream halves are criterion 6 of [[025-observability-follow-ups]] |
-| 9 | Holds. `TestAlertsNameKnownMetrics`, `TestEveryRowOfTheSpecTableIsAnAlert` and `TestTheCommittedManifestIsCurrent`; the `rules` job runs `promtool check rules` over what the tool prints |
+| 9 | Holds. `TestAlertsNameKnownMetrics`, `TestEveryRowOfTheSpecTableIsAnAlert` and `TestTheCommittedManifestIsCurrent`; the `rules` gate runs `promtool check rules` over what the tool prints |
 | 10 | Holds. `TestNoExporterStillServes`, whose environment is a map carrying neither endpoint variable |
 | 11 | Holds. `TestAnInjectedCollectorEndpointIsReadAndTheTablesRowWins` at the configuration and `TestAnInjectedEndpointReachesTheExporter` at the process, which starts `serve` with the standard name alone and reads what the bootstrap was handed. The collector is also in `dialled` in `test/deploy/examples_test.go` under both names, so an overlay that writes either into a manifest is held to the egress rule; the injected endpoint's host port 40318 is translated by Cilium to the collector Pod's 4318 before policy is evaluated, so the base's 4318 rule admits it, and `TestNoPolicyAdmitsTheCollectorsHostPort` refuses a policy naming the host port (until 2026-09-25 deploy/prod admitted 40318, which matched nothing) |
 
@@ -415,8 +415,8 @@ the second line and the test below plants one canary of each kind.
 kustomization rather than in it; this spec owns what is in it.
 `tools/rules` prints the rules document out of the object, because
 `promtool check rules` reads a rules file and not a Kubernetes object,
-and a `rules` job in `verify.yml` runs `promtool check rules` over that
-output. The same job runs `TestAlertsNameKnownMetrics`, which fails on
+and the `rules` gate of `go tool lateregate` runs `promtool check rules`
+over that output. The suite runs `TestAlertsNameKnownMetrics`, which fails on
 an alert naming an `arca_` metric or label absent from the table above;
 a metric another exporter publishes does not carry the prefix and is
 not checked.
@@ -479,7 +479,7 @@ they were narrowed from are carried by
 | 6 | Every request log line carries the request id and the trace id, and the request id on the line is the one the response header answers | `TestTheRequestLineCarriesTheIdsAndNothingSecret`. The trace id is empty until a request span exists, which with the ids on the spans is [[025-observability-follow-ups]] |
 | 7 | No call site passes a token, a credential, a presigned URL or a path as a log attribute, and the line names the caller by the rendered subject the authorizer was already told | `TestTheRequestLineCarriesTheIdsAndNothingSecret`, which plants a bearer and a path and reads the whole line back. The handler over both paths of the tee is [[025-observability-follow-ups]] |
 | 8 | One log line and one observation per request, and none per presigned URL | `TestOneLineAndOneObservationPerRequest`. The stream open and close lines are [[025-observability-follow-ups]] |
-| 9 | The rules document `tools/rules` prints passes `promtool check rules`, and every `arca_` metric and label an alert names is in the table | the `rules` job of `verify.yml`, `TestAlertsNameKnownMetrics` |
+| 9 | The rules document `tools/rules` prints passes `promtool check rules`, and every `arca_` metric and label an alert names is in the table | the `rules` gate, `TestAlertsNameKnownMetrics` |
 | 10 | With both endpoint variables unset the process starts, serves, and exports nothing, and `/metrics` still carries the table | `TestNoExporterStillServes` |
 | 11 | With only the standard `OTEL_EXPORTER_OTLP_ENDPOINT` set, the endpoint the exporter is built from is that one; with both set, `ARCA_OTEL_EXPORTER_OTLP_ENDPOINT` wins; an injected value of the wrong shape refuses no start-up | `TestAnInjectedCollectorEndpointIsReadAndTheTablesRowWins` in `internal/config`, `TestAnInjectedEndpointReachesTheExporter` at the process |
 

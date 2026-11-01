@@ -163,7 +163,8 @@ a kind cluster before anything is deployed.
 ## Continuous integration
 
 `.github/workflows/verify.yml` runs on every push and pull request: the
-shared gate, a check that `go.mod` and `go.sum` are tidy, a build of the
-image, a parse of the alert rules, the store tier, and the e2e tier.
+shared gate, the store tier, and the e2e tier. The shared gate checks that
+`go.mod` and `go.sum` are tidy, builds and starts the image, and parses
+the alert rules.
 `.github/workflows/release.yml` runs on a tag; see
 [Releasing](releasing.md).

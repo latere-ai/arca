@@ -183,3 +183,23 @@ waive:
       ARCA_DB_URL, and the reaper beside it is a third claim on the direct
       endpoint whenever it is turned up.
     until: 2026-12-19
+
+# The image a release ships: it builds, reports its version, holds no shell,
+# and starts read-only with every capability dropped. arcad opens its
+# database pool and bucket client lazily, so it starts and answers /livez
+# with no Postgres or object store behind it; only readiness needs them.
+# The values below are the minimum Load accepts, none of them reachable.
+image:
+  images:
+    - name: arcad
+      version_args: [-version]
+      version_expect: "arcad "
+      env:
+        ARCA_DB_URL: postgres://arca:arca@127.0.0.1:1/arca
+        ARCA_BUCKET: arca
+        ARCA_BUCKET_REGION: us-east-1
+        ARCA_BUCKET_ENDPOINT: http://127.0.0.1:1
+        ARCA_PUBLIC_URL: http://127.0.0.1:8080
+        ARCA_OIDC_ISSUERS: https://127.0.0.1:1
+      port: 8080
+      probe: /livez

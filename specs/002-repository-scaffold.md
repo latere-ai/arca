@@ -50,7 +50,7 @@ cmd/arcad/              main: the subcommand dispatcher, configuration, listener
 internal/config/        typed configuration from the environment; every problem in one message
 internal/version/       build identity set by -ldflags
 .lateregate.yaml        the gate's repository-specific values: cover, spec, hermetic, depcheck, license, identity
-.github/workflows/      verify.yml: the shared gate, a tidy module file, the developer image builds
+.github/workflows/      verify.yml: the shared gate and the service tiers
 .githooks/              pre-commit and pre-push, both delegating to the gate
 Makefile                check (the default), build, run, fmt, hooks, clean
 Dockerfile              the developer image; the release image of 016 reuses its runtime stage
@@ -176,8 +176,9 @@ shared packages; the waivers name that spec and expire on 2026-10-31.
 ### Workflow and image
 
 `verify.yml` runs on every push to `main` and every pull request: the
-shared gate on GitHub's hosted runners, `go mod tidy -diff`, and a
-build of the developer image that must report its version. The
+shared gate on GitHub's hosted runners, which also checks that the module
+files are tidy and builds the developer image, which must report its
+version. The
 repository is public, so the hosted runners cost nothing. The tiers
 that need MinIO and Postgres beside them are [[014-test-stubs-and-tiers]]'s.
 
@@ -195,7 +196,7 @@ ports 8080 and 8081, no volume: the server has no local state.
 | 4 | Readiness fails once draining begins, and a stop signal ends the process with exit 0 | the same, and `TestReadinessFailsOnceDrainingBegins` |
 | 5 | An occupied address exits 1 naming the variable | `TestOccupiedAddressExitsOne` |
 | 6 | The gate passes with every gate on, or a dated waiver naming its spec | `go tool lateregate` locally and the `gate` job |
-| 7 | The developer image builds and reports its version | the `image` job |
+| 7 | The developer image builds and reports its version | the `image` gate of `go tool lateregate` |
 | 8 | The first push to `main` is green on every job | the verify run, cited in the Outcome |
 
 ## Outcome
