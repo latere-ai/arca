@@ -50,13 +50,44 @@ A `vX.Y.Z` tag publishes, under the repository that built it:
 | Artifact | What it is |
 |---|---|
 | `arcad` for linux and darwin, amd64 and arm64 | four `.tar.gz` archives |
-| `checksums.txt` | SHA-256 over every archive |
-| `checksums.txt.cosign.bundle` | the signature over that file |
 | `arcad` and `arca-stubs` images | one multi-arch image each, both architectures |
-| three SPDX documents | the module graph, and the contents of each image |
+| two SPDX documents | the contents of each image |
+| `checksums.txt` | SHA-256 over every other file of the release |
+| `checksums.txt.sigstore.json` | the signature over that file |
 
-Every image is signed keyless, with the workflow's own identity as the
-signer, so you can check one without holding a key of ours:
+Both images and `checksums.txt` are signed keyless by the shared release
+stages in [latere-ai/ci](https://github.com/latere-ai/ci) that build and
+publish Arca, so you can check one without holding a key of ours. The
+signature names the stage that made it, and
+`--certificate-github-workflow-repository` holds it to this repository.
+With `TAG` the release's tag:
+
+```sh
+gh release download "$TAG" -R latere-ai/arca -D arca-release
+cd arca-release
+cosign verify-blob --bundle checksums.txt.sigstore.json \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github\.com/latere-ai/ci/\.github/workflows/image-publish\.yml@' \
+  --certificate-github-workflow-repository latere-ai/arca checksums.txt
+sha256sum -c checksums.txt
+
+for image in arcad arca-stubs; do
+  cosign verify "ghcr.io/latere-ai/$image:$TAG" \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+    --certificate-identity-regexp '^https://github\.com/latere-ai/ci/\.github/workflows/image-build\.yml@' \
+    --certificate-github-workflow-repository latere-ai/arca
+  gh attestation verify "oci://ghcr.io/latere-ai/$image:$TAG" -R latere-ai/arca \
+    --signer-workflow latere-ai/ci/.github/workflows/image-build.yml
+done
+```
+
+The release workflow runs the same checks against every release it
+publishes.
+
+Releases up to v0.10.3 were signed by this repository's own release
+workflow, carry the signature over `checksums.txt` as
+`checksums.txt.cosign.bundle`, and a third SPDX document, for the module
+graph. Check one of those with:
 
 ```sh
 cosign verify ghcr.io/latere-ai/arcad:vX.Y.Z \

@@ -1,330 +1,113 @@
 # A vX.Y.Z tag is a release. This workflow produces the artifacts spec 016
-# names and calls no shared workflow: `service-release.yml` of latere-ai/ci
-# builds one architecture and runs its deploy and its smoke as one job it
-# does not expose as a callable step, and a core an outsider installs needs
-# archives, checksums, signatures, a bill of materials and both
-# architectures, none of which that workflow produces.
+# names. The build, the signatures and the publish run through the shared
+# image release stages of latere-ai/ci, and the two jobs that are Arca's
+# own, the conformance run and the deploy, run between them against the
+# digests the build outputs:
 #
-#   build        the four binary archives, checksums.txt, the two
-#                multi-arch images, the cosign signatures, the three SPDX
-#                documents, and the SBOM and provenance attestations
-#   conformance  the kind stack of spec 016 brought up from the published
-#                images, with the suite of spec 017 run against it
+#   build        the shared build stage: the tag's commit is on main and
+#                passed verify.yml, and CHANGELOG.md has a section for the
+#                tag; then the four binary archives, and the arcad and
+#                arca-stubs images for linux/amd64 and linux/arm64, each
+#                pushed by digest under no tag, arcad asked for its
+#                version, both signed, each given an SPDX document and the
+#                SBOM and provenance attestations
+#   conformance  the kind stack of spec 016 brought up from those digests,
+#                with the suite of spec 017 run against it
 #   deploy       only with the repository variable ARCA_RELEASE_DEPLOY:
-#                deploy/prod applied, the rollout waited for, the smoke
-#   publish      the GitHub release, its body the CHANGELOG section for the
-#                tag with the smoke and conformance evidence appended
+#                deploy/prod applied with arcad pinned by digest, the
+#                rollout waited for, the smoke
+#   publish      the shared publish stage: each digest gets the tag, then
+#                checksums.txt over every attached file, signed, and the
+#                GitHub release, its body the CHANGELOG section for the tag
+#                with the conformance and smoke evidence appended
+#   verify       the shared verify stage: the published release checked
+#                from a runner with no checkout, with the commands
+#                docs/operations.md gives an operator
 #
-# Spec 016 designs three more jobs that are not here yet, and its Outcome
-# says so: `candidate`, which starts the published image beside a fresh
-# Postgres and MinIO before anything reaches a cluster; `install-release`,
-# which walks docs/install.md against the published artifacts alone; and
-# `release-verify`, which checks the signatures, the attestations and the
-# checksums from a clean runner. They join when the stores they need exist.
+# Of the three jobs spec 016 designs and its Outcome lists as not written,
+# `release-verify` is the verify stage above. The other two are not here
+# yet: `candidate`, which starts the published image beside a fresh
+# Postgres and MinIO before anything reaches a cluster, and
+# `install-release`, which walks docs/install.md against the published
+# artifacts alone. They join when the stores they need exist.
 #
-# Every third-party action is pinned by commit, with the version beside it.
+# The images publish under ghcr.io/<repository owner>, lowered, or under
+# ghcr.io/<RELEASE_IMAGE_NAMESPACE> where that repository variable is set,
+# so a tag on a fork publishes to the fork's own packages and none of
+# Latere's. Every third-party action is pinned by commit, with the version
+# beside it.
 name: Release
 
 on:
   push:
     tags: ['v*']
 
-# Read by default; each job that writes says so. Keyless signing needs
-# id-token: write and the attestations need attestations: write.
+# Read by default; each job that writes says so.
 permissions:
   contents: read
 
-# The registry namespace both images are published under, derived from the
-# repository that runs the workflow: a tag on a fork publishes to the fork's
-# own packages and no name here is Latere's. The repository variable
-# ARCA_RELEASE_IMAGE_NAMESPACE overrides it for an installation that
-# publishes elsewhere, and an owner whose login carries capitals must set
-# it, because an image reference is lowercase and a workflow expression
-# cannot fold case.
-env:
-  IMAGE_NAMESPACE: ${{ vars.ARCA_RELEASE_IMAGE_NAMESPACE || format('ghcr.io/{0}', github.repository_owner) }}
-  ARCAD_IMAGE: ${{ vars.ARCA_RELEASE_IMAGE_NAMESPACE || format('ghcr.io/{0}', github.repository_owner) }}/arcad
-  STUBS_IMAGE: ${{ vars.ARCA_RELEASE_IMAGE_NAMESPACE || format('ghcr.io/{0}', github.repository_owner) }}/arca-stubs
-
 jobs:
-  # Step 1. Everything built from the tag's tree, signed, and attested.
-  # Nothing here reaches a cluster.
+  # Step 1. Everything built from the tag's tree, pushed by digest, signed
+  # and attested. Nothing here reaches a cluster, and no image gets the tag
+  # before publish.
   build:
-    name: artifacts, images, signatures, attestations
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
+    uses: latere-ai/ci/.github/workflows/image-build.yml@c3fcc1bda62305ca978a5474dd29a898564baa42
+    # The stage reads the verify runs of the tagged commit, pushes the
+    # images, signs them with the job's OIDC token and attests them; a
+    # calling job that grants less fails before it starts.
     permissions:
       contents: read
+      actions: read
       packages: write
       id-token: write
       attestations: write
-    outputs:
-      arcad_digest: ${{ steps.arcad.outputs.digest }}
-      stubs_digest: ${{ steps.stubs.outputs.digest }}
-    steps:
-      # docker/metadata-action and the registry sanitize an image tag to
-      # [a-zA-Z0-9._-], so a SemVer build-metadata tag would push as
-      # v1.0.0-exp-sha.5114f85 while `kubectl set image` below still names
-      # the raw ref with its '+'. The deploy needs image tag == git tag, so
-      # the tag is refused here, before anything is pushed.
-      - name: Reject build-metadata tags
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          case "$TAG" in
-            *+*) echo "::error::${TAG} carries SemVer build metadata; an image tag cannot contain '+'. Cut a tag without it."; exit 1 ;;
-          esac
+    with:
+      # arcad answers -version with "arcad <tag> (<commit>, <date>)".
+      # Dockerfile.ci compiles nothing: it copies the binary the archives
+      # below built for its platform. Dockerfile.stubs is spec 014's: it
+      # builds the stub issuer and the stub authorizer into one image, so an
+      # operator's first installation and the kind example run a released,
+      # signed stub and not a checkout. Its command prints no version.
+      image_1: '{"name": "arcad", "dockerfile": "Dockerfile.ci", "version_args": "-version", "version_expect": "{name} {tag} ("}'
+      image_2: '{"name": "arca-stubs", "dockerfile": "Dockerfile.stubs"}'
+      # Four archives. The -ldflags are the Makefile's, so a binary from the
+      # pipeline and one from `make build` report their identity the same
+      # way. The binaries stay under out/release/bin/<os>_<arch>/, which
+      # Dockerfile.ci copies its platform's from. The archives are written
+      # under the ignored out/ and moved into dist/, whose files the release
+      # attaches, only once every build is done, so no build sees an
+      # untracked file and stamps its binary as built from a modified tree.
+      archives_command: |
+        commit=$(git rev-parse --short HEAD)
+        date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        pkg=latere.ai/x/arca/internal/version
+        for platform in linux_amd64 linux_arm64 darwin_amd64 darwin_arm64; do
+          os=${platform%_*}
+          arch=${platform#*_}
+          mkdir -p "out/release/bin/${platform}"
+          CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath \
+            -ldflags "-X ${pkg}.Version=${TAG} -X ${pkg}.Commit=${commit} -X ${pkg}.Date=${date}" \
+            -o "out/release/bin/${platform}/arcad" ./cmd/arcad
+          tar -C "out/release/bin/${platform}" -czf \
+            "out/release/arcad_${TAG}_${os}_${arch}.tar.gz" arcad
+        done
+        mv out/release/*.tar.gz dist/
+      runs_on: ubuntu-latest
 
-      # An image reference is lowercase and carries no scheme and no tag,
-      # and the default namespace is the repository owner's login, which
-      # preserves case. A fork whose owner has capitals is told here what to
-      # set, rather than by a push that fails after the archives are built.
-      - name: Check the image namespace
-        run: |
-          case "$IMAGE_NAMESPACE" in
-            *[[:upper:]]*|*:*|*//*|*' '*|"")
-              echo "::error::ARCA_RELEASE_IMAGE_NAMESPACE is '${IMAGE_NAMESPACE}', which is not a lowercase image reference prefix. Set the repository variable to one, for example ghcr.io/$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')."
-              exit 1 ;;
-          esac
-          echo "publishing under ${IMAGE_NAMESPACE}"
-
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-
-      # Four archives and the checksums over them. The -ldflags are the
-      # Makefile's, so a binary from the pipeline and one from `make build`
-      # report their identity the same way. The binaries stay under
-      # out/release/bin/<os>_<arch>/, which Dockerfile.ci copies its
-      # platform's from.
-      - name: Build the release archives
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          commit=$(git rev-parse --short HEAD)
-          date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          pkg=latere.ai/x/arca/internal/version
-          mkdir -p out/release
-          for platform in linux_amd64 linux_arm64 darwin_amd64 darwin_arm64; do
-            os=${platform%_*}
-            arch=${platform#*_}
-            mkdir -p "out/release/bin/${platform}"
-            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath \
-              -ldflags "-X ${pkg}.Version=${TAG} -X ${pkg}.Commit=${commit} -X ${pkg}.Date=${date}" \
-              -o "out/release/bin/${platform}/arcad" ./cmd/arcad
-            tar -C "out/release/bin/${platform}" -czf \
-              "out/release/arcad_${TAG}_${os}_${arch}.tar.gz" arcad
-          done
-          cd out/release && sha256sum ./*.tar.gz > checksums.txt
-          cat checksums.txt
-
-      # The runtime stage is distroless and carries no package manager, so
-      # nothing is installed per platform; the emulator is still needed for
-      # buildx to assemble the arm64 entry of the manifest list.
-      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
-
-      # Inline attestations carry the build time, so two builds of one
-      # commit differ; they are attached below as referrers instead.
-      - name: Build and push arcad
-        id: arcad
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          docker buildx build --push --provenance=false --sbom=false \
-            --platform linux/amd64,linux/arm64 \
-            -f Dockerfile.ci \
-            -t "${ARCAD_IMAGE}:${TAG}" \
-            --metadata-file arcad.json .
-          digest=$(jq -r '."containerimage.digest"' arcad.json)
-          echo "digest=$digest" >> "$GITHUB_OUTPUT"
-
-      # Dockerfile.stubs is spec 014's: it builds the stub issuer and the
-      # stub authorizer into one image, so an operator's first installation
-      # and the kind example run a released, signed stub and not a
-      # checkout. This job publishes it; that spec writes it.
-      - name: Build and push arca-stubs
-        id: stubs
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          docker buildx build --push --provenance=false --sbom=false \
-            --platform linux/amd64,linux/arm64 \
-            -f Dockerfile.stubs \
-            -t "${STUBS_IMAGE}:${TAG}" \
-            --metadata-file stubs.json .
-          digest=$(jq -r '."containerimage.digest"' stubs.json)
-          echo "digest=$digest" >> "$GITHUB_OUTPUT"
-
-      - name: Assert both architectures are published
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          for image in "${ARCAD_IMAGE}:${TAG}" "${STUBS_IMAGE}:${TAG}"; do
-            docker buildx imagetools inspect "$image" --raw > manifest.json
-            for arch in amd64 arm64; do
-              grep -q "\"architecture\": *\"$arch\"" manifest.json \
-                || { echo "::error::$image has no linux/$arch entry"; exit 1; }
-            done
-            echo "$image carries linux/amd64 and linux/arm64"
-          done
-
-      # Three SPDX documents: the module graph from the tree, and the
-      # contents of each image.
-      - uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
-        with:
-          path: .
-          format: spdx-json
-          output-file: out/release/sbom-module.spdx.json
-          upload-artifact: false
-          upload-release-assets: false
-      - uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
-        with:
-          image: ${{ env.ARCAD_IMAGE }}@${{ steps.arcad.outputs.digest }}
-          format: spdx-json
-          output-file: out/release/sbom-arcad.spdx.json
-          upload-artifact: false
-          upload-release-assets: false
-      - uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
-        with:
-          image: ${{ env.STUBS_IMAGE }}@${{ steps.stubs.outputs.digest }}
-          format: spdx-json
-          output-file: out/release/sbom-arca-stubs.spdx.json
-          upload-artifact: false
-          upload-release-assets: false
-
-      # GitHub's attestation API refuses a private repository on this
-      # organization's plan. Arca is public, so these run; the condition
-      # stays because a repository made private would otherwise fail here
-      # with the images already pushed, and a fork that is private is told
-      # rather than stopped.
-      - name: Attestations are skipped on a private repository
-        if: ${{ github.event.repository.private }}
-        run: |
-          echo "::notice::the repository is private, so the SBOM and provenance attestations are not attached; GitHub's attestation API refuses a private repository on this plan. The SPDX documents ship as release assets and the images are signed with cosign."
-
-      - uses: actions/attest-sbom@36590ecaf038d6630c74f2da259095627d52ac11 # v4.1.0
-        if: ${{ !github.event.repository.private }}
-        with:
-          subject-name: ${{ env.ARCAD_IMAGE }}
-          subject-digest: ${{ steps.arcad.outputs.digest }}
-          sbom-path: out/release/sbom-arcad.spdx.json
-          push-to-registry: true
-      - uses: actions/attest-sbom@36590ecaf038d6630c74f2da259095627d52ac11 # v4.1.0
-        if: ${{ !github.event.repository.private }}
-        with:
-          subject-name: ${{ env.STUBS_IMAGE }}
-          subject-digest: ${{ steps.stubs.outputs.digest }}
-          sbom-path: out/release/sbom-arca-stubs.spdx.json
-          push-to-registry: true
-
-      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        if: ${{ !github.event.repository.private }}
-        with:
-          subject-name: ${{ env.ARCAD_IMAGE }}
-          subject-digest: ${{ steps.arcad.outputs.digest }}
-          push-to-registry: true
-      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        if: ${{ !github.event.repository.private }}
-        with:
-          subject-name: ${{ env.STUBS_IMAGE }}
-          subject-digest: ${{ steps.stubs.outputs.digest }}
-          push-to-registry: true
-
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-      # Keyless: the workflow's OIDC identity is the signer, which is what
-      # an operator outside Latere can check without holding a key. A
-      # sigstore bundle carries the signature, the certificate, and the
-      # transparency-log proof in one file, so checksums.txt is verified
-      # from the release assets alone.
-      - name: Sign the images and checksums.txt
-        env:
-          COSIGN_YES: 'true'
-        run: |
-          set -euo pipefail
-          # Each signature reaches Sigstore's certificate authority and its
-          # timestamp authority over the network, and a connection reset
-          # from either fails the whole release after the images are built
-          # and pushed; v0.1.3's first run was lost to exactly one reset
-          # from timestamp.sigstore.dev. Signing is idempotent, so a retry
-          # costs nothing and three attempts with a pause cover the
-          # transient case. A failure that survives three is reported.
-          retry() {
-            local n
-            for n in 1 2 3; do
-              "$@" && return 0
-              echo "attempt $n of 3 failed: $*" >&2
-              sleep $((n * 10))
-            done
-            return 1
-          }
-          retry cosign sign "${ARCAD_IMAGE}@${{ steps.arcad.outputs.digest }}"
-          retry cosign sign "${STUBS_IMAGE}@${{ steps.stubs.outputs.digest }}"
-          cd out/release && retry cosign sign-blob --bundle checksums.txt.cosign.bundle checksums.txt
-
-      # Every overlay of the tree rendered by the kustomize kubectl embeds.
-      # The gate's own test proves that every path a render reads exists;
-      # this is the render itself, which is what catches a patch whose
-      # target does not match and is silently dropped.
-      - name: Render every overlay
-        run: |
-          set -euo pipefail
-          for dir in deploy/base deploy/examples/kind deploy/examples/aws deploy/examples/digitalocean deploy/prod; do
-            kubectl kustomize "$dir" > /dev/null
-            echo "rendered $dir"
-          done
-          kubectl kustomize deploy/examples/kind | grep -q 'nodePort: 30180'
-          kubectl kustomize deploy/prod | grep -q 'path: /version'
-
-      # The bytes are pulled back from the registry, so the stack of step 2
-      # runs the published image and not a second build of it.
-      - name: Save the published linux/amd64 images for the stack
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          mkdir -p out/images
-          docker pull "${ARCAD_IMAGE}@${{ steps.arcad.outputs.digest }}"
-          docker pull "${STUBS_IMAGE}@${{ steps.stubs.outputs.digest }}"
-          docker tag "${ARCAD_IMAGE}@${{ steps.arcad.outputs.digest }}" "ghcr.io/latere-ai/arcad:candidate"
-          docker tag "${STUBS_IMAGE}@${{ steps.stubs.outputs.digest }}" "ghcr.io/latere-ai/arca-stubs:candidate"
-          docker save -o out/images/arcad.tar "ghcr.io/latere-ai/arcad:candidate"
-          docker save -o out/images/arca-stubs.tar "ghcr.io/latere-ai/arca-stubs:candidate"
-
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: candidate-images
-          path: out/images/*.tar
-          retention-days: 1
-          if-no-files-found: error
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: release-artifacts
-          path: |
-            out/release/*.tar.gz
-            out/release/checksums.txt
-            out/release/checksums.txt.cosign.bundle
-            out/release/*.spdx.json
-          if-no-files-found: error
-
-  # Step 2. The kind stack of spec 016, brought up from the images that were
-  # just published rather than from a second build of them, and the suite of
+  # Step 2. The kind stack of spec 016, brought up from the digests that were
+  # just pushed rather than from a second build of them, and the suite of
   # spec 017 run against it. A failure here stops the release.
   conformance:
     name: conformance against the published image
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    # The images carry no tag until publish, so the stack pulls them by
+    # digest, and a fork's packages are private until their owner opens
+    # them, so the pull signs in with the job's token.
+    permissions:
+      contents: read
+      packages: read
     env:
       ARCA_TEST_URL: http://localhost:30180
       ARCA_TEST_ISSUER_URL: http://localhost:30081
@@ -346,15 +129,37 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: candidate-images
-          path: out/images
       - uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
         with:
           install_only: true
+
+      # Every overlay of the tree rendered by the kustomize kubectl embeds.
+      # The gate's own test proves that every path a render reads exists;
+      # this is the render itself, which is what catches a patch whose
+      # target does not match and is silently dropped.
+      - name: Render every overlay
+        run: |
+          set -euo pipefail
+          for dir in deploy/base deploy/examples/kind deploy/examples/aws deploy/examples/digitalocean deploy/prod; do
+            kubectl kustomize "$dir" > /dev/null
+            echo "rendered $dir"
+          done
+          kubectl kustomize deploy/examples/kind | grep -q 'nodePort: 30180'
+          kubectl kustomize deploy/prod | grep -q 'path: /version'
+
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      # up.sh pulls each image by the reference it is given and loads it
+      # into the cluster under the tag the overlay pins, so the stack runs
+      # the published bytes, the linux/amd64 entry of each.
       - name: Bring the stack up
-        run: deploy/examples/kind/up.sh out/images/arcad.tar out/images/arca-stubs.tar
+        env:
+          ARCAD_IMAGE: ${{ needs.build.outputs.ref_1 }}@${{ needs.build.outputs.digest_1 }}
+          STUBS_IMAGE: ${{ needs.build.outputs.ref_2 }}@${{ needs.build.outputs.digest_2 }}
+        run: deploy/examples/kind/up.sh
 
       # The suite is spec 017's, in test/conformance, and this is its run:
       # the cases of that spec against the published image on a real
@@ -473,7 +278,9 @@ jobs:
   # what holds the run here until the maintainer approves it.
   deploy:
     name: deploy and smoke
-    needs: conformance
+    # build is named for its outputs: a job reads the outputs of the jobs it
+    # needs directly, and of no other.
+    needs: [build, conformance]
     if: ${{ vars.ARCA_RELEASE_DEPLOY != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -500,7 +307,8 @@ jobs:
       # two processes at once.
       - name: Apply deploy/prod and roll the new image
         env:
-          TAG: ${{ github.ref_name }}
+          ARCAD_REF: ${{ needs.build.outputs.ref_1 }}
+          ARCAD_DIGEST: ${{ needs.build.outputs.digest_1 }}
         run: |
           set -euo pipefail
           # The namespace is the overlay's, not a name repeated here: an
@@ -512,17 +320,18 @@ jobs:
           # publishing elsewhere applies the same manifests against its own
           # packages, so the name moves with the images before the apply
           # rather than only on the set image below.
-          if [ "$IMAGE_NAMESPACE" != "ghcr.io/latere-ai" ]; then
-            sed -i "s|ghcr.io/latere-ai/arcad|${ARCAD_IMAGE}|g" deploy/prod/kustomization.yaml deploy/base/deployment.yaml deploy/base/reaper.yaml
+          if [ "$ARCAD_REF" != "ghcr.io/latere-ai/arcad" ]; then
+            sed -i "s|ghcr.io/latere-ai/arcad|${ARCAD_REF}|g" deploy/prod/kustomization.yaml deploy/base/deployment.yaml deploy/base/reaper.yaml
           fi
-          # deploy/prod names the image's tag as committed, which is not this
-          # release's; the apply takes this release's tag, so neither arcad
-          # nor the reaper, which runs the same image, is rolled to the
-          # committed tag on the way.
-          sed -i "s|^\(  *newTag: \).*|\1${TAG}|" deploy/prod/kustomization.yaml
-          grep -q "newTag: ${TAG}\$" deploy/prod/kustomization.yaml
+          # deploy/prod names the image's tag as committed, and the image
+          # gets this release's tag only when publish runs, after this job.
+          # The apply pins the digest the build pushed in place of the tag,
+          # so neither arcad nor the reaper, which runs the same image, is
+          # rolled to any other build on the way.
+          sed -i "s|^\(  *\)newTag: .*|\1digest: ${ARCAD_DIGEST}|" deploy/prod/kustomization.yaml
+          grep -q "digest: ${ARCAD_DIGEST}\$" deploy/prod/kustomization.yaml
           kubectl apply -k deploy/prod/
-          kubectl -n "$NS" set image deployment/arcad "arcad=${ARCAD_IMAGE}:${TAG}"
+          kubectl -n "$NS" set image deployment/arcad "arcad=${ARCAD_REF}@${ARCAD_DIGEST}"
           kubectl -n "$NS" rollout status deployment/arcad --timeout=600s
           kubectl -n "$NS" rollout status deployment/arcad-reaper --timeout=600s
 
@@ -553,60 +362,44 @@ jobs:
           path: release-evidence/smoke.md
           if-no-files-found: error
 
-  # Step 4. The GitHub release: every artifact, the CHANGELOG.md section as
-  # the body, then the evidence of the steps that ran.
+  # Step 4. The GitHub release: each digest gets the tag, every file the
+  # build wrote is attached with checksums.txt over them and its signature,
+  # and the CHANGELOG.md section is the body, then the evidence of the jobs
+  # that ran.
   publish:
-    name: publish the release
     needs: [build, conformance, deploy]
     # deploy is skipped on every repository that sets no
     # ARCA_RELEASE_DEPLOY, and a job that leans on the implicit success() is
     # skipped whenever a job above it in the graph is, so each result is
     # named here.
     if: ${{ always() && needs.build.result == 'success' && needs.conformance.result == 'success' && needs.deploy.result != 'failure' && needs.deploy.result != 'cancelled' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    uses: latere-ai/ci/.github/workflows/image-publish.yml@c3fcc1bda62305ca978a5474dd29a898564baa42
     permissions:
       contents: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: false
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          path: assets
-          pattern: 'release-*'
-          merge-multiple: true
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          path: evidence
-          pattern: '*-evidence'
-          merge-multiple: true
-      # A tag is a release, and a release has notes. The section for the tag
-      # in CHANGELOG.md is the body; no section fails here, before anything
-      # is created. The pre-push hook refuses the tag with the same reader,
-      # so this branch is rarely taken.
-      - name: Read the release note for this tag
-        env:
-          TAG: ${{ github.ref_name }}
-        run: go tool lateregate release-notes "$TAG" > notes.md
-      - name: Create the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          cp notes.md body.md
-          for part in evidence/smoke.md evidence/conformance.md; do
-            if [ -f "$part" ]; then printf '\n' >> body.md; cat "$part" >> body.md; fi
-          done
-          prerelease=""
-          case "${TAG%%+*}" in *-*) prerelease="--prerelease" ;; esac
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --notes-file body.md
-            gh release upload "$TAG" assets/* --clobber
-          else
-            gh release create "$TAG" $prerelease \
-              --title "Arca $TAG" --notes-file body.md assets/*
-          fi
+      packages: write
+      id-token: write
+    with:
+      images: ${{ needs.build.outputs.images }}
+      title: Arca
+      evidence: '*-evidence'
+      runs_on: ubuntu-latest
+
+  # Step 5. The published release read back from a runner with no checkout:
+  # the signature over checksums.txt, every asset against it, each image's
+  # tag to a signed and attested digest, and the body against the CHANGELOG
+  # section.
+  verify:
+    needs: publish
+    # deploy sits above this job in the graph and is skipped on a fork, so
+    # the result this job waits on is named, as on publish.
+    if: ${{ always() && needs.publish.result == 'success' }}
+    uses: latere-ai/ci/.github/workflows/release-verify.yml@c3fcc1bda62305ca978a5474dd29a898564baa42
+    permissions:
+      contents: read
+      packages: read
+      attestations: read
+    with:
+      images: |
+        arcad
+        arca-stubs
+      runs_on: ubuntu-latest

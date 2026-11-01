@@ -6,8 +6,8 @@
 #
 # Everything here is safe to re-apply, because the release pipeline applies
 # it on every release with `kubectl apply -k deploy/prod/` and then sets the
-# image to the tag it built. A resource that cannot be re-applied belongs in
-# deploy/bootstrap/, which the pipeline never reads.
+# image to the digest it built. A resource that cannot be re-applied belongs
+# in deploy/bootstrap/, which the pipeline never reads.
 #
 # Latere runs Arca beside its other services in the namespace `latere`,
 # not in one of its own, so this overlay names that namespace and reads the

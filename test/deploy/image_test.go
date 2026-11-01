@@ -123,7 +123,7 @@ func TestTheStubsImageBuildsTheStubsCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(workflow), "-f Dockerfile.stubs") {
+	if !strings.Contains(string(workflow), `"dockerfile": "Dockerfile.stubs"`) {
 		t.Error("release.yml no longer builds Dockerfile.stubs; the kind example and the conformance job run that image")
 	}
 }

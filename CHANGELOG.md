@@ -6,6 +6,31 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Changed
+
+- **Releases are built, signed and published by the shared release stages
+  in latere-ai/ci.** The signatures on both images and on `checksums.txt`
+  now name those stages, run for this repository, and the signature over
+  `checksums.txt` is `checksums.txt.sigstore.json` in place of
+  `checksums.txt.cosign.bundle`. docs/operations.md gives the commands that
+  check a release, and the ones for releases up to v0.10.3; the release
+  workflow runs the checks against every release it publishes.
+- **A release carries one SPDX document per image and none for the module
+  graph.** `sbom-module.spdx.json` is no longer published; the document of
+  the `arcad` image lists the modules compiled into the binary.
+  `checksums.txt` now covers the SPDX documents as well as the archives.
+- **The images get the release tag only when the release is published,**
+  after the conformance run and the deploy pass, so a release that stops
+  on the way leaves no image under its tag. Latere's own deploy runs
+  `arcad` by the digest the release built.
+- **A tag is released only from a commit on `main` whose verify run
+  passed,** and only once the `arcad` image reports the tag's version.
+- **A fork moves its image namespace with the repository variable
+  `RELEASE_IMAGE_NAMESPACE`,** a namespace under `ghcr.io`, in place of
+  `ARCA_RELEASE_IMAGE_NAMESPACE`, which named the registry as well. An
+  owner whose login carries capitals no longer has to set it: the
+  namespace is lowered.
+
 ## v0.10.3 - 2026-10-30
 
 ### Fixed

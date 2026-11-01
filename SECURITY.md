@@ -23,8 +23,11 @@ token names and to nothing beside it; a file a link serves is saved as a
 download and never rendered as a page of the server's origin.
 
 Dependencies are checked for known vulnerabilities on every push. A release
-carries an SPDX bill of materials for the module graph and one per image,
-cosign signatures over the images and the checksums, and an SBOM and a
-build provenance attestation per image, so `gh attestation verify` answers
-for the image you are about to run. The commands that check each of them
-are in [docs/operations.md](docs/operations.md).
+is built from a tagged commit whose verify run passed, through the shared
+release stages in [latere-ai/ci](https://github.com/latere-ai/ci). It
+carries an SPDX bill of materials per image, cosign signatures over the
+images and the checksums made by those stages for this repository, and an
+SBOM and a build provenance attestation per image, so
+`gh attestation verify` answers for the image you are about to run. The
+commands that check each of them are in
+[docs/operations.md](docs/operations.md).
