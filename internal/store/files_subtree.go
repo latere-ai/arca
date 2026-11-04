@@ -182,7 +182,14 @@ func (files) Unreferenced(ctx context.Context, q Querier, ids []object.ID) ([]ob
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	rows, err := q.Query(ctx, unreferencedSQL, ids)
+	// The ids are bound as strings: a slice of the object.ID type has no
+	// encoding of its own on a connection that does not describe its
+	// parameters, and the statement casts the array to uuid[].
+	candidates := make([]string, len(ids))
+	for i, id := range ids {
+		candidates[i] = string(id)
+	}
+	rows, err := q.Query(ctx, unreferencedSQL, candidates)
 	if err != nil {
 		return nil, fmt.Errorf("store: read the references of %d objects: %w", len(ids), err)
 	}

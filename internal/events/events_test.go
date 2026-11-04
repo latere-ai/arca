@@ -33,7 +33,7 @@ func TestAppendWritesOneRowAndAnswersItsCursor(t *testing.T) {
 	if args[0] != aSpace || *(args[1].(*string)) != "files/reports/q3.pdf" || args[2] != "put" {
 		t.Fatalf("the append bound %v", args[:3])
 	}
-	if string(args[4].([]byte)) != `{"size":48213}` {
+	if *args[4].(*string) != `{"size":48213}` {
 		t.Fatalf("the detail was bound as %s", args[4])
 	}
 }
@@ -46,7 +46,7 @@ func TestAppendBindsAnAbsentPathAndActorAsNull(t *testing.T) {
 	if q.args[0][1] != (*string)(nil) || q.args[0][3] != (*string)(nil) {
 		t.Fatalf("an absent path and actor were bound as %v and %v", q.args[0][1], q.args[0][3])
 	}
-	if detail, _ := q.args[0][4].([]byte); detail != nil {
+	if detail, _ := q.args[0][4].(*string); detail != nil {
 		t.Fatalf("an absent detail was bound as %v", detail)
 	}
 }

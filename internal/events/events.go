@@ -183,12 +183,20 @@ func (eventLog) Append(ctx context.Context, q store.Querier, e Event) (int64, er
 	if err != nil {
 		return 0, fmt.Errorf("events: append %q to %q: %w", e.Action, e.Owner, err)
 	}
+	// The detail is bound as text, and as a nil pointer when there is none,
+	// so it is SQL NULL. A byte slice would travel as bytea, which a json
+	// column refuses on a connection that does not describe its parameters.
+	var text *string
+	if detail != nil {
+		s := string(detail)
+		text = &s
+	}
 	var id int64
 	if err := q.QueryRow(ctx, `
 		INSERT INTO events (owner, path, action, actor, detail)
 		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id`,
-		e.Owner, nullable(e.Path), string(e.Action), nullable(e.Actor), detail).Scan(&id); err != nil {
+		e.Owner, nullable(e.Path), string(e.Action), nullable(e.Actor), text).Scan(&id); err != nil {
 		return 0, fmt.Errorf("events: append %q to %q: %w", e.Action, e.Owner, err)
 	}
 	return id, nil

@@ -55,12 +55,12 @@ func deciding(t *testing.T, caller, owner string) context.Context {
 // arguments, which is the bytes the column holds.
 func appended(t *testing.T, q *fakeQuerier) map[string]any {
 	t.Helper()
-	raw, ok := q.args[0][4].([]byte)
-	if !ok || len(raw) == 0 {
+	raw, ok := q.args[0][4].(*string)
+	if !ok || raw == nil || *raw == "" {
 		return nil
 	}
 	var detail map[string]any
-	if err := json.Unmarshal(raw, &detail); err != nil {
+	if err := json.Unmarshal([]byte(*raw), &detail); err != nil {
 		t.Fatalf("the detail is not JSON: %v", err)
 	}
 	return detail
