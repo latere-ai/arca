@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.11.0 - 2026-11-04
+
 ### Added
 
 - **An administrator can delete a whole space.** `DELETE
