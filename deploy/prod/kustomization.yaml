@@ -45,3 +45,5 @@ patches:
   - path: authorizer.yaml
   - path: pull-secret.yaml
   - path: replicas.yaml
+  # The reconciler runs as its own single replica, off on the API replicas.
+  - path: reaper-replica.yaml

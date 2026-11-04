@@ -8,6 +8,10 @@ refused before it is pushed.
 
 ### Changed
 
+- **The production overlay runs the reconciler as its own single replica.**
+  `deploy/prod` sets `arcad-reaper` to one replica and the API replicas'
+  `ARCA_REAP_INTERVAL` to 0, so the sweep runs once and the API replicas
+  scale on requests alone.
 - **Releases are built, signed and published by the shared release stages
   in latere-ai/ci.** The signatures on both images and on `checksums.txt`
   now name those stages, run for this repository, and the signature over

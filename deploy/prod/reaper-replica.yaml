@@ -1,0 +1,28 @@
+# Runs the reconciler as one process of its own. By default every API
+# replica sweeps the whole installation on a timer, and each sweep is a
+# burst of CPU that the CPU autoscaler reads as request load; adding
+# replicas never lowers it, because each replica still runs the same sweep.
+# Here `arcad-reaper` runs it once and the API replicas turn their own off,
+# so they scale on requests alone.
+#
+# The interval is set on the API container only: `arcad reap` refuses an
+# interval of 0, so it must never reach `arcad-reaper`.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: arcad-reaper
+spec:
+  replicas: 1
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: arcad
+spec:
+  template:
+    spec:
+      containers:
+        - name: arcad
+          env:
+            - name: ARCA_REAP_INTERVAL
+              value: "0"
