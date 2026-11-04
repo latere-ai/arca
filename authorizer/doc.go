@@ -18,7 +18,7 @@
 //
 //	conformance.Run(t, url, token, conformance.WithVocabulary(authorizer.Vocabulary()))
 //
-// Actions lists every action, fifteen of them over six kinds, each
+// Actions lists every action, sixteen of them over six kinds, each
 // one a constant here; Kind reports the kind an action acts on, and Known
 // whether a string is in the vocabulary at all. Nothing here dials: the
 // package builds values and decodes them, and the client is the caller's.

@@ -15,9 +15,10 @@ import (
 // same rows with none for the generator of the committed description, which
 // has no service and no stores to build one with.
 //
-// Both rows ask space.admin, and both ask it before they act. The overview
-// names no one space, so its resource carries no owner; the restore names
-// the space in its path. Neither is a list action, so neither reads the
+// The overview and the restore ask space.admin, the deletion asks
+// space.delete, and each asks before it acts. The overview names no one
+// space, so its resource carries no owner; the restore and the deletion name
+// the space in their paths. None is a list action, so none reads the
 // authorizer's filter: an administrator the endpoint admitted reads every
 // space, and narrowing the page would answer a question nobody asked
 // (spec 013).
@@ -29,7 +30,7 @@ type row struct {
 	answer                                     func(*Service, http.ResponseWriter, *http.Request)
 }
 
-// rows is the two routes of spec 013's administration table.
+// rows is the three routes of spec 013's administration table.
 var rows = []row{
 	{
 		method: http.MethodGet, path: "/v1/admin/overview",
@@ -44,6 +45,13 @@ var rows = []row{
 		summary:     "Restore deleted item",
 		description: "Restore one trashed object of a space.",
 		answer:      (*Service).restore,
+	},
+	{
+		method: http.MethodDelete, path: "/v1/admin/spaces/{owner}",
+		action: authorizer.ActionSpaceDelete, status: http.StatusOK,
+		summary:     "Delete a space",
+		description: "Delete everything one space holds.",
+		answer:      (*Service).erase,
 	},
 }
 

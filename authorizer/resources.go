@@ -218,8 +218,9 @@ func (e Event) Resource() authz.Resource {
 	return authz.NewResource(KindEvent, "", fields(field{"owner", e.Owner}))
 }
 
-// Space is the resource of space.admin, the administrator's action. Owner is
-// absent on the overview across spaces, which names no one space.
+// Space is the resource of space.admin, the administrator's action, and of
+// space.delete. Owner is absent on the overview across spaces, which names no
+// one space.
 type Space struct {
 	Owner string
 }

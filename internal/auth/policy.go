@@ -57,9 +57,9 @@ func rung(p Permission) int {
 // ladder is spec 006's reading of the share ladder: the lowest rung a grant
 // must reach for each action. An action absent here is reachable by no
 // grant, which is the owner's or an administrator's alone: space.admin,
-// event.read and the three link.* actions, since reading a space's log and
-// minting or revoking a public token are powers over the space rather than
-// over a subtree of it.
+// space.delete, event.read and the three link.* actions, since reading a
+// space's log, minting or revoking a public token and deleting a space are
+// powers over the space rather than over a subtree of it.
 var ladder = map[string]Permission{
 	authorizer.ActionFileRead:    PermissionRead,
 	authorizer.ActionFileList:    PermissionRead,
@@ -271,8 +271,8 @@ func grantPath(res authz.Resource) string { return res.String("path") }
 // object with no owner is one no space claims, which only the administrative
 // overview across spaces asks about.
 //
-// space.admin is the one action the owner rung does not reach. Administration
-// is a capability and not ownership: a space's owner is not an administrator
+// space.admin and space.delete are the actions the owner rung does not
+// reach. Administration is a capability and not ownership: a space's owner is not an administrator
 // of its own space, and the routes under /v1/admin read across other people's
 // spaces and restore across owners, which the owner's own routes of spec 005
 // do without asking this action (spec 012). The frame admits an owner
@@ -281,7 +281,7 @@ func grantPath(res authz.Resource) string { return res.String("path") }
 // the frame refuses the reserved id before it reads the object, so no listed
 // subject reaches past it.
 func objectOf(action string, res authz.Resource) authz.Object {
-	if action == authorizer.ActionSpaceAdmin {
+	if action == authorizer.ActionSpaceAdmin || action == authorizer.ActionSpaceDelete {
 		return authz.Object{}
 	}
 	owner := res.String("owner")

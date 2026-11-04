@@ -18,13 +18,13 @@ import (
 func TestTheVocabularyIsClosedAndInTheOrderTheSpecListsIt(t *testing.T) {
 	want := []Action{
 		"put", "move", "copy", "delete", "restore", "purge",
-		"reap", "share_created", "share_revoked",
+		"reap", "share_created", "share_revoked", "space_delete",
 	}
 	if got := Actions(); !slices.Equal(got, want) {
 		t.Fatalf("the vocabulary is %v, and spec 010 lists %v", got, want)
 	}
-	if len(Actions()) != 9 {
-		t.Fatalf("the vocabulary holds %d actions, and spec 010 names nine", len(Actions()))
+	if len(Actions()) != 10 {
+		t.Fatalf("the vocabulary holds %d actions, and spec 010 and spec 032 name ten", len(Actions()))
 	}
 	for _, a := range want {
 		if !a.Valid() {

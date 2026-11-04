@@ -79,6 +79,7 @@ spec once every spec in its `depends_on` is at `testing` or later, not
 | [029](029-finding-files.md) | Finding files: a folder listing narrowed to names that contain a text, and the newest files under a folder | complete |
 | [030](030-moving-a-folder.md) | Moving a folder: every object under a folder renamed below a destination in one call and one transaction, with no byte copied | complete |
 | [031](031-download-only-link-reads.md) | Download-only link reads: every answer of the three link routes is an attachment, never sniffed and sandboxed, and a link's redirect asks the bucket for the attachment | complete |
+| [032](032-space-delete.md) | Space delete: one administrative route removes everything an owner's Storage space holds, under its own action | validated |
 
 The order of building is the order of the numbers except where a spec's
 `depends_on` says otherwise, and 019 runs alongside all of them: each

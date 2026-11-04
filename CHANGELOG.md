@@ -6,6 +6,21 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Added
+
+- **An administrator can delete a whole space.** `DELETE
+  /v1/admin/spaces/{owner}` removes everything the owner's space holds:
+  files and every version, the trash, stars, grants and links on the space,
+  the stars and grants the owner held on other spaces, open uploads, the
+  usage ledger, the log and the owner's directory entry. The answer counts
+  each kind, a repeat answers zero counts, and the bytes go only when no
+  remaining row names the object. The route asks a new action,
+  `space.delete`, in the `Space` kind, so an authorizer can allow account
+  closure without allowing `space.admin`'s overview and restore. The
+  deletion leaves one `space_delete` event with the counts and no path.
+  The action vocabulary is now sixteen actions and the event vocabulary ten;
+  an authorizer that lists its actions adds `space.delete`.
+
 ## v0.10.4 - 2026-11-04
 
 ### Changed

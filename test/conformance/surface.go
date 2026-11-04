@@ -15,7 +15,7 @@ import (
 // The surface of spec 013 as the suite holds it, and what the target
 // answers of it.
 //
-// The table below is the suite's own declaration of the twenty-nine routes,
+// The table below is the suite's own declaration of the thirty routes,
 // not a reading of the server's registrations: a build that dropped a route
 // has to fail, and a suite that read the build's own list would drop it too.
 // What the target serves is read from the document spec 013 publishes, and
@@ -38,7 +38,7 @@ func (r route) key() string { return r.method + " " + r.path }
 // has no such form, so the suffix goes.
 func (r route) template() string { return strings.ReplaceAll(r.path, "...", "") }
 
-// surfaceTable is the twenty-nine routes of spec 013, grouped by the spec that
+// surfaceTable is the thirty routes of spec 013, grouped by the spec that
 // owns each. Outside /v1 sits one more document, GET /openapi.json, which
 // the errors group asserts and which is not a row here because it is not a
 // route of the surface.
@@ -81,6 +81,7 @@ var surfaceTable = []route{
 	// Administration (spec 012).
 	{http.MethodGet, "/v1/admin/overview", "012"},
 	{http.MethodPost, "/v1/admin/spaces/{owner}/restore", "012"},
+	{http.MethodDelete, "/v1/admin/spaces/{owner}", "032"},
 }
 
 // Routes names every row of spec 013's table as a case names it, so a

@@ -46,6 +46,17 @@ var detailVocabulary = map[string]string{
 	"path_prefix":  "the subtree a grant covers, which the caller sent",
 	"files":        "a count of paths",
 	"bytes":        "a count of bytes",
+	// The counts of a space's deletion (spec 032), one per kind it removed.
+	"trashed_files": "a count of trashed paths",
+	"versions":      "a count of superseded contents",
+	"objects":       "a count of bucket objects the removed rows named",
+	"stars":         "a count of stars on the space's paths",
+	"shares":        "a count of grants to subjects on the space",
+	"links":         "a count of link and public grants on the space",
+	"stars_held":    "a count of stars the space's owner placed elsewhere",
+	"shares_held":   "a count of grants the space's owner held elsewhere",
+	"uploads":       "a count of open upload sessions",
+	"events":        "a count of log rows",
 }
 
 // builtDetails names the one writer that passes a detail it built rather

@@ -159,7 +159,7 @@ table was twenty-three actions over seven kinds before.
 | `Share` | `share.create`, `share.read`, `share.list`, `share.revoke` | `id`, `owner`, `path`, `grantee`, `permission` |
 | `Link` | `link.create`, `link.read`, `link.revoke` | `id`, `owner`, `path` |
 | `Event` | `event.read` | `owner` |
-| `Space` | `space.admin` | `owner` (absent on the overview across spaces) |
+| `Space` | `space.admin`, `space.delete` | `owner` (absent on the overview across spaces) |
 
 Rules of the table:
 
@@ -194,8 +194,11 @@ Rules of the table:
 - A `list` action carries the prefix listed as `path`, and the
   authorizer's `filter` narrows the page to the owners and labels it
   names.
-- `space.admin` is the administrator's action, asked for every route
-  under `/v1/admin`.
+- `space.admin` is the administrator's action, asked for the overview and
+  the restore under `/v1/admin`. `space.delete` is a separate action,
+  asked for the deletion of a whole space ([[032-space-delete]]), so a
+  caller that closes accounts does not also read every space's overview
+  or restore across owners.
 - A personal key's grants intersect with this vocabulary through
   `authz.Restrict`; an action the grants do not name is a deny with
   reason `grant`, indistinguishable on the wire from any other deny.
@@ -350,16 +353,16 @@ The ladder a grant is read against is [[008-shares-and-links]]'s:
 `share.create`, `share.read`, `share.list`, `share.revoke` on the
 granted subtree.
 
-No grant reaches the remaining five, which are the owner's or an
-administrator's: `space.admin`, `event.read`, `link.create`,
-`link.read`, `link.revoke`. Reading a space's log and minting or
+No grant reaches the remaining six, which are the owner's or an
+administrator's: `space.admin`, `space.delete`, `event.read`,
+`link.create`, `link.read`, `link.revoke`. Reading a space's log and minting or
 revoking a token anyone may read with are powers over the space and not
 over a subtree of it, so a grant on a subtree does not confer them. `link.read` sits on that list and is
 still the one action an anonymous caller reaches, because the link step
 of the flowchart answers it and no grant does.
 
-`space.admin` is the administrator's alone, and is the one action of the
-table the owner step does not reach either. Administration is a
+`space.admin` and `space.delete` are the administrator's alone, and are the
+actions of the table the owner step does not reach either. Administration is a
 capability and not ownership: a space's owner is not an administrator of
 its own space, and the owner's own equivalents of what `/v1/admin` serves
 ask the actions they always ask ([[012-administration]]). This policy

@@ -84,6 +84,21 @@ func (f *fakeRestorer) Restore(_ context.Context, owner, id string) (Restored, e
 	return back, nil
 }
 
+// fakeEraser is the deletion seam a case binds. It records the space it was
+// asked to delete.
+type fakeEraser struct {
+	counts Erased
+	err    error
+	owner  string
+	calls  int
+}
+
+// Erase answers what the case set.
+func (f *fakeEraser) Erase(_ context.Context, owner string) (Erased, error) {
+	f.owner, f.calls = owner, f.calls+1
+	return f.counts, f.err
+}
+
 // fakeQuerier is the pool the handlers carry to the query set. Nothing in
 // this package reaches it: the query set is the fake above, and a call that
 // arrived here would be a handler talking to a database of its own.

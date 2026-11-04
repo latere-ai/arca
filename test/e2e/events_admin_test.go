@@ -145,6 +145,12 @@ func TestE2ENoRouteDeletesFromTheLog(t *testing.T) {
 		if _, refuses := operations["delete"]; !refuses {
 			continue
 		}
+		// The deletion of a whole space (spec 032) is the one route that
+		// removes a space's log rows, with the rest of what the space holds,
+		// and it appends the record of having done so.
+		if path == "/v1/admin/spaces/{owner}" {
+			continue
+		}
 		if strings.HasPrefix(path, "/v1/events") || strings.HasPrefix(path, "/v1/admin") {
 			t.Errorf("%s declares a delete; the log is a tail nothing in spec 012 removes from", path)
 		}

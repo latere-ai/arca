@@ -32,6 +32,7 @@ import (
 	"latere.ai/x/arca/internal/blob"
 	"latere.ai/x/arca/internal/check"
 	"latere.ai/x/arca/internal/config"
+	"latere.ai/x/arca/internal/erasure"
 	"latere.ai/x/arca/internal/events"
 	"latere.ai/x/arca/internal/files"
 	"latere.ai/x/arca/internal/metrics"
@@ -512,10 +513,20 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	// route restores rather than answering not_implemented; the link counter
 	// is spec 008's table, and it is here too, so the overview reports the
 	// links a space actually holds.
+	//
+	// The deletion of a whole space (spec 032) is bound the same way, to the
+	// package that holds the order the rows and the bytes go in.
+	eraser, err := erasure.New(erasure.Options{
+		DB: db, Bucket: bucket, Prefix: cfg.BucketPrefix, Log: log,
+	})
+	if err != nil {
+		return fail(stderr, err)
+	}
 	administration, err := admin.New(admin.Options{
 		Querier: db.Querier(), Spaces: store.NewAdmin(), Authorizer: identity.Authorizer,
 		Links:    shares.LinkCounts(grants),
 		Restorer: restorer{objects: object},
+		Eraser:   eraser,
 	})
 	if err != nil {
 		return fail(stderr, err)

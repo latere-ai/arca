@@ -38,7 +38,7 @@ import (
 // to the conformance rows of spec 017, and it is not a migration.
 type Action string
 
-// The nine actions. The spec that appends each is in its comment.
+// The ten actions. The spec that appends each is in its comment.
 const (
 	// ActionPut is an object written, by a put or by a completed upload
 	// session (specs 005 and 007).
@@ -64,12 +64,17 @@ const (
 	ActionShareCreated Action = "share_created"
 	// ActionShareRevoked is a grant withdrawn (spec 008).
 	ActionShareRevoked Action = "share_revoked"
+	// ActionSpaceDelete is a whole space deleted by an administrative
+	// caller (spec 032). It is the one event a space keeps after its
+	// deletion: the detail holds the count of each kind removed, never a
+	// path or a file name.
+	ActionSpaceDelete Action = "space_delete"
 )
 
 // actions is the vocabulary in the order spec 010 lists it.
 var actions = []Action{
 	ActionPut, ActionMove, ActionCopy, ActionDelete, ActionRestore, ActionPurge,
-	ActionReap, ActionShareCreated, ActionShareRevoked,
+	ActionReap, ActionShareCreated, ActionShareRevoked, ActionSpaceDelete,
 }
 
 // Actions answers the closed vocabulary, in the order spec 010 lists it. The
@@ -102,7 +107,7 @@ type Event struct {
 	Actor string
 	// Detail is the finer grain a consumer reads when the action is not
 	// enough: the size of a put, the kind of a share. It is the reason the
-	// vocabulary can stay at nine members.
+	// vocabulary can stay at ten members.
 	Detail map[string]any
 	// At is when the row was written.
 	At time.Time

@@ -48,6 +48,12 @@ func withRestorer(f *fakeRestorer) func(*Options) {
 	return func(o *Options) { o.Restorer = f }
 }
 
+// withEraser binds the deletion seam, which the node binds to the erasure of
+// spec 032.
+func withEraser(f *fakeEraser) func(*Options) {
+	return func(o *Options) { o.Eraser = f }
+}
+
 // ownerPolicy decides with the built-in policy of spec 006 instead of an
 // endpoint, which is what an installation with ARCA_AUTHORIZER_URL unset
 // runs. The subjects given are ARCA_ADMIN_SUBJECTS.

@@ -222,7 +222,7 @@ func TestEveryRegisteredRouteIsInSpec013sTable(t *testing.T) {
 // surfaceRoutes is the size of spec 013's route table: twelve routes of
 // files, trash and stars, three of uploads, eleven of shares and links, one
 // of events and two of administration.
-const surfaceRoutes = 29
+const surfaceRoutes = 30
 
 // prefixes are the first segments under /v1 that the route tables of spec
 // 013 are written under, each owned by one spec (its second grammar rule).

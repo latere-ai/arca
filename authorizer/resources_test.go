@@ -65,7 +65,7 @@ func TestResourceShapesMatchSpec006(t *testing.T) {
 	}
 }
 
-// TestEveryActionHasAResourceType: a handler asking any of the fifteen has a
+// TestEveryActionHasAResourceType: a handler asking any of the sixteen has a
 // type to build the question's resource with.
 func TestEveryActionHasAResourceType(t *testing.T) {
 	for _, action := range Actions() {

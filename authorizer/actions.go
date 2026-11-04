@@ -52,6 +52,11 @@ const (
 	ActionEventRead = "event.read"
 
 	ActionSpaceAdmin = "space.admin"
+	// ActionSpaceDelete deletes everything one space holds. It is not part
+	// of space.admin: that action reads every space's overview and restores
+	// across owners, and a caller that only closes accounts must not hold
+	// either power.
+	ActionSpaceDelete = "space.delete"
 )
 
 // table is spec 006's action table in its order, one row per action, and the
@@ -78,6 +83,7 @@ var table = []authz.Action{
 	{Name: ActionEventRead, Kind: KindEvent},
 
 	{Name: ActionSpaceAdmin, Kind: KindSpace},
+	{Name: ActionSpaceDelete, Kind: KindSpace},
 }
 
 // labels is the name a person reads for each resource kind. A kind is a type

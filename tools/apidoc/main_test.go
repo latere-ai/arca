@@ -236,7 +236,7 @@ func specRoutes(t *testing.T) map[string][]string {
 
 // surfaceRoutes is the size of spec 013's route table, which is the whole
 // surface under /v1.
-const surfaceRoutes = 29
+const surfaceRoutes = 30
 
 // TestEveryRouteThisBuildRegistersIsOneOfSpec013sTable is criterion 1 of
 // spec 013 for the whole surface rather than for one package's half of it.
@@ -251,8 +251,8 @@ const surfaceRoutes = 29
 // The converse, that every row of the table is registered, is the second
 // half below: the union holds every row spec 013 names, so criterion 1 of
 // that spec is proved in both directions from the one place every
-// declaration is visible. The table is twenty-nine routes (spec 028), so
-// the build registers twenty-nine and no other.
+// declaration is visible. The table is thirty routes (specs 028 and 032), so
+// the build registers thirty and no other.
 func TestEveryRouteThisBuildRegistersIsOneOfSpec013sTable(t *testing.T) {
 	spec := specRoutes(t)
 	if len(spec) != surfaceRoutes {
@@ -306,7 +306,7 @@ func TestEveryRouteThisBuildRegistersIsOneOfSpec013sTable(t *testing.T) {
 var chosenPerRequest = []string{}
 
 // TestEveryActionOfTheVocabularyIsAskedByARoute is criterion 3 of spec 013:
-// the fifteen actions of spec 006 and the routes of spec 013 cover each
+// the sixteen actions of spec 006 and the routes of spec 013 cover each
 // other, so no action is a permission nothing can exercise and no route asks
 // a question no authorizer was given.
 //

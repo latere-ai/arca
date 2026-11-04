@@ -589,7 +589,7 @@ Every change to a space appends one event:
 ```
 
 `action` is one of `put`, `move`, `copy`, `delete`, `restore`, `purge`,
-`reap`, `share_created`, and `share_revoked`. `detail` depends on the
+`reap`, `share_created`, `share_revoked`, and `space_delete`. `detail` depends on the
 action: a `move` and a `copy` carry `from`, the source path, and a
 `delete` of a folder carries `recursive` with the counts
 [folders](#folders) describes, so one event may stand for many objects. A
@@ -603,6 +603,7 @@ a consumer that needs a longer history stores what it reads.
 |---|---|---|---|
 | GET | `/v1/admin/overview` | `space.admin` | one row per space: `owner`, `files`, `bytes`, `trashed_bytes`, `links`, `last_write_at` |
 | POST | `/v1/admin/spaces/{owner}/restore` | `space.admin` | `{"id"}` restores one trashed object of that space; the answer is `{"id", "kind", "status"}`, where `kind` is `file` |
+| DELETE | `/v1/admin/spaces/{owner}` | `space.delete` | deletes everything the space holds: files and every version, the trash, stars, grants and links, open uploads, the ledger and the log; `{owner}` is a full subject and `me` is refused; the answer is `{"owner", "status": "deleted", "counts"}` with one count per kind; a repeat answers zero counts |
 
 Everything else an administrator needs is an ordinary route asked about a
 space the administrator does not own: `GET /v1/files/{owner}/files?list=1`
@@ -645,7 +646,7 @@ flat object: its `kind`, its `id` when it has one, and the fields of that
 kind. A field Arca does not know for a question is left out rather than sent
 empty.
 
-The vocabulary is fifteen actions over six kinds:
+The vocabulary is sixteen actions over six kinds:
 
 | Kind | Actions | Fields |
 |---|---|---|
@@ -654,7 +655,7 @@ The vocabulary is fifteen actions over six kinds:
 | `Share` | `share.create`, `share.read`, `share.list`, `share.revoke` | `owner`, `path`, `grantee`, `permission` |
 | `Link` | `link.create`, `link.read`, `link.revoke` | `owner`, `path` |
 | `Event` | `event.read` | `owner` |
-| `Space` | `space.admin` | `owner`, absent on the overview across spaces |
+| `Space` | `space.admin`, `space.delete` | `owner`, absent on the overview across spaces |
 
 Four fields of a `File` say what kind of act the question is about:
 

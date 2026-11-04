@@ -123,7 +123,7 @@ var findingKinds = []string{
 // held equal to that package's table by a test.
 var eventKinds = []string{
 	"put", "move", "copy", "delete", "restore", "purge",
-	"reap", "share_created", "share_revoked",
+	"reap", "share_created", "share_revoked", "space_delete",
 }
 
 // errorCodes is the closed vocabulary of arca_requests_total's code: every

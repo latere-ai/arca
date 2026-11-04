@@ -46,11 +46,11 @@ func TestE2EEveryDocumentedPathAnswersUnderTheBasePathAndNoneAtTheRoot(t *testin
 	if err := json.Unmarshal([]byte(body), &document); err != nil {
 		t.Fatalf("the document is not JSON: %v", err)
 	}
-	// The twenty-nine routes of spec 013 sit at nineteen paths. The floor
+	// The thirty routes of spec 013 sit at twenty paths. The floor
 	// tells a document that was read from one that was not, and is below
 	// the count so a route the surface gains or loses is not this test's.
 	if len(document.Paths) < 15 {
-		t.Fatalf("the document names %d paths, want the nineteen spec 013's routes sit at", len(document.Paths))
+		t.Fatalf("the document names %d paths, want the twenty spec 013's routes sit at", len(document.Paths))
 	}
 	// The server is the origin root and carries no base: the address of a
 	// route is the server and the path the document writes, so a base on

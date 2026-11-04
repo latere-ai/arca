@@ -18,6 +18,7 @@ import (
 	"latere.ai/x/pkg/authz/stub"
 
 	"latere.ai/x/arca/authorizer"
+	"latere.ai/x/arca/object"
 )
 
 // Spec 012 through the binary: `arcad check` against the whole stack, the
@@ -280,5 +281,90 @@ func TestE2ETheRestoreAcrossOwnersReturnsATrashedObject(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "ARCA_TRASH_RETENTION") {
 		t.Errorf("the refusal does not name the window: %s", body)
+	}
+}
+
+// TestE2EADeletedSpaceHoldsNothingAndItsSharedBytesStay is spec 032 through
+// the running server, against a real database and a real bucket: the rows of
+// one space are gone, the bytes no row names are gone from the bucket, the
+// bytes another space's row still names stay, a repeat counts nothing, and
+// the log holds the one record of the deletion.
+func TestE2EADeletedSpaceHoldsNothingAndItsSharedBytesStay(t *testing.T) {
+	i := start(t)
+	i.allowEverything()
+	db := i.database(t)
+	bucket := i.bucket(t)
+
+	alone := i.put(t, db, "files/reports/q3.pdf", "held by this space alone")
+	trashed := i.put(t, db, "files/old.txt", "in the trash")
+	shared := i.put(t, db, "files/shared.txt", "named by two spaces")
+	i.expect(t, http.StatusNoContent, http.MethodDelete,
+		"/v1/files/"+url.PathEscape(i.subject())+"/files/old.txt", nil, nil)
+	other := i.issuer.URL() + "|other"
+	if _, err := db.Querier().Exec(t.Context(), `
+		INSERT INTO files (owner, path, object_id, created_by, size_bytes, checksum)
+		VALUES ($1, 'files/copy.txt', $2, $1, $3, $4)`,
+		other, shared.id, shared.size, shared.checksum); err != nil {
+		t.Fatalf("seed the other space's row: %v", err)
+	}
+
+	route := "/v1/admin/spaces/" + url.PathEscape(i.subject())
+	var done struct {
+		Owner  string           `json:"owner"`
+		Status string           `json:"status"`
+		Counts map[string]int64 `json:"counts"`
+	}
+	i.expect(t, http.StatusOK, http.MethodDelete, route, nil, &done)
+	if done.Owner != i.subject() || done.Status != "deleted" ||
+		done.Counts["files"] != 2 || done.Counts["trashed"] != 1 || done.Counts["objects"] != 2 {
+		t.Fatalf("the deletion answered %+v", done)
+	}
+
+	held := func(id object.ID) bool {
+		_, err := bucket.Head(t.Context(), id.Key(i.prefix))
+		return err == nil
+	}
+	if held(alone.id) || held(trashed.id) {
+		t.Error("the bytes of a deleted space are still in the bucket")
+	}
+	if !held(shared.id) {
+		t.Error("the bytes another space's row names were deleted")
+	}
+	var rows, usage int
+	if err := db.Querier().QueryRow(t.Context(),
+		`SELECT (SELECT count(*) FROM files WHERE owner = $1), (SELECT count(*) FROM space_usage WHERE owner = $1)`,
+		i.subject()).Scan(&rows, &usage); err != nil || rows != 0 || usage != 0 {
+		t.Errorf("the space still holds %d rows and %d ledger rows: %v", rows, usage, err)
+	}
+
+	i.expect(t, http.StatusOK, http.MethodDelete, route, nil, &done)
+	for kind, n := range done.Counts {
+		if n != 0 {
+			t.Errorf("a repeat counted %d of %s", n, kind)
+		}
+	}
+	var actions []string
+	logged, err := db.Querier().Query(t.Context(), `SELECT action FROM events WHERE owner = $1`, i.subject())
+	if err != nil {
+		t.Fatalf("read the log: %v", err)
+	}
+	defer logged.Close()
+	for logged.Next() {
+		var a string
+		if err := logged.Scan(&a); err != nil {
+			t.Fatal(err)
+		}
+		actions = append(actions, a)
+	}
+	if !slices.Equal(actions, []string{"space_delete"}) {
+		t.Errorf("the log holds %v, want the one record of the deletion", actions)
+	}
+
+	// The action is its own: a caller denied space.delete and allowed
+	// space.admin reads the overview and deletes nothing.
+	i.authorizer.Deny(stub.Rule{Subject: "*", Action: authorizer.ActionSpaceDelete, Resource: "*"}, "no rule allows it")
+	i.expect(t, http.StatusOK, http.MethodGet, "/v1/admin/overview", nil, nil)
+	if code, body := i.api(t, http.MethodDelete, route, nil); code != http.StatusForbidden {
+		t.Errorf("a caller refused space.delete answered %d: %s", code, body)
 	}
 }

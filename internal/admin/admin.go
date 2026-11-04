@@ -1,15 +1,18 @@
 // SPDX-FileCopyrightText: 2026 Latere AI
 // SPDX-License-Identifier: MIT
 
-// Package admin is spec 012: the two routes under /v1/admin that answer
-// across spaces rather than for one.
+// Package admin is spec 012: the routes under /v1/admin that answer across
+// spaces rather than for one, and spec 032's deletion of a whole space.
 //
 // Administration is a capability and not a claim. This package knows no
-// administrator: every route asks space.admin, and the answer comes from the
-// operator's authorizer or, with none configured, from the owner policy of
-// spec 006 reading ARCA_ADMIN_SUBJECTS. An installation with neither has no
-// administrator, and both routes answer 403 to everyone, which is the
-// correct default for a self-hosted installation that needs none.
+// administrator: the overview and the restore ask space.admin and the
+// deletion asks space.delete, and the answer comes from the operator's
+// authorizer or, with none configured, from the owner policy of spec 006
+// reading ARCA_ADMIN_SUBJECTS. An installation with neither has no
+// administrator, and every route answers 403 to everyone, which is the
+// correct default for a self-hosted installation that needs none. The
+// deletion is its own action so that a caller allowed to close accounts
+// does not also read every space's overview or restore across owners.
 //
 // A deny is 403 and not the 404 the service Arca replaces answered to hide
 // the surface. The route names are in /openapi.json anyway, and existence
@@ -79,6 +82,45 @@ type Restorer interface {
 	Restore(ctx context.Context, owner, id string) (Restored, error)
 }
 
+// Erased is what the deletion of one space removed, one count per kind. It
+// holds numbers and never a path or a file name, because the same numbers
+// are the detail of the audit event the deletion appends.
+type Erased struct {
+	// Files and Trashed are the live and the trashed paths, Versions the
+	// superseded contents of both, and Objects the bucket objects whose
+	// bytes were dropped with them.
+	Files    int64 `json:"files"`
+	Trashed  int64 `json:"trashed"`
+	Versions int64 `json:"versions"`
+	Objects  int64 `json:"objects"`
+	// Stars, Shares and Links are the stars, the grants to subjects and the
+	// link or public grants on the space.
+	Stars  int64 `json:"stars"`
+	Shares int64 `json:"shares"`
+	Links  int64 `json:"links"`
+	// StarsHeld and SharesHeld are the stars and the grants the space's
+	// owner held on other spaces.
+	StarsHeld  int64 `json:"stars_held"`
+	SharesHeld int64 `json:"shares_held"`
+	// Uploads is the upload sessions, and Events the log rows.
+	Uploads int64 `json:"uploads"`
+	Events  int64 `json:"events"`
+	// Usage and Subject are 1 when the ledger row and the directory entry
+	// of the owner existed.
+	Usage   int64 `json:"usage"`
+	Subject int64 `json:"subject"`
+}
+
+// Eraser deletes everything one space holds (spec 032). It is a seam for the
+// reason [Restorer] is: the tables are other specs', and the bytes belong to
+// the bucket. An installation whose build binds none answers not_implemented.
+type Eraser interface {
+	// Erase removes the space and answers what it removed. It is idempotent:
+	// a space that holds nothing answers zero counts and no error. A failure
+	// leaves the space whole or already deleted, and the caller repeats it.
+	Erase(ctx context.Context, owner string) (Erased, error)
+}
+
 // Links counts the token grants of spec 008 a space still holds, which is
 // the one counter of the overview that is not in this build's schema: the
 // grants and the links share one table, and that table arrives with that
@@ -116,6 +158,8 @@ type Options struct {
 	Links Links
 	// Restorer is the restore across owners. Nil answers not_implemented.
 	Restorer Restorer
+	// Eraser is the deletion of a whole space. Nil answers not_implemented.
+	Eraser Eraser
 }
 
 // Service answers the administrative routes. It is built once at start and
@@ -126,6 +170,7 @@ type Service struct {
 	authorizer *auth.Authorizer
 	links      Links
 	restorer   Restorer
+	eraser     Eraser
 }
 
 // New builds the service. It refuses to build without a seam it would
@@ -149,7 +194,7 @@ func New(o Options) (*Service, error) {
 	}
 	s := &Service{
 		querier: o.Querier, spaces: o.Spaces, authorizer: o.Authorizer,
-		links: o.Links, restorer: o.Restorer,
+		links: o.Links, restorer: o.Restorer, eraser: o.Eraser,
 	}
 	if s.links == nil {
 		s.links = noLinks{}

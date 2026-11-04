@@ -440,6 +440,13 @@ there is nothing here to set ([[010-events-and-reaper]]). The status
 codes and error bodies ([[013-api]]). The metrics and traces `check`
 does not emit ([[018-observability]]).
 
+**Amended 2026-11-04 by [[032-space-delete]].** A third route,
+`DELETE /v1/admin/spaces/{owner}`, asks its own action, `space.delete`,
+and not `space.admin`: the caller that closes accounts reads no overview
+and restores nothing. It is also the one route that removes rows of a
+space's log, with everything else the space holds, and it appends the
+record of the deletion. No other route removes from the log.
+
 ## Acceptance criteria
 
 | # | Criterion | Proved by |

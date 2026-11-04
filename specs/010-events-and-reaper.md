@@ -352,8 +352,9 @@ without a database constraint, so the closure is a table in
 | `reap` | this spec's reaper |
 | `share_created` | [[008-shares-and-links]] |
 | `share_revoked` | [[008-shares-and-links]] |
+| `space_delete` | the deletion of a whole space, [[032-space-delete]] |
 
-Nine actions. **Amended 2026-10-12 ([[028-one-tree]]):** `attach`,
+Ten actions. **Amended 2026-11-04 ([[032-space-delete]]):** `space_delete` joined the table. **Amended 2026-10-12 ([[028-one-tree]]):** `attach`,
 `release` and `sync` left the table with the plane that appended them,
 and `copy` joined it. A row already in a log under one of the three
 stays until log retention removes it. Adding one is a change to that table and to the

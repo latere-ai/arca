@@ -33,6 +33,41 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /v1/admin/spaces/{owner}:
+    delete:
+      operationId: deleteV1AdminSpacesByOwner
+      summary: Delete a space
+      description: Delete everything one space holds. Asks the authorizer for space.delete before it acts.
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      security:
+      - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: {}
+        "401":
+          $ref: "#/components/responses/unauthenticated"
+        "403":
+          $ref: "#/components/responses/forbidden"
+        "404":
+          $ref: "#/components/responses/not_found"
+        "429":
+          $ref: "#/components/responses/rate_limited"
+        "500":
+          $ref: "#/components/responses/internal"
+        "503":
+          description: "authorizer_unavailable: The permission service is unavailable; retry shortly."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /v1/admin/spaces/{owner}/restore:
     post:
       operationId: postV1AdminSpacesByOwnerRestore

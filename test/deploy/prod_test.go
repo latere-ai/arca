@@ -187,12 +187,12 @@ func TestProdClaimsOneV1PrefixAndItIsTheBasePathItServes(t *testing.T) {
 		t.Fatalf("deploy/prod sets ARCA_BASE_PATH to %q, which is not under the version spec 013 fixes", base)
 	}
 	served := servedPaths(t)
-	// The twenty-nine routes of spec 013 sit at nineteen paths. The floor is
+	// The thirty routes of spec 013 sit at twenty paths. The floor is
 	// below that on purpose: it tells a parse that found the document from
 	// one that did not, and a route the surface gains or loses is not a
 	// fault of this overlay.
 	if len(served) < 15 {
-		t.Fatalf("read %d paths out of api/openapi.yaml, want the nineteen spec 013's routes sit at: the parse is wrong, not the overlay", len(served))
+		t.Fatalf("read %d paths out of api/openapi.yaml, want the twenty spec 013's routes sit at: the parse is wrong, not the overlay", len(served))
 	}
 	for _, path := range served {
 		if !strings.HasPrefix(path, "/v1/") {

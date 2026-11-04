@@ -87,7 +87,7 @@ func TestErrorTableMatchesTheSpec(t *testing.T) {
 	}
 }
 
-// TestEveryRouteHasACase: every one of the twenty-nine rows of spec 013's
+// TestEveryRouteHasACase: every one of the thirty rows of spec 013's
 // table is driven by at least one case, and every route a case names is a
 // row of the table. A case naming a route the table does not hold is a case
 // driving something the contract does not fix.
@@ -96,8 +96,8 @@ func TestEveryRouteHasACase(t *testing.T) {
 	for _, r := range surfaceTable {
 		inTable[r.key()] = true
 	}
-	if len(surfaceTable) != 29 {
-		t.Errorf("spec 013's table is twenty-nine routes and the suite declares %d", len(surfaceTable))
+	if len(surfaceTable) != 30 {
+		t.Errorf("spec 013's table is thirty routes and the suite declares %d", len(surfaceTable))
 	}
 	driven := map[string]bool{}
 	for _, sp := range cases() {

@@ -368,7 +368,7 @@ func admits(held, need auth.Permission) bool {
 	return order[held] >= order[need]
 }
 
-// TestTheLadderCoversTheWholeVocabulary: every one of the fifteen is
+// TestTheLadderCoversTheWholeVocabulary: every one of the sixteen is
 // either reachable by a grant at a named rung or the owner's and an
 // administrator's, with nothing left undecided.
 func TestTheLadderCoversTheWholeVocabulary(t *testing.T) {
