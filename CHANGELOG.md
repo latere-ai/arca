@@ -6,6 +6,19 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Added
+
+- **`arcad` can serve through a transaction pooler.** Set `ARCA_DB_POOL_URL`
+  to the connection string of a PgBouncer in transaction mode in front of
+  your Postgres, and `arcad serve` and `arcad reap` open their connections
+  there, so every replica shares the pooler's connections instead of holding
+  its own. Unset, nothing changes: both use `ARCA_DB_URL`. `arcad migrate`
+  always uses `ARCA_DB_URL`, because a migration needs a direct connection.
+  A value that does not begin with `postgres://` or `postgresql://` is
+  refused at start-up. The shipped Deployments read the optional key
+  `ARCA_DATABASE_POOL_URL` of the `arcad-database` Secret, so an installation
+  whose Secret does not have it serves over the direct endpoint as before.
+
 ## v0.11.0 - 2026-11-04
 
 ### Added

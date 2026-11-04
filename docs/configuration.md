@@ -47,11 +47,14 @@ object exists.
 
 | Variable | Required | Default | What it is |
 |---|---|---|---|
-| `ARCA_DB_URL` | yes | none | The Postgres connection string, beginning `postgres://` or `postgresql://`. `arcad migrate` reads this variable and nothing else, so a migration job needs no other configuration. |
+| `ARCA_DB_URL` | yes | none | The Postgres connection string of the direct endpoint, beginning `postgres://` or `postgresql://`. `arcad migrate` reads this variable and nothing else, so a migration job needs no other configuration. |
+| `ARCA_DB_POOL_URL` | no | none | The connection string of a transaction pooler (PgBouncer in transaction mode) in front of the same database, with the same scheme. When set, `arcad serve` and `arcad reap` open their pool from it, so every replica shares the pooler's connections instead of holding its own. Unset, they use `ARCA_DB_URL`. Migrations never use it. |
 
-The deployment manifests read it from the key `ARCA_DATABASE_URL` of the
-`arcad-database` Secret and map it onto `ARCA_DB_URL`, so a Secret written
-from `deploy/bootstrap/secrets.example.yaml` keeps working.
+The deployment manifests read them from the keys `ARCA_DATABASE_URL` and
+`ARCA_DATABASE_POOL_URL` of the `arcad-database` Secret and map them onto
+`ARCA_DB_URL` and `ARCA_DB_POOL_URL`, so a Secret written from
+`deploy/bootstrap/secrets.example.yaml` keeps working. The pool key is
+optional: a Secret without it serves over the direct endpoint.
 
 ## Identity and authorization
 

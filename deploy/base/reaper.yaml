@@ -68,6 +68,16 @@ spec:
                 secretKeyRef:
                   name: arcad-database
                   key: ARCA_DATABASE_URL
+            # The pooler's connection string, read the way the server reads
+            # it so the reaper shares the pooler's connections too. The key
+            # is optional: a Secret without it reaps over the direct
+            # endpoint.
+            - name: ARCA_DB_POOL_URL
+              valueFrom:
+                secretKeyRef:
+                  name: arcad-database
+                  key: ARCA_DATABASE_POOL_URL
+                  optional: true
           envFrom:
             - secretRef:
                 name: arcad-bucket

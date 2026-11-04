@@ -122,7 +122,8 @@ operator fixes a deployment in one round. A blank value is unset.
 | `ARCA_BUCKET_PATH_STYLE` | `false` | path-style addressing, for MinIO and stores without virtual hosts | 003 |
 | `ARCA_BUCKET_ACCESS_KEY`, `ARCA_BUCKET_SECRET_KEY` | the SDK's chain | static credentials, when the environment has no other | 003 |
 | `ARCA_PUBLIC_CDN_URL` | unset | the prefix a public object's redirect points at, when one fronts the bucket | 003 |
-| `ARCA_DB_URL` | required | the Postgres connection string | 004 |
+| `ARCA_DB_URL` | required | the Postgres connection string of the direct endpoint; migrations always use it | 004 |
+| `ARCA_DB_POOL_URL` | unset | the connection string of a transaction pooler; serve and reap open their pool from it when set, else from `ARCA_DB_URL` | 004 |
 | `ARCA_MAX_UPLOAD_BYTES` | `5368709120` | the largest object accepted | 007 |
 | `ARCA_INLINE_BYTES` | `16777216` | the largest object streamed through the server; above it, parts go direct | 007 |
 | `ARCA_BASE_PATH` | `/v1` | the base every route of the surface is registered under; begins with `/`, no trailing slash, first segment `v1` | 027 |

@@ -105,6 +105,17 @@ spec:
                 secretKeyRef:
                   name: arcad-database
                   key: ARCA_DATABASE_URL
+            # The pooler's connection string, when the installation runs
+            # one in transaction mode. The server serves over it, so every
+            # replica shares the pooler's connections instead of holding
+            # its own; migrations stay on ARCA_DB_URL. The key is optional:
+            # a Secret without it serves over the direct endpoint.
+            - name: ARCA_DB_POOL_URL
+              valueFrom:
+                secretKeyRef:
+                  name: arcad-database
+                  key: ARCA_DATABASE_POOL_URL
+                  optional: true
           # ARCA_BUCKET, ARCA_BUCKET_REGION, ARCA_BUCKET_ENDPOINT and the
           # access keys arrive from arcad-bucket; ARCA_OIDC_ISSUERS and
           # ARCA_AUTHORIZER_TOKEN from arcad-auth. Both are written by hand

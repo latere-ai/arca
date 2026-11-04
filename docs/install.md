@@ -137,7 +137,7 @@ Three Secrets, one per endpoint, so a credential that leaks opens one thing:
 | Secret | Keys |
 |---|---|
 | `arcad-bucket` | `ARCA_BUCKET`, `ARCA_BUCKET_REGION`, `ARCA_BUCKET_ENDPOINT`, `ARCA_BUCKET_ACCESS_KEY`, `ARCA_BUCKET_SECRET_KEY` |
-| `arcad-database` | `ARCA_DATABASE_URL`, the connection string, which the Deployment passes to `arcad` as `ARCA_DB_URL` |
+| `arcad-database` | `ARCA_DATABASE_URL`, the connection string, which the Deployment passes to `arcad` as `ARCA_DB_URL`; optionally `ARCA_DATABASE_POOL_URL`, the connection string of a transaction pooler, passed as `ARCA_DB_POOL_URL` |
 | `arcad-auth` | `ARCA_OIDC_ISSUERS`, `ARCA_AUTHORIZER_TOKEN` |
 
 Leave the two bucket keys out when the cluster gives the pods a role; the

@@ -247,6 +247,9 @@ var dialed = []string{
 	// by hand, so it is not the variable's name and does not follow it.
 	"ARCA_DB_URL",
 	"ARCA_DATABASE_URL",
+	// The pooler's connection string, under the same two spellings.
+	"ARCA_DB_POOL_URL",
+	"ARCA_DATABASE_POOL_URL",
 	"ARCA_OTEL_EXPORTER_OTLP_ENDPOINT",
 	"OTEL_EXPORTER_OTLP_ENDPOINT",
 }
