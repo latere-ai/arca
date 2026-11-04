@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.10.4 - 2026-11-04
+
 ### Changed
 
 - **The production overlay runs the reconciler as its own single replica.**
