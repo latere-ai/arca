@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.12.0 - 2026-11-04
+
 ### Added
 
 - **`arcad` can serve through a transaction pooler.** Set `ARCA_DB_POOL_URL`
