@@ -98,8 +98,15 @@ type Config struct {
 	// PublicCDNURL is the base a public object's redirect points at, with
 	// no trailing slash. Empty answers the ordinary presigned redirect.
 	PublicCDNURL string
-	// DatabaseURL is the Postgres connection string.
+	// DatabaseURL is the Postgres connection string of the direct endpoint.
+	// Migrations always run over it.
 	DatabaseURL string
+	// DatabasePoolURL is the optional connection string of a transaction
+	// pooler in front of the same database. When set, the processes that
+	// serve (arcad serve and arcad reap) open their pool from it instead of
+	// DatabaseURL, so the installation claims the pooler's connections and
+	// not one per replica. Empty serves over DatabaseURL.
+	DatabasePoolURL string
 	// PublicURL is the address clients reach the public listener at, and
 	// the base of every URL the server writes (spec 013). It is the origin
 	// root and carries no base path: arcad check reads /version under it,
@@ -182,22 +189,33 @@ type Config struct {
 // migration job runs with the database and nothing else configured.
 func Database(getenv Getenv) (string, error) {
 	url := value(getenv("ARCA_DB_URL"))
-	if problem := checkDatabaseURL(url); problem != "" {
+	if problem := checkDatabaseURL("ARCA_DB_URL", url); problem != "" {
 		return "", errors.New("configuration: " + problem)
 	}
 	return url, nil
 }
 
-// checkDatabaseURL answers the problem with the connection string, or the
-// empty string. The migrator selects its driver from the scheme, so a
-// keyword and value connection string, which the pool would accept, is
-// refused here rather than at the first migration.
-func checkDatabaseURL(url string) string {
+// ServingDatabaseURL is the connection string the serving processes open
+// their pool from: the pooler's when ARCA_DB_POOL_URL is set, the direct
+// endpoint's otherwise. Migrations never use it.
+func (c Config) ServingDatabaseURL() string {
+	return cmp.Or(c.DatabasePoolURL, c.DatabaseURL)
+}
+
+// checkDatabaseURL answers the problem with the connection string held by
+// the named variable, or the empty string. The migrator selects its driver
+// from the scheme, so a keyword and value connection string, which the pool
+// would accept, is refused here rather than at the first migration. The
+// pool URL is held to the same scheme so a typo in it fails at start-up and
+// not at the first query.
+func checkDatabaseURL(name, url string) string {
 	switch {
-	case url == "":
+	case url == "" && name == "ARCA_DB_URL":
 		return "ARCA_DB_URL is unset, and the database is what decides whether an object exists"
+	case url == "":
+		return ""
 	case !strings.HasPrefix(url, "postgres://") && !strings.HasPrefix(url, "postgresql://"):
-		return fmt.Sprintf("ARCA_DB_URL is %q, and a connection string begins with postgres:// or postgresql://", url)
+		return fmt.Sprintf("%s is %q, and a connection string begins with postgres:// or postgresql://", name, url)
 	default:
 		return ""
 	}
@@ -229,6 +247,7 @@ func Load(getenv Getenv) (Config, error) {
 		BucketSecretKey: value(getenv("ARCA_BUCKET_SECRET_KEY")),
 		PublicCDNURL:    strings.TrimRight(value(getenv("ARCA_PUBLIC_CDN_URL")), "/"),
 		DatabaseURL:     value(getenv("ARCA_DB_URL")),
+		DatabasePoolURL: value(getenv("ARCA_DB_POOL_URL")),
 
 		PublicURL:           value(getenv("ARCA_PUBLIC_URL")),
 		BasePath:            withDefault(value(getenv("ARCA_BASE_PATH")), DefaultBasePath),
@@ -293,7 +312,10 @@ func Load(getenv Getenv) (Config, error) {
 			problems = append(problems, "ARCA_PUBLIC_CDN_URL "+err.Error())
 		}
 	}
-	if problem := checkDatabaseURL(c.DatabaseURL); problem != "" {
+	if problem := checkDatabaseURL("ARCA_DB_URL", c.DatabaseURL); problem != "" {
+		problems = append(problems, problem)
+	}
+	if problem := checkDatabaseURL("ARCA_DB_POOL_URL", c.DatabasePoolURL); problem != "" {
 		problems = append(problems, problem)
 	}
 	// The shape is held against the table's own row alone. A value that

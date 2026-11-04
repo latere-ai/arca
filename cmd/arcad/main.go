@@ -115,7 +115,7 @@ func reap(ctx context.Context, args []string, getenv config.Getenv, stdout, stde
 		return fail(stderr, err)
 	}
 	bucket := recorder.Bucket(s3)
-	db, err := store.Open(ctx, cfg.DatabaseURL)
+	db, err := openServing(ctx, cfg)
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -363,6 +363,16 @@ func migrate(args []string, getenv config.Getenv, stdout, stderr io.Writer) int 
 	return 0
 }
 
+// openServing opens the pool serve and reap run on: the pooler when
+// ARCA_DB_POOL_URL is set, the direct endpoint otherwise. Migrations do not
+// come through here; arcad migrate reads ARCA_DB_URL alone.
+func openServing(ctx context.Context, cfg config.Config) (*store.DB, error) {
+	if cfg.DatabasePoolURL != "" {
+		return store.OpenPooled(ctx, cfg.DatabasePoolURL)
+	}
+	return store.Open(ctx, cfg.DatabaseURL)
+}
+
 // The two seams of spec 004's schema handling. Both reach a database, so a
 // test drives them with a stub and the store tier runs the real ones.
 var (
@@ -425,7 +435,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	// bucket.<op>. internal/blob is left holding the S3 contract alone.
 	bucket := recorder.Bucket(s3)
 
-	db, err := store.Open(ctx, cfg.DatabaseURL)
+	db, err := openServing(ctx, cfg)
 	if err != nil {
 		return fail(stderr, err)
 	}

@@ -502,3 +502,49 @@ func TestTheAudienceIsAListWithThePrimaryFirst(t *testing.T) {
 		t.Errorf("a blank list read as %v, want %v", blank.OIDCAudiences, want)
 	}
 }
+
+func TestTheServingURLIsThePoolersWhenOneIsSet(t *testing.T) {
+	direct := "postgres://arca:arca@db:5432/arca?sslmode=disable"
+	pooled := "postgres://arca:arca@pooler:6432/arca?sslmode=disable"
+
+	c, err := Load(required(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.DatabasePoolURL != "" || c.ServingDatabaseURL() != direct {
+		t.Errorf("without a pool URL: pool %q, serving %q; want the direct URL", c.DatabasePoolURL, c.ServingDatabaseURL())
+	}
+
+	c, err = Load(required(map[string]string{"ARCA_DB_POOL_URL": " " + pooled + " "}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.ServingDatabaseURL() != pooled {
+		t.Errorf("serving = %q, want the pooler's %q", c.ServingDatabaseURL(), pooled)
+	}
+	if c.DatabaseURL != direct {
+		t.Errorf("DatabaseURL = %q; the direct URL is kept for migrations", c.DatabaseURL)
+	}
+}
+
+func TestThePoolURLIsHeldToTheSchemeOfTheDirectURL(t *testing.T) {
+	for _, raw := range []string{"host=pooler dbname=arca", "mysql://pooler/arca", "pooler:6432/arca"} {
+		_, err := Load(required(map[string]string{"ARCA_DB_POOL_URL": raw}))
+		if err == nil || !strings.Contains(err.Error(), "ARCA_DB_POOL_URL is") {
+			t.Errorf("a pool URL of %q loaded with %v", raw, err)
+		}
+	}
+}
+
+func TestMigrationsReadTheDirectURLWhateverThePoolURLIs(t *testing.T) {
+	url, err := Database(env(map[string]string{
+		"ARCA_DB_URL":      "postgres://arca@db/arca",
+		"ARCA_DB_POOL_URL": "postgres://arca@pooler/arca",
+	}))
+	if err != nil || url != "postgres://arca@db/arca" {
+		t.Errorf("Database() = %q, %v; want the direct URL", url, err)
+	}
+	if _, err := Database(env(map[string]string{"ARCA_DB_POOL_URL": "postgres://arca@pooler/arca"})); err == nil {
+		t.Error("a migration with only a pool URL was accepted")
+	}
+}

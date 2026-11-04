@@ -49,9 +49,26 @@ var ErrConflict = errors.New("store: the row already exists")
 // connection, so a database that is briefly unreachable at start-up delays
 // readiness rather than crashing the process.
 func Open(ctx context.Context, databaseURL string) (*DB, error) {
+	return open(ctx, databaseURL, "ARCA_DB_URL", false)
+}
+
+// OpenPooled opens the pool over a transaction pooler. A pooler hands each
+// transaction whichever server connection is free, so a named prepared
+// statement made on one transaction is missing on the next: this pool
+// prepares none. It still asks the server each statement's parameter types
+// once and keeps them, so a parameter is encoded for its column's type.
+func OpenPooled(ctx context.Context, databaseURL string) (*DB, error) {
+	return open(ctx, databaseURL, "ARCA_DB_POOL_URL", true)
+}
+
+func open(ctx context.Context, databaseURL, variable string, pooled bool) (*DB, error) {
 	cfg, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
-		return nil, fmt.Errorf("store: ARCA_DB_URL: %w", err)
+		return nil, fmt.Errorf("store: %s: %w", variable, err)
+	}
+	if pooled {
+		cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeCacheDescribe
+		cfg.ConnConfig.StatementCacheCapacity = 0
 	}
 	p, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {

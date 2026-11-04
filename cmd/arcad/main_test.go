@@ -421,6 +421,49 @@ func TestMigrateAppliesWhatIsPendingAndSaysSo(t *testing.T) {
 	}
 }
 
+func TestMigrateUsesTheDirectURLEvenWithAPoolURL(t *testing.T) {
+	applied := applyMigrations
+	t.Cleanup(func() { applyMigrations = applied })
+
+	var url string
+	applyMigrations = func(databaseURL string) error { url = databaseURL; return nil }
+	code := run(t.Context(), []string{"migrate"}, env(map[string]string{
+		"ARCA_DB_URL":      "postgres://arca@db/arca",
+		"ARCA_DB_POOL_URL": "postgres://arca@pooler/arca",
+	}), io.Discard, io.Discard)
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if url != "postgres://arca@db/arca" {
+		t.Errorf("the migrator was given %q, want the direct URL", url)
+	}
+}
+
+func TestServingOpensThePoolerWhenOneIsConfiguredAndTheDirectEndpointOtherwise(t *testing.T) {
+	for name, tc := range map[string]struct {
+		cfg    config.Config
+		pooled bool
+	}{
+		"pool URL set":   {config.Config{DatabaseURL: "postgres://arca@127.0.0.1:1/arca", DatabasePoolURL: "postgres://arca@127.0.0.1:2/arca"}, true},
+		"pool URL unset": {config.Config{DatabaseURL: "postgres://arca@127.0.0.1:1/arca"}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			db, err := openServing(t.Context(), tc.cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			if tc.pooled {
+				// An invalid pool URL is refused naming its variable, which
+				// shows the pooled opener was the one reached.
+				if _, err := openServing(t.Context(), config.Config{DatabaseURL: tc.cfg.DatabaseURL, DatabasePoolURL: "://bad"}); err == nil || !strings.Contains(err.Error(), "ARCA_DB_POOL_URL") {
+					t.Errorf("a bad pool URL = %v", err)
+				}
+			}
+		})
+	}
+}
+
 func TestMigrateReadsTheDatabaseVariableAndNothingElse(t *testing.T) {
 	var errOut bytes.Buffer
 	if code := run(t.Context(), []string{"migrate"}, env(nil), io.Discard, &errOut); code != 1 {

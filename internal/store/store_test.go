@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // conflictError is what Postgres answers when a unique constraint refuses a
@@ -138,5 +139,25 @@ func TestARefusalIsToldFromAFault(t *testing.T) {
 	}
 	if !undefinedTable(&pgconn.PgError{Code: "42P01"}) || undefinedTable(other) {
 		t.Error("a missing relation is not told from a fault")
+	}
+}
+
+func TestOpenPooledPreparesNoStatementAndNamesItsVariable(t *testing.T) {
+	db, err := OpenPooled(t.Context(), "postgres://arca:arca@127.0.0.1:1/arca?sslmode=disable")
+	if err != nil {
+		t.Fatalf("OpenPooled = %v", err)
+	}
+	defer db.Close()
+	p, ok := db.pool.(*pgxpool.Pool)
+	if !ok {
+		t.Fatalf("pool is a %T", db.pool)
+	}
+	cfg := p.Config().ConnConfig
+	if cfg.DefaultQueryExecMode != pgx.QueryExecModeCacheDescribe || cfg.StatementCacheCapacity != 0 {
+		t.Errorf("mode %v, statement cache %d; a transaction pooler needs no named prepared statement",
+			cfg.DefaultQueryExecMode, cfg.StatementCacheCapacity)
+	}
+	if _, err := OpenPooled(t.Context(), "://not a url"); err == nil || !strings.Contains(err.Error(), "ARCA_DB_POOL_URL") {
+		t.Fatalf("OpenPooled = %v, want the error that names the variable", err)
 	}
 }
