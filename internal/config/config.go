@@ -195,13 +195,6 @@ func Database(getenv Getenv) (string, error) {
 	return url, nil
 }
 
-// ServingDatabaseURL is the connection string the serving processes open
-// their pool from: the pooler's when ARCA_DB_POOL_URL is set, the direct
-// endpoint's otherwise. Migrations never use it.
-func (c Config) ServingDatabaseURL() string {
-	return cmp.Or(c.DatabasePoolURL, c.DatabaseURL)
-}
-
 // checkDatabaseURL answers the problem with the connection string held by
 // the named variable, or the empty string. The migrator selects its driver
 // from the scheme, so a keyword and value connection string, which the pool

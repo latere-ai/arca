@@ -503,7 +503,7 @@ func TestTheAudienceIsAListWithThePrimaryFirst(t *testing.T) {
 	}
 }
 
-func TestTheServingURLIsThePoolersWhenOneIsSet(t *testing.T) {
+func TestThePoolURLIsReadBesideTheDirectURL(t *testing.T) {
 	direct := "postgres://arca:arca@db:5432/arca?sslmode=disable"
 	pooled := "postgres://arca:arca@pooler:6432/arca?sslmode=disable"
 
@@ -511,16 +511,16 @@ func TestTheServingURLIsThePoolersWhenOneIsSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.DatabasePoolURL != "" || c.ServingDatabaseURL() != direct {
-		t.Errorf("without a pool URL: pool %q, serving %q; want the direct URL", c.DatabasePoolURL, c.ServingDatabaseURL())
+	if c.DatabasePoolURL != "" {
+		t.Errorf("without ARCA_DB_POOL_URL: pool %q, want none", c.DatabasePoolURL)
 	}
 
 	c, err = Load(required(map[string]string{"ARCA_DB_POOL_URL": " " + pooled + " "}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.ServingDatabaseURL() != pooled {
-		t.Errorf("serving = %q, want the pooler's %q", c.ServingDatabaseURL(), pooled)
+	if c.DatabasePoolURL != pooled {
+		t.Errorf("DatabasePoolURL = %q, want the pooler's %q", c.DatabasePoolURL, pooled)
 	}
 	if c.DatabaseURL != direct {
 		t.Errorf("DatabaseURL = %q; the direct URL is kept for migrations", c.DatabaseURL)
