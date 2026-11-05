@@ -14,6 +14,19 @@ database, and an issuer can run it.
 [![Go](https://img.shields.io/github/go-mod/go-version/latere-ai/arca)](go.mod)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
+## Status
+
+Arca is before 1.0: a minor release may remove a field, with a
+[changelog](CHANGELOG.md) entry that names the break, and
+[what a version number promises](docs/operations.md#what-a-version-number-promises)
+says the rest. The [releases](https://github.com/latere-ai/arca/releases)
+carry the signed images and the manifests.
+
+Everything under [What you get](#what-you-get) is served today; none of it
+is only designed. Arca has had no external security audit. The
+[security policy](SECURITY.md#what-is-protected) names the test behind
+each commitment it makes.
+
 ## The problem
 
 A platform that runs agents and sandboxes needs a place for what is
@@ -27,6 +40,74 @@ them last week.
 Arca is that place. It gives every principal a space, every file a version
 history and a trash, every share a permission, every space a usage count,
 and every change an event a consumer can tail.
+
+## Quickstart
+
+You need Go 1.27 or newer, `git`, `curl`, and Docker or Podman with
+Compose.
+
+```sh
+git clone https://github.com/latere-ai/arca.git && cd arca
+mkdir -p out && make run > out/run.log 2>&1 &
+until grep -q '^export ARCA_URL' out/run.log; do sleep 2; done
+grep -A2 '^export ARCA_URL' out/run.log | sh
+```
+
+`make run` builds `arcad`, starts Postgres and MinIO with a bucket,
+starts a stub issuer and a stub authorizer, applies the database
+migrations, and starts the server. Once it is ready, it checks itself,
+one line per requirement, and prints a token and two requests, which the
+last line runs. The first writes an object to your own space and the
+second reads it back:
+
+```
+{"path":"files/hello.txt","size":11,"checksum":"b187b04f...","checksum_kind":"sha256","content_type":"text/plain","is_public":false,"modified":"..."}
+hello, arca
+```
+
+`kill %1` stops the server and the stubs, and `make clean` removes the
+stack, its data and `out/`. Ports derive from the checkout's directory
+name, so two clones run side by side, and everything listens on
+loopback. [Running it locally](docs/local.md) is the same, step by step,
+with more requests.
+
+## How it fits
+
+```mermaid
+flowchart LR
+  client["Clients: people, agents, sandboxes"] -->|"requests with a token"| arcad
+  client -.->|"large reads and uploads, presigned"| bucket[("S3 compatible bucket")]
+  consumer["Event consumers"] -->|"read the event log by cursor"| arcad
+  arcad -->|"verifies tokens against its key set"| issuer["OIDC issuer"]
+  arcad -->|"asks each decision"| authorizer["Your authorizer, optional"]
+  arcad -->|"metadata"| postgres[("Postgres")]
+  arcad -->|"bytes"| bucket
+  prometheus["Prometheus"] -->|"scrapes metrics"| arcad
+  arcad -->|"traces and logs"| otlp["OTLP collector, optional"]
+```
+
+- **Clients** call the API with a token from an issuer you list. The
+  server handles metadata, authorization, and small objects; a large read
+  or upload goes between the client and the bucket over a presigned URL.
+- **Event consumers** tail each space's event log, rather than receiving
+  webhooks.
+- **The bucket** holds the bytes and **Postgres** holds what they mean:
+  owners, paths, versions, shares, usage, and events.
+- **Prometheus** scrapes the metrics, and an **OTLP collector**, when you
+  run one, receives a span per request and the log records beside it.
+
+Arca verifies and asks. Every request carries a token from an issuer you
+list; Arca checks it against the issuer's key set and reads nothing else
+from the issuer. Whether the caller may act is a question Arca sends,
+with the verified claims and the action, to an
+[authorization endpoint](docs/authorizer.md) you write. Without one, the owner policy applies: a subject acts on its own
+space, the administrators you list act on every space, and anyone else
+gets what a grant or a link gives them.
+
+The contract is shared with [Origo](https://github.com/latere-ai/origo),
+[Cella](https://github.com/latere-ai/cella), and
+[Lux](https://github.com/latere-ai/lux), so one endpoint can answer for
+all four.
 
 ## How it works
 
@@ -54,50 +135,6 @@ and every change an event a consumer can tail.
   own.
 - **Any replica serves any request.** Nothing is kept on local disk and
   there is no leader. Scale the Deployment.
-
-## Identity
-
-Arca verifies and asks. Every request carries a token from an issuer you
-list; Arca checks it against the issuer's key set and reads nothing else
-from the issuer. Whether the caller may act is a question Arca sends,
-with the verified claims and the action, to an authorization endpoint you
-write. Without one, the owner policy applies: a subject acts on its own
-space, the administrators you list act on every space, and anyone else
-gets what a grant or a link gives them.
-
-The contract is shared with [Origo](https://github.com/latere-ai/origo),
-[Cella](https://github.com/latere-ai/cella), and
-[Lux](https://github.com/latere-ai/lux), so one endpoint can answer for
-all four.
-
-## Try it in a few minutes
-
-You need Go 1.27 or newer, `git`, `curl`, and Docker or Podman with
-Compose.
-
-```sh
-git clone https://github.com/latere-ai/arca.git
-cd arca
-make run
-```
-
-That builds `arcad`, starts Postgres and MinIO with a bucket, starts a
-stub issuer and a stub authorizer, applies the database migrations, and
-runs the server in the foreground. Once it is ready it runs `arcad check`
-against itself, one line per requirement, and then prints a token and two
-requests to paste into another terminal:
-
-```
-export ARCA_URL=http://localhost:<port> ARCA_TOKEN=<token>
-curl -sS -X PUT -H "Authorization: Bearer $ARCA_TOKEN" ... "$ARCA_URL/v1/files/<you>/files/hello.txt"
-curl -sS -H "Authorization: Bearer $ARCA_TOKEN" "$ARCA_URL/v1/files/<you>/files/hello.txt"
-```
-
-The first writes an object to your own space and the second reads it
-back. Ports derive from the checkout's directory name, so two clones run
-side by side, and everything listens on loopback. Stop the server with
-Ctrl-C, then `make run-down` stops the stubs and `make clean` removes the
-stack and its data.
 
 ## Install it for real
 
@@ -145,9 +182,12 @@ An authorization endpoint is optional.
 
 | | |
 |---|---|
+| [Running it locally](docs/local.md) | the server and everything it needs on one machine, from a clone, with requests that show it working |
 | [Install](docs/install.md) | from a cluster, a bucket, and a database to a serving installation |
 | [Configuration](docs/configuration.md) | every environment variable with its default |
-| [API](docs/api.md) | the model, every route, errors, and the authorization endpoint you write |
+| [API](docs/api.md) | the model, every route, lists, conditional requests, errors, and limits |
+| [Authorizer](docs/authorizer.md) | the question Arca asks the endpoint you write, the actions, the answer and the limits it may carry, and the policy without one |
+| [Security](docs/security.md) | what Arca guarantees, what it sees and keeps, what it does not defend, and what an operator keeps safe |
 | [Operations](docs/operations.md) | checking an installation, upgrades and rollbacks, verifying a release, monitoring |
 
 [`docs/README.md`](docs/README.md) is the index.
