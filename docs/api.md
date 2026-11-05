@@ -578,6 +578,9 @@ A bucket that has no per-object public setting, such as MinIO, still makes the
 link; the object is then read only through Arca's redirects, unless the
 bucket's own policy lets anyone read it.
 
+Several `public` links can name one object. It stays public until the last of
+them is revoked, so revoking one leaves the others reading as before.
+
 ## Events
 
 | Method | Path | Action | What it does |
