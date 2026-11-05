@@ -195,12 +195,12 @@ func case013RequestID(t *testing.T, s *session) {
 	failIf(t, kept.header.Get(HeaderRequestID) != mine,
 		"a client id within the rule came back as %q, want %q", kept.header.Get(HeaderRequestID), mine)
 
-	// Over 128 characters, and outside printable ASCII: both are outside the
-	// rule, and both are replaced by one the server minted. A control
+	// Over 128 characters, a space, and outside visible ASCII: each is outside the
+	// rule, and each is replaced by one the server minted. A control
 	// character is not among them: net/http refuses to put one in a header
 	// at all, so no target ever sees one and a case sending one would be
 	// asserting against its own client.
-	for _, outside := range []string{strings.Repeat("a", 200), "aéb"} {
+	for _, outside := range []string{strings.Repeat("a", 200), "aéb", "a b"} {
 		r := s.with(t, Alice, http.MethodGet, "/v1/shares?limit=1", "", map[string]string{HeaderRequestID: outside})
 		got := r.header.Get(HeaderRequestID)
 		failIf(t, got == outside, "a client id outside the rule was echoed: %q", got)

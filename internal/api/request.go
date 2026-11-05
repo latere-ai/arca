@@ -12,13 +12,14 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"latere.ai/x/pkg/otel"
+	"latere.ai/x/pkg/requestid"
 
 	"latere.ai/x/arca/internal/auth"
 )
 
 // Header is the request id a client may send and every response carries
 // back, errors included.
-const Header = "X-Request-Id"
+const Header = requestid.Header
 
 // Prefix opens every request id arcad mints, so an id in a log is read at a
 // glance as this server's rather than a caller's.
@@ -27,7 +28,7 @@ const Prefix = "req_"
 // MaxClientRequestID is the bound on a client's own id: spec 013 keeps one
 // of at most this many printable ASCII characters and replaces anything
 // else, so a header cannot carry a log injection or a megabyte.
-const MaxClientRequestID = 128
+const MaxClientRequestID = requestid.MaxLen
 
 type requestIDKey struct{}
 
@@ -68,24 +69,10 @@ func (a *API) requestID(next http.Handler) http.Handler {
 // so a caller correlates its own logs with the server's, and anything else
 // is replaced with one this server minted.
 func (a *API) identify(r *http.Request) string {
-	if given := r.Header.Get(Header); usableID(given) {
+	if given := r.Header.Get(Header); requestid.Valid(given) {
 		return given
 	}
 	return Prefix + a.newID()
-}
-
-// usableID reports whether a client's id may be kept: at most the bound, and
-// printable ASCII throughout, so nothing in it can break a log line.
-func usableID(id string) bool {
-	if id == "" || len(id) > MaxClientRequestID {
-		return false
-	}
-	for i := range len(id) {
-		if id[i] < 0x20 || id[i] > 0x7e {
-			return false
-		}
-	}
-	return true
 }
 
 // crockford is the alphabet of a ULID: base32 without the letters a reader

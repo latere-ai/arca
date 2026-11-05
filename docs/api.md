@@ -110,8 +110,8 @@ refusal never reveals that something is there.
   which is required (`411 length_required`).
 - Every response body is JSON unless it is object bytes. Every timestamp is
   RFC 3339 in UTC. Every size is a number of bytes.
-- Every response carries `X-Request-Id`. Send your own, up to 128 printable
-  ASCII characters, and it is kept; otherwise Arca mints one. It is in every
+- Every response carries `X-Request-Id`. Send your own, up to 128 visible
+  ASCII characters with no space, and it is kept; otherwise Arca mints one. It is in every
   error body and in the server's log line for the request.
 - An installation that exports traces also answers `X-Trace-Id`, the trace
   the request was recorded under. Quote it beside `X-Request-Id` when you

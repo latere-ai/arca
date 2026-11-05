@@ -34,6 +34,8 @@ func TestEveryRequestCarriesAnId(t *testing.T) {
 			reason: "an id without a bound is a log line without a bound"},
 		{name: "one carrying a newline", given: "one\ntwo", kept: false,
 			reason: "an id that breaks a log line is an id that forges one"},
+		{name: "one carrying a space", given: "one two", kept: false,
+			reason: "an id with a space splits a logfmt line into two fields"},
 		{name: "one carrying a control character", given: "one\x00two", kept: false},
 		{name: "one carrying a character outside ASCII", given: "réquest", kept: false},
 	}
