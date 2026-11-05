@@ -8,6 +8,12 @@ refused before it is pushed.
 
 ### Fixed
 
+- **A file whose public link expired stops being public.** The link
+  stopped working at its expiry, but the bucket kept serving the file to
+  anyone with its address. The reconciler now makes the file private on
+  its next run after the last public link on it expires, and while the
+  bucket refuses it keeps the file on its list for the next run.
+
 - **A public link the bucket will not mark leaves nothing behind.** The
   create still answers `503 storage_unavailable`, and now takes back the
   link and the file's public mark, so other reads of the file answer as
