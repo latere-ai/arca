@@ -97,6 +97,21 @@ space. The pass table said "revokes it" and now says "deletes it", which is
 what [[008-shares-and-links]] states and the only one of the two that has an
 effect: a revoke of a row that already grants nothing changes nothing.
 
+**Amended 2026-11-06:** pass 7 also clears what an expired public grant left
+on its object. The grant granted nothing from its expiry, but the row's mark
+and the bucket's ACL stayed, so the object was readable through the bucket
+long after, and the purge deleted the only row that named it. The pass now
+reads the objects whose last public grant expired, takes each one's ACL off
+and then its mark, and the purge keeps an expired public grant whose object
+is still marked; [[008-shares-and-links]] records the order and why it is
+the reverse of a revoke's. The purge runs first, so the dry count and the
+live run read one state: a dry run counts the grants the purge takes and the
+objects the clear would reach, and a live run answers the grants it removed
+plus the objects it cleared, both under `share_expired`. The pass therefore
+needs the bucket, which both `serve` and `reap` hand it. It still appends
+no event: the expiry is what changed who may read, written on the grant when
+it was made, and the clear brings the bucket to what the grants already say.
+
 ### The route
 
 `GET /v1/events` is a handler function, `events.Handler(log, querier, guard,
@@ -415,7 +430,7 @@ what each failure leaves behind.
 | 4 | expired uploads | an upload session idle past its TTL | aborts the multipart, then deletes the row ([[007-uploads]]) |
 | 5 | trash | a trashed object past `ARCA_TRASH_RETENTION` | deletes the rows, then the keys |
 | 6 | retired | retired 2026-10-12 by [[028-one-tree]] with the record it purged; the number is not reused. What a soft deleted workspace held is trashed objects, which pass 5 purges | |
-| 7 | grant hygiene | a grant expired long ago | deletes it ([[008-shares-and-links]]) |
+| 7 | grant hygiene | a grant expired long ago; an object whose last public grant expired | clears the object's public mark and ACL, the bucket first, then deletes a grant expired long ago once nothing it marked is still public ([[008-shares-and-links]]) |
 | 8 | stale stars | a star whose path has no live `files` row | deletes it ([[005-files]]) |
 | 9 | log retention | an event older than thirty days | deletes it |
 | 10 | ledger reconciliation | a `space_usage` row that differs from the sum over the rows that hold the bytes | corrects the row and reports the difference |

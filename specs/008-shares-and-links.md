@@ -185,6 +185,40 @@ What the implementation decided, where this spec was silent:
   `TestOnlyTheFirstAndTheLastPublicLinkCallTheBucket`,
   `TestARevokeThatCannotReadTheOtherLinksChangesNothing` and
   `TestStoreLinksAHoldWaitsAndThenReadsTheRevokeBeforeIt` hold it.
+- **Amended 2026-11-06:** an object whose last public grant has expired
+  stops being public on the next run of pass 7 ([[010-events-and-reaper]]).
+  The grant stopped granting at its expiry, but the row's mark and the
+  bucket's ACL it put on stayed, and the purge removed the grant a retention
+  window later without touching either, so on a bucket with object ACLs the
+  object stayed readable without a token. `Expiry.Sweep` now reads the
+  lapsed objects (`Shares.Lapsed`: a live row still marked, named by an
+  active public grant that has expired and by no live one) and clears each,
+  the bucket first: the ACL comes off while the row is still marked, then the
+  row is held, the other grants are read again, and the mark is cleared. The
+  order is the reverse of `withdraw`'s because the retry is different: a
+  revoke's retry is the caller's same request against a grant still live,
+  and this pass's retry is the next read of `Lapsed`, which finds only a row
+  still marked. A row unmarked before a bucket that then refused, with a
+  database that would not put the mark back, would be an object readable
+  without a token that nothing looks at again. A refused bucket call
+  therefore changes nothing and the next run tries again, and the purge
+  keeps an expired public grant whose object is still lapsed however old it
+  is, so the only row that names the object is never removed before its
+  clear lands. A public link made between the read and the hold found the
+  row marked and stamped nothing, so the pass leaves the mark and puts the
+  ACL back; a bucket that will not put it back is the run's failure, and the
+  link grants less than was asked until the last public link on the object
+  goes. A clear of a key the bucket does not hold is done, for the pass and
+  a revoke alike, because a missing object carries no ACL. The pass starts
+  from the expired grants and never from the marked rows: a row the
+  migration from Drive carried over public has no grant behind it, and its
+  publicity is not this pass's to take. A trashed object's mark is outside
+  it, as it is outside a revoke's. `TestAnExpiredPublicLinkLeavesNoMarkAndNoACL`,
+  `TestASecondLivePublicLinkKeepsTheMarkAndTheACL`,
+  `TestARefusedClearKeepsTheObjectForTheNextRun`,
+  `TestALinkMadeWhileTheObjectClearsKeepsItPublic`,
+  `TestStoreAnObjectWhoseLastPublicGrantExpiredIsLapsedUntilItClears` and
+  `TestE2EAnExpiredPublicLinkIsClearedByTheReaper` hold it.
 - **Amended 2026-11-05:** a store that holds no object ACLs answers
   `ErrNotSupported`, which [[003-object-store]] has a caller carry on from,
   and the create carries on: the grant is written and the row marked, and
@@ -429,6 +463,10 @@ create still succeeds; Current state records it. The handler calls
 revoke of the last, not on every create and revoke; Current state records
 that too.
 
+**Amended 2026-11-06:** when the last public grant on an object expires
+rather than being revoked, pass 7 of [[010-events-and-reaper]] clears it on
+its next run. Current state records how.
+
 **Amended 2026-10-18 ([[031-download-only-link-reads]]):** the `302` to
 `ARCA_PUBLIC_CDN_URL` is the owner's own read of a public object. A read
 of it through the link is presigned with the attachment disposition,
@@ -460,6 +498,14 @@ is `ARCA_TRASH_RETENTION`, because there is no second retention setting
 Expiry needs no sweep to take effect. `Covering` and the token lookup both
 filter on `expires_at`, so an expired grant stops granting at the moment
 it expires whether or not anything has run.
+
+**Amended 2026-11-06:** what a public grant put on its object is the
+exception. The row's mark and the bucket's ACL stay until pass 7 next runs,
+every `ARCA_REAP_INTERVAL` on a replica or on the operator's `arcad reap`
+schedule, and until then the object is readable through the bucket without a
+token. The pass clears both once no live public grant names the object, and
+the purge keeps the expired grant until it has; Current state records the
+order.
 
 ### Events
 

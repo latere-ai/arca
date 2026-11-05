@@ -87,7 +87,12 @@ before it reads the others (`hold`), so two revokes of the last two
 grants cannot both read the other as live and both leave the ACL on. A create
 the bucket will not stamp is taken back (`unmint`): the grant is revoked
 and the mark cleared, so no grant is left whose token nobody was given.
-On a store that holds no object ACLs nothing is stamped, and the bytes
+An expired grant goes the other way: it stops granting at its expiry, and
+pass 7 of [[010-events-and-reaper]] takes the ACL off and then the mark
+once no live public grant names the object (`Expiry`, `clear`), keeping
+the expired grant from the purge until it has. Until that pass runs the
+object stays readable through the bucket, so the window is the reaper's
+interval. On a store that holds no object ACLs nothing is stamped, and the bytes
 are readable without a token only where the operator's bucket policy
 makes them so.
 
@@ -113,7 +118,7 @@ flowchart LR
   A --> P
   A --> B
   C -.->|presigned URL, one object, five minutes| B
-  L -.->|public-read ACL, no credential, until revoked| B
+  L -.->|public-read ACL, no credential, until revoked or reaped| B
   A -->|key set only| I
   A -->|one question| Z
 ```
@@ -126,8 +131,8 @@ authorizer the control is configuration: `arcad` trusts them because the
 operator named them, and calls the issuer for a key set and nothing
 else. The fourth is the dotted pair, where bytes leave the bucket
 without passing through this server at all: a presigned URL, bounded by
-`blob.PresignTTL`, and a public object's ACL, bounded only by the
-revoke.
+`blob.PresignTTL`, and a public object's ACL, bounded by the revoke or,
+for a grant that expires, by the reaper's next run after it.
 
 Nothing in the core dials an address a consumer chose. Arca makes
 outbound calls to the bucket, the database, the issuer, and the
@@ -375,7 +380,7 @@ it. Names are as they appear in the tree.
 | a link token in a listing | the token is answered once at creation and is absent from every other shape | 008 | `TestMintingALinkAnswersTheTokenOnce` |
 | a link that grants more than reading | a token grant carries `read`; a create asking for more is `link_read_only` | 008 | `TestALinkThatWouldGrantMoreThanReadingIsRefused`, `TestE2EALinkThatWouldWriteIsRefused` |
 | a link read outside the subtree it names | the prefix is matched by segment, so `files/reports` covers `files/reports/q3.pdf` and not `files/reports-archive` | 008 | `TestALinkServesNothingOutsideItsPrefix` |
-| a public object readable after its grant is gone | the ACL is cleared before the row is revoked, and a bucket that will not answer leaves the grant standing and its mark put back rather than the object readable. A create the bucket will not stamp leaves no grant and no mark behind. The ACL is cleared with the last live public grant on the object, and the revokes of the last two hold the object's row in turn, so neither reads the other as live once it is gone. A prefix naming a subtree marks no object at all | 008, 003 | `TestAPublicGrantMarksTheObjectItNames`, `TestAPublicGrantOverASubtreeMarksNoObject`, `TestARefusedStampLeavesNoLinkBehind`, `TestARefusedClearLeavesTheLinkAndItsMark`, `TestRevokingOneOfTwoPublicLinksKeepsTheMark`, `TestStoreLinksAHoldWaitsAndThenReadsTheRevokeBeforeIt`, `TestStoreACopyOfAPublicObjectIsStampedAndNotCarried` |
+| a public object readable after its grant is gone | the ACL is cleared before the row is revoked, and a bucket that will not answer leaves the grant standing and its mark put back rather than the object readable. A create the bucket will not stamp leaves no grant and no mark behind. The ACL is cleared with the last live public grant on the object, and the revokes of the last two hold the object's row in turn, so neither reads the other as live once it is gone. The object of a grant that expired is cleared by pass 7, the ACL before the mark, and the expired grant is kept from the purge until it has. A prefix naming a subtree marks no object at all | 008, 003, 010 | `TestAPublicGrantMarksTheObjectItNames`, `TestAnExpiredPublicLinkLeavesNoMarkAndNoACL`, `TestARefusedClearKeepsTheObjectForTheNextRun`, `TestStoreAnObjectWhoseLastPublicGrantExpiredIsLapsedUntilItClears`, `TestAPublicGrantOverASubtreeMarksNoObject`, `TestARefusedStampLeavesNoLinkBehind`, `TestARefusedClearLeavesTheLinkAndItsMark`, `TestRevokingOneOfTwoPublicLinksKeepsTheMark`, `TestStoreLinksAHoldWaitsAndThenReadsTheRevokeBeforeIt`, `TestStoreACopyOfAPublicObjectIsStampedAndNotCarried` |
 | usage accounting bypass through multipart | the session is charged its declared size, and the completion charges the difference against the assembled size read back from the store | 007, 010 | `TestACompletionPastTheAnswersLimitIsRefusedAndTheObjectGoes`, `TestTheCompletionReadsTheAssembledSizeBack` |
 | usage accounting bypass by holding many open sessions | an open session's declared bytes are charged from the moment it opens until it completes or is reaped | 007, 010 | `TestASessionThatCouldNotBeOpenedLeavesNoMultipartAndNoCharge`, `TestAnExpiredSessionIsSweptWithItsPartsAndItsCharge` |
 | a usage charge that fails open | the charge and the check are one statement inside the write's own transaction, so a failure refuses the write and records no charge | 010 | `TestUsageFailsClosed`, `TestStoreUsageFailsClosed`, `TestALedgerThatCannotBeWrittenTakesTheWriteDownWithIt`, `TestAWriteRefusedByTheLedgerLeavesNoRowAndNoBytes` |
