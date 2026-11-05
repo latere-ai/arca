@@ -51,6 +51,7 @@ func newHarness(t *testing.T, opts ...func(*shares.Options)) *harness {
 		bucket:   newBucket(),
 	}
 	h.db = &database{table: h.table}
+	h.reader.table = h.table
 	h.endpoint.Allow(stub.Rule{Subject: "*", Action: "*", Resource: "*", Allow: true})
 
 	id, err := auth.Start(t.Context(), auth.Options{

@@ -300,25 +300,28 @@ func (s *Service) RevokeGrant(w http.ResponseWriter, r *http.Request) {
 
 // revoke marks one grant revoked and appends its event in one transaction.
 func (s *Service) revoke(ctx context.Context, g store.Grant) error {
-	actor := auth.CallerFrom(ctx).Subject
-	err := s.db.Tx(ctx, func(q store.Querier) error {
-		if _, err := s.store.Revoke(ctx, q, g.ID); err != nil {
-			return err
-		}
-		_, err := s.ledger.Append(ctx, q, Event{
-			Owner: g.Owner, Path: g.PathPrefix, Action: ActionShareRevoked,
-			Actor: actor, Detail: map[string]any{
-				"share_id":     g.ID,
-				"grantee_kind": g.GranteeKind,
-				"path_prefix":  g.PathPrefix,
-			},
-		})
-		return err
-	})
+	err := s.db.Tx(ctx, func(q store.Querier) error { return s.revokeIn(ctx, q, g) })
 	if err != nil {
 		return fmt.Errorf("shares: revoke the grant: %w", err)
 	}
 	return nil
+}
+
+// revokeIn revokes one grant and records it, inside the caller's
+// transaction.
+func (s *Service) revokeIn(ctx context.Context, q store.Querier, g store.Grant) error {
+	if _, err := s.store.Revoke(ctx, q, g.ID); err != nil {
+		return err
+	}
+	_, err := s.ledger.Append(ctx, q, Event{
+		Owner: g.Owner, Path: g.PathPrefix, Action: ActionShareRevoked,
+		Actor: auth.CallerFrom(ctx).Subject, Detail: map[string]any{
+			"share_id":     g.ID,
+			"grantee_kind": g.GranteeKind,
+			"path_prefix":  g.PathPrefix,
+		},
+	})
+	return err
 }
 
 // subjectGrant reads the grant a {id} route names, and refuses a token grant

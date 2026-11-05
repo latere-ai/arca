@@ -5,9 +5,11 @@ package shares
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"time"
 
 	"latere.ai/x/pkg/httpjson"
@@ -15,6 +17,7 @@ import (
 	"latere.ai/x/arca/authorizer"
 	"latere.ai/x/arca/internal/api"
 	"latere.ai/x/arca/internal/auth"
+	"latere.ai/x/arca/internal/blob"
 	"latere.ai/x/arca/internal/store"
 )
 
@@ -110,12 +113,13 @@ func (s *Service) CreateLink(w http.ResponseWriter, r *http.Request) {
 // mint writes one token grant, its event, and, for a public grant whose
 // prefix names one object, the public flag on that object's row. The bucket
 // is stamped after the transaction commits, because a transaction holds no
-// bucket call (spec 004).
+// bucket call (spec 004), and never before it: an ACL on an object no grant
+// covers would be a leak.
 //
-// The order is the safe one. A public flag on the row with no ACL on the
-// object grants less than the caller asked for, and a failed stamp is
-// answered as an unavailable store rather than swallowed; an ACL on an
-// object no grant covers would be the other way round, and that is a leak.
+// A stamp the bucket refuses is answered as an unavailable store, and the
+// transaction's work is taken back first (unmint). The caller was given no
+// token, so a grant left live would be one nobody holds, and a row left
+// marked would redirect every read of an object the bucket does not serve.
 func (s *Service) mint(ctx context.Context, g store.Grant) (store.Grant, error) {
 	var written store.Grant
 	var object store.File
@@ -142,9 +146,50 @@ func (s *Service) mint(ctx context.Context, g store.Grant) (store.Grant, error) 
 		return store.Grant{}, fmt.Errorf("shares: mint the link: %w", err)
 	}
 	if err := s.stamp(ctx, object, true); err != nil {
+		s.unmint(ctx, written)
 		return store.Grant{}, err
 	}
 	return written, nil
+}
+
+// unmint takes back a public grant whose stamp the bucket refused, in one
+// transaction: the grant is revoked, the revoke is recorded beside the
+// create under the same id, and the row's flag is cleared unless another
+// live public grant names the same object, so the row reads as it did
+// before the request.
+//
+// A database that will not take it back is logged and the caller still reads
+// the unavailable store. What it leaves is a grant whose token nobody was
+// given and a row marked over an object the bucket does not serve, which
+// grants less than was asked and never more.
+func (s *Service) unmint(ctx context.Context, g store.Grant) {
+	err := s.db.Tx(ctx, func(q store.Querier) error {
+		if err := s.revokeIn(ctx, q, g); err != nil {
+			return err
+		}
+		marked, err := s.markedElsewhere(ctx, q, g)
+		if err != nil || marked {
+			return err
+		}
+		_, err = s.publicRow(ctx, q, g, false)
+		return err
+	})
+	if err != nil {
+		slog.ErrorContext(ctx, "shares: take back a public link the bucket did not stamp",
+			"share_id", g.ID, "error", err)
+	}
+}
+
+// markedElsewhere reports whether a live public grant other than g names the
+// object g names, which then stays marked when g is taken back.
+func (s *Service) markedElsewhere(ctx context.Context, q store.Querier, g store.Grant) (bool, error) {
+	held, err := s.store.Covering(ctx, q, g.Owner, g.PathPrefix)
+	if err != nil {
+		return false, err
+	}
+	return slices.ContainsFunc(held, func(h store.Grant) bool {
+		return h.ID != g.ID && h.GranteeKind == store.GranteePublic && h.PathPrefix == g.PathPrefix
+	}), nil
 }
 
 // publicRow marks the object a public grant's prefix names, and answers the
@@ -168,14 +213,28 @@ func (s *Service) publicRow(ctx context.Context, q store.Querier, g store.Grant,
 // stamp puts the bucket's public-read ACL on the object a public grant
 // covers, or takes it off. An object no row named, and a build with no
 // bucket bound, stamp nothing.
+//
+// A store that holds no object ACLs answers ErrNotSupported, which spec 003
+// has a caller carry on from: the row is marked, a read of the object is the
+// presigned redirect, and whether the world reads it directly is the bucket
+// policy's, which the operator sets and arcad does not. There is no ACL to
+// put on, so there is none to take off either.
 func (s *Service) stamp(ctx context.Context, f store.File, public bool) error {
 	if s.publisher == nil || f.ObjectID == "" {
 		return nil
 	}
-	if err := s.publisher.SetPublic(ctx, f.ObjectID.Key(s.bucketPrefix), public); err != nil {
+	err := s.publisher.SetPublic(ctx, f.ObjectID.Key(s.bucketPrefix), public)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, blob.ErrNotSupported):
+		slog.InfoContext(ctx, "shares: the store holds no object ACLs; the row is marked and the bucket is not",
+			"object_id", f.ObjectID, "public", public)
+		return nil
+	default:
+		slog.ErrorContext(ctx, "shares: stamp the object's public flag", "object_id", f.ObjectID, "public", public, "error", err)
 		return api.Refuse(api.CodeStorageUnavailable, "the object's public flag was not stamped")
 	}
-	return nil
 }
 
 // ListLinks answers GET /v1/shares/links: the token grants on a space.
@@ -238,6 +297,10 @@ func (s *Service) RevokeLink(w http.ResponseWriter, r *http.Request) {
 // standing and the caller retrying, which grants no more than before, while
 // revoking first and failing to clear would leave an object readable that no
 // grant covers.
+//
+// The row's flag is cleared in the transaction that answers the object to
+// clear, so a bucket that will not clear has it put back (remark): the row
+// then says public for as long as the bucket's ACL does.
 func (s *Service) withdraw(ctx context.Context, g store.Grant) error {
 	if g.GranteeKind == store.GranteePublic {
 		var object store.File
@@ -250,10 +313,25 @@ func (s *Service) withdraw(ctx context.Context, g store.Grant) error {
 			return fmt.Errorf("shares: clear the public flag: %w", err)
 		}
 		if err := s.stamp(ctx, object, false); err != nil {
+			s.remark(ctx, g)
 			return err
 		}
 	}
 	return s.revoke(ctx, g)
+}
+
+// remark puts back the flag a revoke cleared when the bucket would not clear
+// the ACL. A database that will not is logged; the caller still reads the
+// unavailable store, and the retry clears both.
+func (s *Service) remark(ctx context.Context, g store.Grant) {
+	err := s.db.Tx(ctx, func(q store.Querier) error {
+		_, err := s.publicRow(ctx, q, g, true)
+		return err
+	})
+	if err != nil {
+		slog.ErrorContext(ctx, "shares: put back the public flag the bucket did not clear",
+			"share_id", g.ID, "error", err)
+	}
 }
 
 // Counter answers the link count of spec 012's overview through that spec's

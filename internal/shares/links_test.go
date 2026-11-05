@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,6 +18,7 @@ import (
 
 	"latere.ai/x/arca/authorizer"
 	"latere.ai/x/arca/internal/api"
+	"latere.ai/x/arca/internal/blob"
 	"latere.ai/x/arca/internal/shares"
 	"latere.ai/x/arca/internal/store"
 	"latere.ai/x/arca/object"
@@ -404,17 +406,226 @@ func TestAPublicGrantOverASubtreeMarksNoObject(t *testing.T) {
 	}
 }
 
-// TestABucketThatWillNotStampIsAnUnavailableStore: the flag is not swallowed.
-func TestABucketThatWillNotStampIsAnUnavailableStore(t *testing.T) {
-	h := newHarness(t)
-	anObject(h, "files/reports/q3.pdf")
-	h.bucket.fail = errors.New("the bucket is not answering")
-	w := h.do(t, http.MethodPost, "/v1/shares/links", "alice", map[string]any{
-		"owner": "me", "path_prefix": "files/reports/q3.pdf", "kind": store.GranteePublic,
+// linkRead reads one object through a token, with no bearer.
+func linkRead(t *testing.T, h *harness, link shares.Link, path string) *httptest.ResponseRecorder {
+	t.Helper()
+	return h.do(t, http.MethodGet, "/v1/shares/links/"+link.Token+"/files/"+path, "", nil)
+}
+
+// liveLinks answers the token grants the space's listing shows, by kind.
+func liveLinks(t *testing.T, h *harness) map[string]int {
+	t.Helper()
+	w := h.do(t, http.MethodGet, "/v1/shares/links", "alice", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /v1/shares/links = %d: %s", w.Code, w.Body)
+	}
+	kinds := map[string]int{}
+	for _, g := range pageOf[shares.Grant](t, w).Entries {
+		kinds[g.GranteeKind]++
+	}
+	return kinds
+}
+
+// askPublic asks for a public link over one path and answers the response,
+// whatever it is.
+func askPublic(t *testing.T, h *harness, path string) *httptest.ResponseRecorder {
+	t.Helper()
+	return h.do(t, http.MethodPost, "/v1/shares/links", "alice", map[string]any{
+		"owner": "me", "path_prefix": path, "kind": store.GranteePublic,
 	})
+}
+
+// TestARefusedStampLeavesNoLinkBehind: a create the bucket will not stamp is
+// an unavailable store, and it takes back what its transaction wrote. No
+// live grant is left whose token nobody was given, the row is not marked
+// public, and a read of the object through another link answers as it did
+// before the attempt rather than redirecting.
+func TestARefusedStampLeavesNoLinkBehind(t *testing.T) {
+	h := newHarness(t)
+	object := anObject(h, "files/reports/q3.pdf")
+	folder := mint(t, h, "files/reports", "")
+	if w := linkRead(t, h, folder, object.Path); w.Code != http.StatusOK {
+		t.Fatalf("before the attempt the link read = %d: %s", w.Code, w.Body)
+	}
+
+	h.bucket.fail = errors.New("the bucket is not answering")
+	w := askPublic(t, h, object.Path)
 	if got := refusalOf(t, w); got != api.CodeStorageUnavailable {
 		t.Errorf("a bucket that will not stamp = %q %d", got, w.Code)
 	}
+	if strings.Contains(w.Body.String(), "token") {
+		t.Errorf("the refusal carries a token: %s", w.Body)
+	}
+
+	if got := liveLinks(t, h); got[store.GranteePublic] != 0 || got[store.GranteeLink] != 1 {
+		t.Errorf("after the refused stamp the space lists %v", got)
+	}
+	if h.table.public(object.Path) {
+		t.Error("the row is marked public over an object the bucket would not stamp")
+	}
+	if _, stamped := h.bucket.stamped(object.ObjectID.Key("arca/")); stamped {
+		t.Error("the bucket holds an ACL for a create it refused")
+	}
+	if w := linkRead(t, h, folder, object.Path); w.Code != http.StatusOK {
+		t.Errorf("after the refused stamp the link read = %d, want what it answered before", w.Code)
+	}
+
+	// The create and its undoing are both in the log, under one id, so a
+	// consumer that read the create reads that the grant is gone.
+	entries := h.ledger.all()
+	if len(entries) != 3 || entries[1].Action != shares.ActionShareCreated || entries[2].Action != shares.ActionShareRevoked {
+		t.Fatalf("the log holds %+v", entries)
+	}
+	if entries[1].Detail["share_id"] != entries[2].Detail["share_id"] {
+		t.Errorf("the revoke names %v and the create %v", entries[2].Detail["share_id"], entries[1].Detail["share_id"])
+	}
+
+	// Once the bucket answers, the same create succeeds.
+	h.bucket.fail = nil
+	if w := askPublic(t, h, object.Path); w.Code != http.StatusCreated {
+		t.Fatalf("the retry = %d: %s", w.Code, w.Body)
+	}
+	if public, _ := h.bucket.stamped(object.ObjectID.Key("arca/")); !public || !h.table.public(object.Path) {
+		t.Error("the retry did not mark the object public")
+	}
+}
+
+// TestARefusedStampKeepsAnotherPublicLinksMark: taking back a refused create
+// clears the mark only when no other live public link names the object, so
+// a second attempt that fails leaves the first link as it was.
+func TestARefusedStampKeepsAnotherPublicLinksMark(t *testing.T) {
+	h := newHarness(t)
+	object := anObject(h, "files/reports/q3.pdf")
+	first := mint(t, h, object.Path, store.GranteePublic)
+	if w := linkRead(t, h, first, object.Path); w.Code != http.StatusFound {
+		t.Fatalf("a public object read through its link = %d", w.Code)
+	}
+
+	h.bucket.fail = errors.New("the bucket is not answering")
+	if got := refusalOf(t, askPublic(t, h, object.Path)); got != api.CodeStorageUnavailable {
+		t.Errorf("a bucket that will not stamp = %q", got)
+	}
+	if got := liveLinks(t, h); got[store.GranteePublic] != 1 {
+		t.Errorf("after the second attempt the space lists %v", got)
+	}
+	if !h.table.public(object.Path) {
+		t.Error("the refused second link cleared the first link's mark")
+	}
+	if w := linkRead(t, h, first, object.Path); w.Code != http.StatusFound {
+		t.Errorf("the first link now reads %d, want what it answered before", w.Code)
+	}
+}
+
+// TestARefusedClearLeavesTheLinkAndItsMark is the revoke's half. The bucket
+// is cleared before the grant is revoked, and a bucket that will not clear
+// leaves the grant live and its row still marked, matching the ACL the
+// bucket still holds, so the retry finds what the first attempt found.
+func TestARefusedClearLeavesTheLinkAndItsMark(t *testing.T) {
+	h := newHarness(t)
+	object := anObject(h, "files/reports/q3.pdf")
+	link := mint(t, h, object.Path, store.GranteePublic)
+	key := object.ObjectID.Key("arca/")
+
+	h.bucket.fail = errors.New("the bucket is not answering")
+	w := h.do(t, http.MethodDelete, "/v1/shares/links/"+link.ID, "alice", nil)
+	if got := refusalOf(t, w); got != api.CodeStorageUnavailable {
+		t.Errorf("a bucket that will not clear = %q %d", got, w.Code)
+	}
+	if kept, _ := h.table.held(link.ID); kept.Status != store.GrantActive {
+		t.Error("the grant was revoked over an object the bucket still serves")
+	}
+	if !h.table.public(object.Path) {
+		t.Error("the row reads as private over an object the bucket still serves")
+	}
+	if public, _ := h.bucket.stamped(key); !public {
+		t.Error("the fake bucket lost its ACL")
+	}
+	if w := linkRead(t, h, link, object.Path); w.Code != http.StatusFound {
+		t.Errorf("the link now reads %d, want what it answered before", w.Code)
+	}
+
+	h.bucket.fail = nil
+	if w := h.do(t, http.MethodDelete, "/v1/shares/links/"+link.ID, "alice", nil); w.Code != http.StatusNoContent {
+		t.Fatalf("the retry = %d: %s", w.Code, w.Body)
+	}
+	if public, _ := h.bucket.stamped(key); public || h.table.public(object.Path) {
+		t.Error("the retry did not clear the object")
+	}
+}
+
+// TestAStoreWithoutObjectACLsStillMakesAPublicLink: a store that holds no
+// object ACLs answers ErrNotSupported, which spec 003 has a caller carry on
+// from. The grant and the row's mark are written, nothing is stamped, and
+// the revoke clears the row the same way. Whether the world can read the
+// object directly is then the bucket policy's, which the operator sets.
+func TestAStoreWithoutObjectACLsStillMakesAPublicLink(t *testing.T) {
+	h := newHarness(t)
+	object := anObject(h, "files/reports/q3.pdf")
+	h.bucket.fail = fmt.Errorf("blob: set public %q: %w", "arca/key", blob.ErrNotSupported)
+
+	link := mint(t, h, object.Path, store.GranteePublic)
+	if !h.table.public(object.Path) {
+		t.Error("the row is not marked public")
+	}
+	if _, stamped := h.bucket.stamped(object.ObjectID.Key("arca/")); stamped {
+		t.Error("a store without object ACLs recorded one")
+	}
+	if w := linkRead(t, h, link, object.Path); w.Code != http.StatusFound {
+		t.Errorf("the public object read through its link = %d", w.Code)
+	}
+
+	if w := h.do(t, http.MethodDelete, "/v1/shares/links/"+link.ID, "alice", nil); w.Code != http.StatusNoContent {
+		t.Fatalf("the revoke = %d: %s", w.Code, w.Body)
+	}
+	if h.table.public(object.Path) {
+		t.Error("the revoke left the row marked public")
+	}
+	if kept, _ := h.table.held(link.ID); kept.Status != store.GrantRevoked {
+		t.Errorf("the grant is %q after the revoke", kept.Status)
+	}
+}
+
+// TestAnUndoThatFailsStillAnswersUnavailable: when the database will not
+// take back what a refused stamp left, the answer is still the unavailable
+// store and the failure goes to the log. What remains is a row marked over
+// an object the bucket does not serve, which grants less than was asked.
+func TestAnUndoThatFailsStillAnswersUnavailable(t *testing.T) {
+	boom := errors.New("the connection went away")
+	t.Run("create", func(t *testing.T) {
+		h := newHarness(t)
+		object := anObject(h, "files/reports/q3.pdf")
+		h.bucket.fail = errors.New("the bucket is not answering")
+		h.db.failTx, h.db.failFrom = boom, 2
+		if got := refusalOf(t, askPublic(t, h, object.Path)); got != api.CodeStorageUnavailable {
+			t.Errorf("a create whose undo failed = %q", got)
+		}
+		if _, stamped := h.bucket.stamped(object.ObjectID.Key("arca/")); stamped {
+			t.Error("the bucket holds an ACL for a create it refused")
+		}
+	})
+	t.Run("another link's mark cannot be read", func(t *testing.T) {
+		h := newHarness(t)
+		object := anObject(h, "files/reports/q3.pdf")
+		h.bucket.fail = errors.New("the bucket is not answering")
+		h.table.failCovering = boom
+		if got := refusalOf(t, askPublic(t, h, object.Path)); got != api.CodeStorageUnavailable {
+			t.Errorf("a create whose undo failed = %q", got)
+		}
+	})
+	t.Run("revoke", func(t *testing.T) {
+		h := newHarness(t)
+		object := anObject(h, "files/reports/q3.pdf")
+		link := mint(t, h, object.Path, store.GranteePublic)
+		h.bucket.fail = errors.New("the bucket is not answering")
+		h.db.failTx, h.db.failFrom = boom, h.db.opened+2
+		w := h.do(t, http.MethodDelete, "/v1/shares/links/"+link.ID, "alice", nil)
+		if got := refusalOf(t, w); got != api.CodeStorageUnavailable {
+			t.Errorf("a revoke whose undo failed = %q", got)
+		}
+		if kept, _ := h.table.held(link.ID); kept.Status != store.GrantActive {
+			t.Error("the grant was revoked over an object the bucket still serves")
+		}
+	})
 }
 
 // TestTheFileRouteNeedsTheReadPathOfSpec005: a build that binds none

@@ -381,16 +381,22 @@ func rung(permission string) int {
 // database is the pool and its transactions over the table.
 type database struct {
 	table *table
-	// failTx is the failure a case makes the transaction answer with.
-	failTx error
-	// commits counts the transactions that ran to the end.
+	// failTx is the failure a case makes the transaction answer with, from
+	// the transaction numbered failFrom on, counting from 1, or every one
+	// when failFrom is 0.
+	failTx   error
+	failFrom int
+	// opened counts the transactions asked for, and commits the ones that
+	// ran to the end.
+	opened  int
 	commits int
 }
 
 func (d *database) Querier() store.Querier { return nil }
 
 func (d *database) Tx(ctx context.Context, fn func(store.Querier) error) error {
-	if d.failTx != nil {
+	d.opened++
+	if d.failTx != nil && d.opened >= d.failFrom {
 		return d.failTx
 	}
 	if err := fn(nil); err != nil {
@@ -425,18 +431,25 @@ func (l *ledger) all() []shares.Event {
 }
 
 // reader stands in for the read path of spec 005: it records what it was
-// asked for and writes a body a test can recognize.
+// asked for and writes a body a test can recognize. A row marked public is
+// answered the way that path answers it through a link, as a redirect to a
+// presigned URL (spec 031), so a mark left behind shows in the next read.
 type reader struct {
+	table       *table
 	owner, path string
 	asked       int
 	fail        error
 }
 
-func (r *reader) ServeObject(w http.ResponseWriter, _ *http.Request, owner, path string) error {
+func (r *reader) ServeObject(w http.ResponseWriter, req *http.Request, owner, path string) error {
 	r.asked++
 	r.owner, r.path = owner, path
 	if r.fail != nil {
 		return r.fail
+	}
+	if r.table != nil && r.table.public(path) {
+		http.Redirect(w, req, "https://bucket.example/presigned", http.StatusFound)
+		return nil
 	}
 	w.Header().Set("Content-Type", "text/plain")
 	_, _ = w.Write([]byte("the bytes of " + path))
