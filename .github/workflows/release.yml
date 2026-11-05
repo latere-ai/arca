@@ -293,9 +293,7 @@ jobs:
     # needs directly, and of no other.
     needs: [build, conformance]
     if: ${{ vars.ARCA_RELEASE_DEPLOY != '' }}
-    # Called at a commit of latere-ai/ci. It moves to @v1, with the other
-    # stages, once ci v1.31.0 is cut.
-    uses: latere-ai/ci/.github/workflows/image-deploy.yml@12fc0c8ce53940211c521a3dc27561c75b3b78f1
+    uses: latere-ai/ci/.github/workflows/image-deploy.yml@v1
     permissions:
       contents: read
     with:

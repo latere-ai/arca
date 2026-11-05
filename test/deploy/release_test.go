@@ -214,9 +214,7 @@ func TestEveryThirdPartyActionIsPinned(t *testing.T) {
 			if !commit.MatchString(version) && !release.MatchString(version) {
 				t.Errorf("release.yml:%d: %s is called at %q, which is neither a commit nor a release tag", i+1, name, version)
 			}
-			if !strings.HasSuffix(name, "/image-deploy.yml") {
-				stages = append(stages, version)
-			}
+			stages = append(stages, version)
 			calls++
 		case !commit.MatchString(version):
 			t.Errorf("release.yml:%d: %s is pinned to %q, which is not a commit", i+1, ref, version)
