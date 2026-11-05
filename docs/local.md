@@ -295,6 +295,51 @@ curl -sS -i "$ARCA_URL/v1/shares/links/$TOKEN/files/files/hello.txt"
 
 The first answers `204 No Content` and the second `404 Not Found`.
 
+### Make a file public
+
+A public link is a link that also marks the one file it names as
+public. Ask for one with `"kind":"public"`:
+
+```sh
+curl -sS -X POST -H "$A" -H "Content-Type: application/json" -d '{"owner":"me","path_prefix":"files/hello.txt","kind":"public"}' "$ARCA_URL/v1/shares/links"
+```
+
+```json
+{"id":"e591fe3d-b934-453d-bf88-7dca0e87d5b4","owner":"http://localhost:22225|dev","path_prefix":"files/hello.txt","grantee_kind":"public","permission":"read","status":"active","token":"C1JRftu9lt6sEL4YDfZq-HsfE4COBK1CocZRrx02Kcw","created_by":"http://localhost:22225|dev","created_at":"2026-11-05T19:35:40Z","url":"/v1/shares/links/C1JRftu9lt6sEL4YDfZq-HsfE4COBK1CocZRrx02Kcw"}
+```
+
+A public file is always read through a redirect, whatever its size, both
+through the link and when you read it yourself. The first request prints
+the status and where it points; the second follows it and prints the
+file:
+
+```sh
+PUBLIC=C1JRftu9lt6sEL4YDfZq-HsfE4COBK1CocZRrx02Kcw
+PUBLIC_LINK=e591fe3d-b934-453d-bf88-7dca0e87d5b4
+curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' "$ARCA_URL/v1/shares/links/$PUBLIC/files/files/hello.txt"
+curl -sS -L "$ARCA_URL/v1/shares/links/$PUBLIC/files/files/hello.txt"
+```
+
+```
+302 http://127.0.0.1:22222/arca-test/arca/40/01a1ad34-ff94-79c7-99c4-bb8976086040?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=minioadmin%2F20261105%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20261105T193540Z&X-Amz-Expires=300&X-Amz-SignedHeaders=host&response-content-disposition=attachment%3B%20filename%3D%22hello.txt%22%3B%20filename%2A%3DUTF-8%27%27hello.txt&x-id=GetObject&X-Amz-Signature=7f23d4733112c8e0c16718fc2cbd3f5c9795b4578778cd6213836f2981917c45
+hello again, arca
+```
+
+On a bucket that can mark a single file public, anyone can also read the
+file at its address in the bucket, without a link. The MinIO that
+`make run` starts cannot, so here the file stays readable only through
+the signed address Arca redirects to, which expires after five minutes.
+The server log notes it when the link is made, with the line
+`the store holds no object ACLs`, and the bucket answers `403` to the
+address without its signature.
+
+Revoking a public link is the same request as before, and your own read
+of the file is then answered directly again:
+
+```sh
+curl -sS -o /dev/null -w '%{http_code}\n' -X DELETE -H "$A" "$ARCA_URL/v1/shares/links/$PUBLIC_LINK"
+```
+
 ## Stop it
 
 In the first terminal, press Ctrl-C. That stops `arcad` and normally the

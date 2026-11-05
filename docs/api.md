@@ -572,6 +572,12 @@ to a presigned URL otherwise. A read through the link is presigned with the
 download's `Content-Disposition` either way, because the CDN's address cannot
 ask for one.
 
+A bucket that will not apply the mark answers the create
+`503 storage_unavailable`, and no link is left behind: retry the same request.
+A bucket that has no per-object public setting, such as MinIO, still makes the
+link; the object is then read only through Arca's redirects, unless the
+bucket's own policy lets anyone read it.
+
 ## Events
 
 | Method | Path | Action | What it does |
