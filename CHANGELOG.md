@@ -15,6 +15,11 @@ refused before it is pushed.
   not apply keeps the file marked public, as the bucket still has it,
   until the retry.
 
+- **Revoking one of two public links on a file keeps the file public.**
+  The file stays public until the last public link on it is revoked, so
+  the other links read as before. Before, the first revoke made the file
+  private while another public link still stood.
+
 - **A public link can be made on a bucket with no per-object public
   setting,** such as the MinIO that `make run` starts. The file is then
   read through Arca's redirects, and the bucket's own policy decides
