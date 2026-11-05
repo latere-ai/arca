@@ -4,6 +4,7 @@
 package auth_test
 
 import (
+	"encoding/json/jsontext"
 	"slices"
 	"testing"
 
@@ -132,6 +133,23 @@ func TestTheOwnerPolicySendsNoLimits(t *testing.T) {
 			if len(d.Limits) != 0 {
 				t.Errorf("the owner policy answered %s asking %s with the limits %s", subject, action, d.Limits)
 			}
+		}
+	}
+}
+
+func TestLimitsFromAnEndpointAreReadLeniently(t *testing.T) {
+	for name, raw := range map[string]string{
+		"duplicate members": `{"quota_bytes":1,"quota_bytes":42}`,
+		"mixed case":        `{"Quota_Bytes":42}`,
+		"invalid UTF-8":     "{\"quota_bytes\":42,\"note\":\"a\xffb\"}",
+	} {
+		got, err := auth.ReadLimits(jsontext.Value(raw))
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if got.QuotaBytes == nil || *got.QuotaBytes != 42 {
+			t.Errorf("%s: the quota read as %v", name, got.QuotaBytes)
 		}
 	}
 }

@@ -4,7 +4,7 @@
 package events
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -298,7 +298,7 @@ func TestLimitOfReadsWhatTheAnswerCarried(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			d := authz.Decision{Allow: true}
 			if c.limits != "" {
-				d.Limits = json.RawMessage(c.limits)
+				d.Limits = jsontext.Value(c.limits)
 			}
 			got, err := LimitOf(d)
 			if (err != nil) != c.refused {

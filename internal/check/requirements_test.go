@@ -5,6 +5,8 @@ package check
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -419,5 +421,21 @@ func TestAPublicURLThatCannotBeReachedIsNotAFailure(t *testing.T) {
 	w.options.Config.PublicURL = unreachable(t)
 	if got := w.passes(t, NamePublicURL); !strings.Contains(got.Detail, "not reachable from here") {
 		t.Errorf("the line is %q", got.Detail)
+	}
+}
+
+func TestADocumentFromAnEndpointIsReadLeniently(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"JWKS_URI":"first","jwks_uri":"second"} trailing`))
+	}))
+	defer server.Close()
+	var doc struct {
+		URI string `json:"jwks_uri"`
+	}
+	if err := readJSON(context.Background(), server.Client(), server.URL, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.URI != "second" {
+		t.Errorf("the document read as %q", doc.URI)
 	}
 }

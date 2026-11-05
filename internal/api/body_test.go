@@ -4,6 +4,7 @@
 package api
 
 import (
+	"encoding/json/v2"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -135,18 +136,25 @@ func TestACallerThatTakesNoJSONIsToldBeforeTheHandlerActs(t *testing.T) {
 	}
 }
 
-func TestAnUnknownFieldThatTheDecoderSpellsOtherwiseIsStillABadBody(t *testing.T) {
-	// The field name is read out of the decoder's text, because nothing in
-	// the standard library exposes it as a typed error. A refusal whose text
-	// does not carry the prefix falls back to the body row rather than
-	// naming a field it could not read.
-	if _, ok := unknownField(errors.New("json: cannot unmarshal number")); ok {
-		t.Error("a refusal that names no field read as one")
+func TestAnUnknownFieldIsReadOffTheDecodersOwnRefusal(t *testing.T) {
+	// The field name is read off the refusal the decoder writes, because
+	// nothing in the standard library exposes the cause as a typed error. A
+	// refusal that is not an unknown member falls back to the body row rather
+	// than naming a field it could not read.
+	_, err := DecodeBody[star](bodied(`{"owner":"me","path":"p","kind":"pin"}`, JSONMediaType))
+	r, ok := errors.AsType[*Refusal](err)
+	if !ok || r.Code != CodeUnknownField || !slices.Equal(r.Fields, []string{"kind"}) {
+		t.Fatalf("an unknown member read as %v", err)
 	}
-	if name, ok := unknownField(errors.New(unknownFieldPrefix + `"kind"`)); !ok || name != "kind" {
-		t.Errorf("the field read as %q, %v", name, ok)
+	var v star
+	for _, body := range []string{`{"owner":5}`, `{"owner":"me"`, `[]`} {
+		err := json.Unmarshal([]byte(body), &v, json.RejectUnknownMembers(true))
+		if name, ok := unknownField(err); ok {
+			t.Errorf("%s read as the unknown field %q", body, name)
+		}
 	}
-	if _, ok := unknownField(errors.New(unknownFieldPrefix + "kind")); ok {
-		t.Error("a name the decoder did not quote read as one")
+	err = json.Unmarshal([]byte(`{"a/b":1}`), &v, json.RejectUnknownMembers(true))
+	if name, ok := unknownField(err); !ok || name != "a/b" {
+		t.Errorf("a member with a slash read as %q, %v", name, ok)
 	}
 }

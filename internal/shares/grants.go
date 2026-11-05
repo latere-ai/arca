@@ -35,7 +35,7 @@ type Grant struct {
 	Permission  string  `json:"permission"`
 	Status      string  `json:"status"`
 	Token       string  `json:"token,omitempty"`
-	ExpiresAt   *string `json:"expires_at,omitempty"`
+	ExpiresAt   *string `json:"expires_at,omitzero"`
 	CreatedBy   string  `json:"created_by"`
 	CreatedAt   string  `json:"created_at"`
 }

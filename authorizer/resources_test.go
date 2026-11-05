@@ -4,7 +4,7 @@
 package authorizer
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"maps"
 	"slices"
 	"testing"

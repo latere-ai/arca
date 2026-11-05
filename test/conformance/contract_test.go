@@ -21,7 +21,7 @@ package conformance_test
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"flag"
 	"fmt"
 	"io"
@@ -326,7 +326,7 @@ func pendingRoutes(t *testing.T, s stack) []string {
 	var document struct {
 		Paths map[string]map[string]any `json:"paths"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&document); err != nil {
+	if err := json.UnmarshalRead(resp.Body, &document); err != nil {
 		t.Fatalf("read the served document: %v", err)
 	}
 	var out []string

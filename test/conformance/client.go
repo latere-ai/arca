@@ -6,7 +6,8 @@ package conformance
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"io"
 	"net/http"
 	"net/url"
@@ -120,10 +121,19 @@ func (s *session) do(t testing.TB, r request) response {
 	failIf(t, err != nil, "read %s %s: %v", r.method, r.path, err)
 	out := response{status: resp.StatusCode, header: resp.Header, body: raw, foreign: foreign}
 	if strings.Contains(resp.Header.Get("Content-Type"), "json") {
-		_ = json.Unmarshal(raw, &out.json)
+		_ = json.Unmarshal(raw, &out.json, foreignJSON)
 	}
 	return out
 }
+
+// foreignJSON reads the answers of a target under test, which is not code
+// this suite controls: duplicate members, invalid UTF-8 and any letter case
+// in a member name are accepted so the case's own assertion decides.
+var foreignJSON = json.JoinOptions(
+	jsontext.AllowDuplicateNames(true),
+	jsontext.AllowInvalidUTF8(true),
+	json.MatchCaseInsensitiveNames(true),
+)
 
 // under is where the target serves the path a case names. The cases are
 // written at the paths spec 013 declares, and an installation mounted under

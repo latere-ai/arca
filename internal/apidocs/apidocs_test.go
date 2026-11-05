@@ -5,7 +5,7 @@ package apidocs
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 	"slices"
 	"strings"
@@ -250,5 +250,13 @@ func keys[V any](m map[string]V) func(func(string) bool) {
 				return
 			}
 		}
+	}
+}
+
+func TestTheDocumentIsIndentedWithSortedKeysAndNoHTMLEscaping(t *testing.T) {
+	got := string(MustJSON(map[string]any{"b": "x<y&z>", "a": []int{1}}))
+	const want = "{\n  \"a\": [\n    1\n  ],\n  \"b\": \"x<y&z>\"\n}\n"
+	if got != want {
+		t.Errorf("the document reads %q, want %q", got, want)
 	}
 }

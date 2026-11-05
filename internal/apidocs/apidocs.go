@@ -26,7 +26,8 @@
 package apidocs
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"maps"
 	"net/http"
@@ -151,8 +152,8 @@ type Schema struct {
 	Description          string            `json:"description,omitempty"`
 	Properties           map[string]Schema `json:"properties,omitempty"`
 	Required             []string          `json:"required,omitempty"`
-	Items                *Schema           `json:"items,omitempty"`
-	AdditionalProperties *bool             `json:"additionalProperties,omitempty"`
+	Items                *Schema           `json:"items,omitzero"`
+	AdditionalProperties *bool             `json:"additionalProperties,omitzero"`
 }
 
 // Components are the pieces the operations reference: the bearer scheme, the
@@ -449,7 +450,7 @@ func (d *Document) JSON() []byte { return MustJSON(d) }
 // same reading as a handler naming an error code nobody wrote a row for, and
 // a panic is what keeps a caller from writing out bytes it never checked.
 func MustJSON(v any) []byte {
-	out, err := json.MarshalIndent(v, "", "  ")
+	out, err := json.Marshal(v, jsontext.WithIndent("  "), json.Deterministic(true))
 	if err != nil {
 		panic("apidocs: the document does not marshal: " + err.Error())
 	}

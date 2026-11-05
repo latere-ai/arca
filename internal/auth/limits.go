@@ -4,7 +4,8 @@
 package auth
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"strings"
 
@@ -36,6 +37,15 @@ type Limits struct {
 	Omit []string
 }
 
+// foreignJSON reads an answer from an endpoint this server does not run:
+// duplicate members, invalid UTF-8 and any letter case in a member name are
+// accepted, as the endpoint's other readers accept them.
+var foreignJSON = json.JoinOptions(
+	jsontext.AllowDuplicateNames(true),
+	jsontext.AllowInvalidUTF8(true),
+	json.MatchCaseInsensitiveNames(true),
+)
+
 // ReadLimits decodes an answer's limits object. A member that is not the
 // type spec 006 gives it, and an omit entry that is not a path of a space,
 // is an error: the endpoint said something this server cannot honor, and
@@ -44,7 +54,7 @@ type Limits struct {
 //
 // A member this server does not know is not read, so an endpoint may carry
 // members for a newer server.
-func ReadLimits(raw json.RawMessage) (Limits, error) {
+func ReadLimits(raw jsontext.Value) (Limits, error) {
 	if len(raw) == 0 {
 		return Limits{}, nil
 	}
@@ -54,7 +64,7 @@ func ReadLimits(raw json.RawMessage) (Limits, error) {
 		Trash      *bool     `json:"trash"`
 		Omit       *[]string `json:"omit"`
 	}
-	if err := json.Unmarshal(raw, &wire); err != nil {
+	if err := json.Unmarshal(raw, &wire, foreignJSON); err != nil {
 		return Limits{}, fmt.Errorf("auth: read the answer's limits: %w", err)
 	}
 	limits := Limits{

@@ -5,7 +5,7 @@ package conformance
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -336,7 +336,7 @@ func TestSurfaceReadsTheServedDocument(t *testing.T) {
 			item[strings.ToLower(row.method)] = map[string]any{}
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"openapi": "3.1.0", "paths": paths})
+		_ = json.MarshalWrite(w, map[string]any{"openapi": "3.1.0", "paths": paths})
 	}))
 	defer target.Close()
 
@@ -748,7 +748,7 @@ func TestTheBasePathIsAppliedAtTheOneChokepoint(t *testing.T) {
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"openapi": "3.1.0", "paths": paths})
+		_ = json.MarshalWrite(w, map[string]any{"openapi": "3.1.0", "paths": paths})
 	}))
 	defer target.Close()
 

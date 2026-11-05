@@ -5,7 +5,7 @@ package auth
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"net/http"
 	"time"
@@ -57,7 +57,7 @@ type Decision struct {
 	// Limits is the answer's limits object as it came, nil when the answer
 	// carried none. [ReadLimits] decodes it, and a handler reads it only for
 	// the members its own question carries.
-	Limits json.RawMessage
+	Limits jsontext.Value
 	// Filter narrows a list action's page to the owners and labels the
 	// authorizer named. [Decision.Admits] applies it to the space asked
 	// about, so a selector outside the filter yields an empty page and never

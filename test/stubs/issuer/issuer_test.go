@@ -5,7 +5,7 @@ package issuer
 
 import (
 	"encoding/base64"
-	"encoding/json"
+	"encoding/json/v2"
 	"io"
 	"net/http"
 	"strings"
@@ -88,7 +88,7 @@ func TestIssuerStub(t *testing.T) {
 		var minted struct {
 			Token string `json:"token"`
 		}
-		if err := json.NewDecoder(resp.Body).Decode(&minted); err != nil {
+		if err := json.UnmarshalRead(resp.Body, &minted); err != nil {
 			t.Fatal(err)
 		}
 		claims := claimsOf(t, minted.Token)

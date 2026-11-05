@@ -21,7 +21,8 @@ package events
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -341,7 +342,7 @@ func marshalDetail(detail map[string]any) ([]byte, error) {
 	if len(detail) == 0 {
 		return nil, nil
 	}
-	b, err := json.Marshal(detail)
+	b, err := json.Marshal(detail, json.Deterministic(true), jsontext.AllowInvalidUTF8(true))
 	if err != nil {
 		return nil, fmt.Errorf("encode the detail: %w", err)
 	}

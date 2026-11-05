@@ -5,7 +5,8 @@ package main
 
 import (
 	"encoding/csv"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"os"
@@ -54,7 +55,7 @@ func isSpace(r rune) bool { return r == ' ' || r == '\t' || r == '\n' || r == '\
 
 func parseJSONMapping(body []byte) (map[string]string, error) {
 	m := map[string]string{}
-	if err := json.Unmarshal(body, &m); err != nil {
+	if err := json.Unmarshal(body, &m, jsontext.AllowDuplicateNames(true), jsontext.AllowInvalidUTF8(true)); err != nil {
 		return nil, fmt.Errorf("the JSON is not an object of organization id against subject: %w", err)
 	}
 	for id, subject := range m {

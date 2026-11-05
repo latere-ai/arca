@@ -6,7 +6,7 @@ package conformance
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/v2"
 	"maps"
 	"net/http"
 	"strings"

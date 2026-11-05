@@ -30,7 +30,7 @@ package authorizer
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/v2"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -161,7 +161,7 @@ func (s *Server) putGrants(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Enabled bool `json:"enabled"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil {
+	if err := json.UnmarshalRead(http.MaxBytesReader(w, r.Body, 4<<10), &body); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}

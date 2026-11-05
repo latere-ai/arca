@@ -4,7 +4,8 @@
 package events
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"net/http"
 	"slices"
@@ -211,13 +212,13 @@ func outsideFilter(filter *authz.Filter, owner string) bool {
 // entry is one row on the wire. The id is the number a consumer sends back
 // as the cursor; the detail is passed through as the writer wrote it.
 type entry struct {
-	ID     int64           `json:"id"`
-	Action string          `json:"action"`
-	Owner  string          `json:"owner"`
-	Path   string          `json:"path,omitempty"`
-	Actor  string          `json:"actor,omitempty"`
-	Detail json.RawMessage `json:"detail,omitempty"`
-	At     string          `json:"at"`
+	ID     int64          `json:"id"`
+	Action string         `json:"action"`
+	Owner  string         `json:"owner"`
+	Path   string         `json:"path,omitempty"`
+	Actor  string         `json:"actor,omitempty"`
+	Detail jsontext.Value `json:"detail,omitzero"`
+	At     string         `json:"at"`
 }
 
 // envelope is the list envelope of spec 013: entries, never null, and a
@@ -246,11 +247,11 @@ func writePage(w http.ResponseWriter, page Page) {
 // detail that will not encode is dropped rather than failing the page: it
 // was written by an append that did encode it, so a failure here is this
 // server's and the entry still says what happened.
-func detailJSON(detail map[string]any) json.RawMessage {
+func detailJSON(detail map[string]any) jsontext.Value {
 	if len(detail) == 0 {
 		return nil
 	}
-	b, err := json.Marshal(detail)
+	b, err := json.Marshal(detail, jsontext.AllowInvalidUTF8(true))
 	if err != nil {
 		return nil
 	}

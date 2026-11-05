@@ -102,3 +102,13 @@ func readMappingFile(t *testing.T, name, body string) map[string]string {
 }
 
 func errFrom(_ map[string]string, err error) error { return err }
+
+func TestAJSONMappingWithADuplicateIdTakesTheLastOne(t *testing.T) {
+	got, err := parseMapping([]byte(`{"org-1":"alice","org-1":"bob"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["org-1"] != "bob" {
+		t.Errorf("the duplicate read as %q", got["org-1"])
+	}
+}

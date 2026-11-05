@@ -4,9 +4,9 @@
 package api
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
-	"fmt"
 	"io"
 	"mime"
 	"net/http"
@@ -49,16 +49,15 @@ func DecodeBody[T any](r *http.Request) (T, error) {
 		return v, err
 	}
 	body := http.MaxBytesReader(nil, r.Body, MaxBodyBytes)
-	dec := json.NewDecoder(body)
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&v); err != nil {
+	dec := jsontext.NewDecoder(body)
+	if err := json.UnmarshalDecode(dec, &v, json.RejectUnknownMembers(true)); err != nil {
 		var zero T
 		return zero, decodeRefusal(err)
 	}
 	// A second value after the first is a client sending two documents where
 	// the route reads one, and reading the first alone would act on half of
 	// what it meant.
-	if err := dec.Decode(new(json.RawMessage)); !errors.Is(err, io.EOF) {
+	if _, err := dec.ReadValue(); !errors.Is(err, io.EOF) {
 		var zero T
 		if err == nil {
 			return zero, Refuse(CodeBadRequest, "the body carries more than one JSON value")
@@ -119,22 +118,26 @@ func decodeRefusal(err error) error {
 	return Refuse(CodeBadRequest, "the body is not JSON this endpoint can read: %v", err)
 }
 
-// unknownFieldPrefix is what the standard library's decoder writes for a
-// field the type does not declare. Nothing in the standard library exposes
-// it as a typed error, so the prefix is read rather than the type, and the
-// test below holds this to what the decoder actually writes.
-const unknownFieldPrefix = "json: unknown field "
+// unknownMemberText is what the decoder writes as the cause of a refusal
+// for a member the type does not declare. Nothing in the standard library
+// exposes it as a typed error, so the cause is read by its text, and the
+// test holds this to what the decoder actually writes.
+const unknownMemberText = "unknown object member name"
 
-// unknownField reads the field name out of the decoder's refusal.
+// unknownField reads the member name out of the decoder's refusal: the last
+// segment of the JSON pointer the refusal carries.
 func unknownField(err error) (string, bool) {
-	text := err.Error()
-	rest, found := strings.CutPrefix(text, unknownFieldPrefix)
-	if !found {
+	se, ok := errors.AsType[*json.SemanticError](err)
+	if !ok || se.Err == nil || se.Err.Error() != unknownMemberText {
 		return "", false
 	}
-	var name string
-	if _, err := fmt.Sscanf(rest, "%q", &name); err != nil {
+	pointer := string(se.JSONPointer)
+	i := strings.LastIndexByte(pointer, '/')
+	if i < 0 || i == len(pointer)-1 {
 		return "", false
 	}
+	name := pointer[i+1:]
+	name = strings.ReplaceAll(name, "~1", "/")
+	name = strings.ReplaceAll(name, "~0", "~")
 	return name, true
 }

@@ -5,7 +5,7 @@ package uploads
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"net/http"
 	"strings"
@@ -335,7 +335,7 @@ func strip(body string) string {
 			delete(details, "request_id")
 		}
 	}
-	out, err := json.Marshal(envelope)
+	out, err := json.Marshal(envelope, json.Deterministic(true))
 	if err != nil {
 		return body
 	}

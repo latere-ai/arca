@@ -5,7 +5,8 @@ package events
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -299,13 +300,13 @@ func TestTheTailRendersTheEnvelopeOfSpec013(t *testing.T) {
 	}
 	var body struct {
 		Entries []struct {
-			ID     int64           `json:"id"`
-			Action string          `json:"action"`
-			Owner  string          `json:"owner"`
-			Path   string          `json:"path"`
-			Actor  string          `json:"actor"`
-			Detail json.RawMessage `json:"detail"`
-			At     string          `json:"at"`
+			ID     int64          `json:"id"`
+			Action string         `json:"action"`
+			Owner  string         `json:"owner"`
+			Path   string         `json:"path"`
+			Actor  string         `json:"actor"`
+			Detail jsontext.Value `json:"detail"`
+			At     string         `json:"at"`
 		} `json:"entries"`
 		NextCursor string `json:"next_cursor"`
 	}
@@ -369,7 +370,7 @@ func TestTheTailReadsTheOmissionOffItsAnswer(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			d := allowed()
-			d.Limits = json.RawMessage(c.limits)
+			d.Limits = jsontext.Value(c.limits)
 			log := &fakeLog{page: Page{Entries: pageOf(1)}}
 			if w := ask(t, log, &fakeGuard{caller: aSpace, decision: d}, ""); w.Code != http.StatusOK {
 				t.Fatalf("the read answered %d %s", w.Code, w.Body)
@@ -381,7 +382,7 @@ func TestTheTailReadsTheOmissionOffItsAnswer(t *testing.T) {
 	}
 	for _, limits := range []string{`{"omit":"files/team"}`, `{"omit":["files"]}`, `{"omit":["../x"]}`, `{"trash":"no"}`} {
 		d := allowed()
-		d.Limits = json.RawMessage(limits)
+		d.Limits = jsontext.Value(limits)
 		log := &fakeLog{}
 		w := ask(t, log, &fakeGuard{caller: aSpace, decision: d}, "")
 		if w.Code != http.StatusServiceUnavailable || errorOf(t, w) != codeStorageUnavailable {

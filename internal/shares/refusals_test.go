@@ -4,7 +4,7 @@
 package shares_test
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -104,7 +104,7 @@ func stripped(w *httptest.ResponseRecorder) string {
 			delete(details, "request_id")
 		}
 	}
-	out, err := json.Marshal(envelope)
+	out, err := json.Marshal(envelope, json.Deterministic(true))
 	if err != nil {
 		return w.Body.String()
 	}

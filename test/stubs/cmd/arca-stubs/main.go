@@ -14,7 +14,8 @@ package main
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"flag"
 	"fmt"
@@ -142,18 +143,26 @@ func build(o options) (*stubs, error) {
 	return s, nil
 }
 
+// foreignJSON reads the JSON an operator types on a flag: duplicate members,
+// invalid UTF-8 and any letter case in a member name are accepted.
+var foreignJSON = json.JoinOptions(
+	jsontext.AllowDuplicateNames(true),
+	jsontext.AllowInvalidUTF8(true),
+	json.MatchCaseInsensitiveNames(true),
+)
+
 // rules builds the table the flags describe: one allow carrying the ttl,
 // the limits, and the filter, and one deny above it when an action is
 // named. The table is read from the last row back, so the deny goes last.
 func rules(authz *authorizer.Server, o options) error {
 	allow := authorizer.Rule{Action: "*", Allow: true, TTL: o.ttl}
 	if o.limits != "" {
-		if err := json.Unmarshal([]byte(o.limits), &allow.Limits); err != nil {
+		if err := json.Unmarshal([]byte(o.limits), &allow.Limits, foreignJSON); err != nil {
 			return fmt.Errorf("-limits: %w", err)
 		}
 	}
 	if o.filter != "" {
-		if err := json.Unmarshal([]byte(o.filter), &allow.Filter); err != nil {
+		if err := json.Unmarshal([]byte(o.filter), &allow.Filter, foreignJSON); err != nil {
 			return fmt.Errorf("-filter: %w", err)
 		}
 	}

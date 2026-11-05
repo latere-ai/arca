@@ -5,7 +5,7 @@ package check
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
@@ -121,7 +121,7 @@ func endpoint(t *testing.T, allow bool) *httptest.Server {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"allow": allow, "reason": "the stub answers one way"})
+		_ = json.MarshalWrite(w, map[string]any{"allow": allow, "reason": "the stub answers one way"})
 	}))
 	t.Cleanup(server.Close)
 	return server
@@ -138,7 +138,7 @@ func versionEndpoint(t *testing.T, body any, status int) *httptest.Server {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
-		_ = json.NewEncoder(w).Encode(body)
+		_ = json.MarshalWrite(w, body)
 	}))
 	t.Cleanup(server.Close)
 	return server
@@ -152,7 +152,7 @@ func keySet(t *testing.T, document string) string {
 	server := httptest.NewUnstartedServer(mux)
 	mux.HandleFunc("GET /.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"jwks_uri": "http://" + server.Listener.Addr().String() + "/jwks"})
+		_ = json.MarshalWrite(w, map[string]string{"jwks_uri": "http://" + server.Listener.Addr().String() + "/jwks"})
 	})
 	mux.HandleFunc("GET /jwks", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -169,7 +169,7 @@ func discovery(t *testing.T, jwksURI string) string {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"jwks_uri": jwksURI})
+		_ = json.MarshalWrite(w, map[string]string{"jwks_uri": jwksURI})
 	}))
 	t.Cleanup(server.Close)
 	return server.URL

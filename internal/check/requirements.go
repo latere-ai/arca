@@ -5,7 +5,8 @@ package check
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -323,11 +324,20 @@ func readJSON(ctx context.Context, client *http.Client, url string, into any) er
 	}
 	// The body is bounded: a document this large is not one of ours, and an
 	// endpoint that streams for ever would otherwise hold the budget open.
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxDocument)).Decode(into); err != nil {
+	if err := json.UnmarshalDecode(jsontext.NewDecoder(io.LimitReader(resp.Body, maxDocument), foreignJSON), into, foreignJSON); err != nil {
 		return fmt.Errorf("%s answered something that is not the document expected", url)
 	}
 	return nil
 }
+
+// foreignJSON reads documents served by endpoints this command does not run:
+// duplicate members, invalid UTF-8 and any letter case in a member name are
+// accepted.
+var foreignJSON = json.JoinOptions(
+	jsontext.AllowDuplicateNames(true),
+	jsontext.AllowInvalidUTF8(true),
+	json.MatchCaseInsensitiveNames(true),
+)
 
 // maxDocument bounds a document this command reads.
 const maxDocument = 1 << 20

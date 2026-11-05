@@ -72,7 +72,7 @@ type Listing struct {
 	// is asking what that space has, and the answer costs one query beside
 	// the page; deeper in the tree the number would answer a question nobody
 	// asked, because the ledger counts a space and not a subtree.
-	Space      *Space `json:"space,omitempty"`
+	Space      *Space `json:"space,omitzero"`
 	NextCursor string `json:"next_cursor,omitempty"`
 }
 
