@@ -80,7 +80,11 @@ and without touching this server, so the revoke path is the control
 that matters: `withdraw` clears the ACL before it revokes the row, so a
 bucket that will not answer leaves the grant standing and the caller
 retrying, which grants no more than before. Revoking first and failing
-to clear would leave an object readable that no grant covers. A create
+to clear would leave an object readable that no grant covers. The ACL
+stays while another live public grant names the object and is cleared
+with the last, and every write of a public grant holds the object's row
+before it reads the others (`hold`), so two revokes of the last two
+grants cannot both read the other as live and both leave the ACL on. A create
 the bucket will not stamp is taken back (`unmint`): the grant is revoked
 and the mark cleared, so no grant is left whose token nobody was given.
 On a store that holds no object ACLs nothing is stamped, and the bytes
@@ -371,7 +375,7 @@ it. Names are as they appear in the tree.
 | a link token in a listing | the token is answered once at creation and is absent from every other shape | 008 | `TestMintingALinkAnswersTheTokenOnce` |
 | a link that grants more than reading | a token grant carries `read`; a create asking for more is `link_read_only` | 008 | `TestALinkThatWouldGrantMoreThanReadingIsRefused`, `TestE2EALinkThatWouldWriteIsRefused` |
 | a link read outside the subtree it names | the prefix is matched by segment, so `files/reports` covers `files/reports/q3.pdf` and not `files/reports-archive` | 008 | `TestALinkServesNothingOutsideItsPrefix` |
-| a public object readable after its grant is gone | the ACL is cleared before the row is revoked, and a bucket that will not answer leaves the grant standing and its mark put back rather than the object readable. A create the bucket will not stamp leaves no grant and no mark behind. A prefix naming a subtree marks no object at all | 008, 003 | `TestAPublicGrantMarksTheObjectItNames`, `TestAPublicGrantOverASubtreeMarksNoObject`, `TestARefusedStampLeavesNoLinkBehind`, `TestARefusedClearLeavesTheLinkAndItsMark`, `TestStoreACopyOfAPublicObjectIsStampedAndNotCarried` |
+| a public object readable after its grant is gone | the ACL is cleared before the row is revoked, and a bucket that will not answer leaves the grant standing and its mark put back rather than the object readable. A create the bucket will not stamp leaves no grant and no mark behind. The ACL is cleared with the last live public grant on the object, and the revokes of the last two hold the object's row in turn, so neither reads the other as live once it is gone. A prefix naming a subtree marks no object at all | 008, 003 | `TestAPublicGrantMarksTheObjectItNames`, `TestAPublicGrantOverASubtreeMarksNoObject`, `TestARefusedStampLeavesNoLinkBehind`, `TestARefusedClearLeavesTheLinkAndItsMark`, `TestRevokingOneOfTwoPublicLinksKeepsTheMark`, `TestStoreLinksAHoldWaitsAndThenReadsTheRevokeBeforeIt`, `TestStoreACopyOfAPublicObjectIsStampedAndNotCarried` |
 | usage accounting bypass through multipart | the session is charged its declared size, and the completion charges the difference against the assembled size read back from the store | 007, 010 | `TestACompletionPastTheAnswersLimitIsRefusedAndTheObjectGoes`, `TestTheCompletionReadsTheAssembledSizeBack` |
 | usage accounting bypass by holding many open sessions | an open session's declared bytes are charged from the moment it opens until it completes or is reaped | 007, 010 | `TestASessionThatCouldNotBeOpenedLeavesNoMultipartAndNoCharge`, `TestAnExpiredSessionIsSweptWithItsPartsAndItsCharge` |
 | a usage charge that fails open | the charge and the check are one statement inside the write's own transaction, so a failure refuses the write and records no charge | 010 | `TestUsageFailsClosed`, `TestStoreUsageFailsClosed`, `TestALedgerThatCannotBeWrittenTakesTheWriteDownWithIt`, `TestAWriteRefusedByTheLedgerLeavesNoRowAndNoBytes` |

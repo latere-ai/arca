@@ -165,9 +165,26 @@ What the implementation decided, where this spec was silent:
   fails puts the mark back, so the row says public for as long as the
   bucket's ACL does, and the grant stays live for the retry. A database
   that will not take either back is logged, and what it leaves grants less
-  than was asked. `TestARefusedStampLeavesNoLinkBehind`,
-  `TestARefusedStampKeepsAnotherPublicLinksMark` and
+  than was asked. `TestARefusedStampLeavesNoLinkBehind` and
   `TestARefusedClearLeavesTheLinkAndItsMark` hold it.
+- **Amended 2026-11-05:** an object is public for as long as a live public
+  grant names it. Only the first public grant on an object marks the row and
+  stamps the bucket, and only the revoke of the last clears them: a grant
+  made or revoked while another live one names the object writes only its own
+  grant and makes no bucket call. Before, every revoke cleared the object, so
+  revoking one of two links made the object private while the other still
+  stood. Each of these writes first holds the object's row
+  (`SELECT ... FOR UPDATE`, `Shares.Hold`) and then reads the other grants,
+  so two revokes of the last two links wait for each other and the second
+  reads the first's revoke; without the hold both read the other as live and
+  the object stays public with no grant. The undo of a refused stamp clears
+  the row it marked, because a create marks only a row that was not marked.
+  A link made in between, on that row, is left live over a row that is not
+  marked, which grants less than was asked until the next public link
+  stamps it. `TestRevokingOneOfTwoPublicLinksKeepsTheMark`,
+  `TestOnlyTheFirstAndTheLastPublicLinkCallTheBucket`,
+  `TestARevokeThatCannotReadTheOtherLinksChangesNothing` and
+  `TestStoreLinksAHoldWaitsAndThenReadsTheRevokeBeforeIt` hold it.
 - **Amended 2026-11-05:** a store that holds no object ACLs answers
   `ErrNotSupported`, which [[003-object-store]] has a caller carry on from,
   and the create carries on: the grant is written and the row marked, and
@@ -407,7 +424,10 @@ no such convention. Nothing else depends on the distinction.
 
 **Amended 2026-11-05:** on a store that holds no object ACLs the row is
 marked and the bucket is not, as [[003-object-store]] describes, and the
-create still succeeds; Current state records it.
+create still succeeds; Current state records it. The handler calls
+`SetPublic` on the first public grant on an object and clears it on the
+revoke of the last, not on every create and revoke; Current state records
+that too.
 
 **Amended 2026-10-18 ([[031-download-only-link-reads]]):** the `302` to
 `ARCA_PUBLIC_CDN_URL` is the owner's own read of a public object. A read
