@@ -187,6 +187,73 @@ func TestE2EAPublicLinkServesTheObjectsBytes(t *testing.T) {
 	}
 }
 
+// TestE2EAPublicLinkOnAStoreWithoutObjectACLs is the public kind against the
+// stack's MinIO, which answers NotImplemented to an object ACL. The create
+// carries on from that, as spec 003 has a caller do: the row is marked, a
+// read of the object is the presigned redirect, and the object is not
+// readable from the bucket without a signature, because no bucket policy
+// makes it so. The revoke puts every read back to what it answered before.
+func TestE2EAPublicLinkOnAStoreWithoutObjectACLs(t *testing.T) {
+	i := filesInstallation(t)
+	const content = "the quarterly numbers, in plain text"
+	const path = "files/reports/q3.txt"
+	if resp := i.filesPut(t, path, content); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("the put = %d: %s", resp.StatusCode, filesRead(t, resp))
+	}
+	ownerRead := func() int {
+		t.Helper()
+		resp := i.filesDo(t, http.MethodGet, i.filesObject(path), nil)
+		_ = filesRead(t, resp)
+		return resp.StatusCode
+	}
+	if got := ownerRead(); got != http.StatusOK {
+		t.Fatalf("before the link the owner's read = %d", got)
+	}
+
+	code, body, _ := i.sharesCall(t, http.MethodPost, "/v1/shares/links", filesCaller, map[string]any{
+		"owner": "me", "path_prefix": path, "kind": "public",
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("POST /v1/shares/links with kind public = %d: %s", code, body)
+	}
+	var minted sharesLink
+	sharesDecodeJSON(t, body, &minted)
+	if minted.GranteeKind != "public" {
+		t.Fatalf("the link is a %q", minted.GranteeKind)
+	}
+
+	// A public object is read through a redirect whatever its size, and the
+	// signed URL serves the bytes.
+	if got := ownerRead(); got != http.StatusFound {
+		t.Errorf("the owner's read of a public object = %d", got)
+	}
+	code, _, header := i.sharesCall(t, http.MethodGet, minted.URL+"/files/"+path, "", nil)
+	if code != http.StatusFound {
+		t.Fatalf("the link read of a public object = %d", code)
+	}
+	signed := header.Get("Location")
+	if status, got := fetch(t, signed); status != http.StatusOK || string(got) != content {
+		t.Fatalf("the signed URL answered %d: %q", status, got)
+	}
+	// The store holds no ACL, so the bucket serves nothing to a caller with
+	// no signature.
+	unsigned, _, _ := strings.Cut(signed, "?")
+	if status, _ := fetch(t, unsigned); status == http.StatusOK {
+		t.Errorf("the bucket served %s with no signature", unsigned)
+	}
+
+	code, body, _ = i.sharesCall(t, http.MethodDelete, "/v1/shares/links/"+minted.ID, filesCaller, nil)
+	if code != http.StatusNoContent {
+		t.Fatalf("the revoke = %d: %s", code, body)
+	}
+	if got := ownerRead(); got != http.StatusOK {
+		t.Errorf("after the revoke the owner's read = %d, want what it answered before", got)
+	}
+	if code, _, _ := i.sharesCall(t, http.MethodGet, minted.URL+"/files/"+path, "", nil); code != http.StatusNotFound {
+		t.Errorf("after the revoke the link read = %d", code)
+	}
+}
+
 // TestE2EAGrantIsCreatedReadAndRevoked is criteria 8 and 9 against the
 // running binary: two subjects of one issuer, the grantee reads what it
 // holds, and an organization is a subject like any other.
