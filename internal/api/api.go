@@ -119,7 +119,7 @@ type API struct {
 	basePath   string
 	perSubject *ratelimit.Buckets
 	perAddress *ratelimit.Buckets
-	// trusted is ARCA_TRUSTED_PROXIES, read by [auth.ClientAddress].
+	// trusted is ARCA_TRUSTED_PROXIES, read by [clientip.Address].
 	trusted  []netip.Prefix
 	links    Links
 	clock    func() time.Time

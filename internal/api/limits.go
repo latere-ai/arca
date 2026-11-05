@@ -6,6 +6,7 @@ package api
 import (
 	"net/http"
 
+	"latere.ai/x/pkg/clientip"
 	"latere.ai/x/pkg/ratelimit"
 
 	"latere.ai/x/arca/internal/auth"
@@ -78,7 +79,7 @@ func (a *API) limitAddress(next http.Handler) http.Handler {
 // about: the peer's, or behind a trusted proxy the one it forwarded, so one
 // client is one key whatever it sends in a header.
 func (a *API) chargeAddress(r *http.Request) bool {
-	return allowed(a.perAddress, auth.ClientAddress(r, a.trusted))
+	return allowed(a.perAddress, clientip.Address(r, a.trusted))
 }
 
 // refuseVerification is the verifier's [auth.Refuser]: the 401 of spec 006
