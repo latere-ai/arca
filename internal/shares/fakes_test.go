@@ -42,6 +42,7 @@ type table struct {
 	failHolders  error
 	failSubtree  error
 	failPublic   error
+	failHold     error
 }
 
 func newTable() *table { return &table{} }
@@ -297,6 +298,23 @@ func (t *table) MarkPublic(_ context.Context, _ store.Querier, owner, path strin
 		}
 	}
 	return store.File{}, fmt.Errorf("store: mark public: %w", pgx.ErrNoRows)
+}
+
+// Hold answers the row of one path the way the store's lock does, trashed
+// or not. The fake runs one request at a time, so there is nothing to wait
+// for; the store tier proves the wait.
+func (t *table) Hold(_ context.Context, _ store.Querier, owner, path string) (store.File, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.failHold != nil {
+		return store.File{}, t.failHold
+	}
+	for _, f := range t.files {
+		if f.Owner == owner && f.Path == path {
+			return f, nil
+		}
+	}
+	return store.File{}, fmt.Errorf("store: hold: %w", pgx.ErrNoRows)
 }
 
 // page answers one page of the grants a case's predicate selects, ordered

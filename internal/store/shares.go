@@ -144,6 +144,9 @@ type Shares interface {
 	PurgeExpired(ctx context.Context, q Querier, before time.Time) (int64, error)
 	// MarkPublic stamps or clears the public flag on one path (links.go).
 	MarkPublic(ctx context.Context, q Querier, owner, path string, public bool) (File, error)
+	// Hold locks the row of one path until the transaction ends, so the
+	// public grants on it are decided one transaction at a time (links.go).
+	Hold(ctx context.Context, q Querier, owner, path string) (File, error)
 }
 
 // shares is the query set over Postgres.

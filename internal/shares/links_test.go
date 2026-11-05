@@ -490,29 +490,88 @@ func TestARefusedStampLeavesNoLinkBehind(t *testing.T) {
 	}
 }
 
-// TestARefusedStampKeepsAnotherPublicLinksMark: taking back a refused create
-// clears the mark only when no other live public link names the object, so
-// a second attempt that fails leaves the first link as it was.
-func TestARefusedStampKeepsAnotherPublicLinksMark(t *testing.T) {
+// TestRevokingOneOfTwoPublicLinksKeepsTheMark: an object stays public for
+// as long as a live public link names it. The revoke of one of two leaves
+// the row marked and the ACL on, so the other link reads as before, and the
+// revoke of the last clears both.
+func TestRevokingOneOfTwoPublicLinksKeepsTheMark(t *testing.T) {
 	h := newHarness(t)
 	object := anObject(h, "files/reports/q3.pdf")
+	key := object.ObjectID.Key("arca/")
+	folder := mint(t, h, "files/reports", "")
 	first := mint(t, h, object.Path, store.GranteePublic)
-	if w := linkRead(t, h, first, object.Path); w.Code != http.StatusFound {
-		t.Fatalf("a public object read through its link = %d", w.Code)
-	}
+	second := mint(t, h, object.Path, store.GranteePublic)
 
-	h.bucket.fail = errors.New("the bucket is not answering")
-	if got := refusalOf(t, askPublic(t, h, object.Path)); got != api.CodeStorageUnavailable {
-		t.Errorf("a bucket that will not stamp = %q", got)
+	if w := h.do(t, http.MethodDelete, "/v1/shares/links/"+first.ID, "alice", nil); w.Code != http.StatusNoContent {
+		t.Fatalf("the revoke of the first = %d: %s", w.Code, w.Body)
 	}
-	if got := liveLinks(t, h); got[store.GranteePublic] != 1 {
-		t.Errorf("after the second attempt the space lists %v", got)
+	if kept, _ := h.table.held(first.ID); kept.Status != store.GrantRevoked {
+		t.Errorf("the first grant is %q after its revoke", kept.Status)
 	}
 	if !h.table.public(object.Path) {
-		t.Error("the refused second link cleared the first link's mark")
+		t.Error("the revoke of one link cleared the mark another live link holds")
 	}
-	if w := linkRead(t, h, first, object.Path); w.Code != http.StatusFound {
-		t.Errorf("the first link now reads %d, want what it answered before", w.Code)
+	if public, _ := h.bucket.stamped(key); !public {
+		t.Error("the revoke of one link took the ACL off an object another live link holds")
+	}
+	if w := linkRead(t, h, second, object.Path); w.Code != http.StatusFound {
+		t.Errorf("the second link now reads %d, want what it answered before", w.Code)
+	}
+	if got := liveLinks(t, h); got[store.GranteePublic] != 1 {
+		t.Errorf("after one revoke the space lists %v", got)
+	}
+
+	if w := h.do(t, http.MethodDelete, "/v1/shares/links/"+second.ID, "alice", nil); w.Code != http.StatusNoContent {
+		t.Fatalf("the revoke of the second = %d: %s", w.Code, w.Body)
+	}
+	if h.table.public(object.Path) {
+		t.Error("the revoke of the last link left the row marked")
+	}
+	if public, _ := h.bucket.stamped(key); public {
+		t.Error("the revoke of the last link left the ACL on")
+	}
+	if w := linkRead(t, h, folder, object.Path); w.Code != http.StatusOK {
+		t.Errorf("after the last revoke a link read = %d, want the private answer", w.Code)
+	}
+}
+
+// TestOnlyTheFirstAndTheLastPublicLinkCallTheBucket: the first public link
+// on an object stamps it and the revoke of the last clears it. A link made
+// or revoked while another live one names the object changes neither, so
+// it makes no bucket call and a bucket that is not answering does not stop
+// it.
+func TestOnlyTheFirstAndTheLastPublicLinkCallTheBucket(t *testing.T) {
+	h := newHarness(t)
+	object := anObject(h, "files/reports/q3.pdf")
+	key := object.ObjectID.Key("arca/")
+	first := mint(t, h, object.Path, store.GranteePublic)
+
+	h.bucket.fail = errors.New("the bucket is not answering")
+	second := mint(t, h, object.Path, store.GranteePublic)
+	if got := liveLinks(t, h); got[store.GranteePublic] != 2 {
+		t.Errorf("after the second link the space lists %v", got)
+	}
+	if w := h.do(t, http.MethodDelete, "/v1/shares/links/"+first.ID, "alice", nil); w.Code != http.StatusNoContent {
+		t.Fatalf("the revoke of one of two = %d: %s", w.Code, w.Body)
+	}
+	if !h.table.public(object.Path) {
+		t.Error("the row is not marked while a live link names it")
+	}
+	if public, _ := h.bucket.stamped(key); !public {
+		t.Error("the ACL is off while a live link names the object")
+	}
+
+	// The last revoke clears the bucket, so it waits for one that answers.
+	w := h.do(t, http.MethodDelete, "/v1/shares/links/"+second.ID, "alice", nil)
+	if got := refusalOf(t, w); got != api.CodeStorageUnavailable {
+		t.Errorf("the last revoke with the bucket refusing = %q %d", got, w.Code)
+	}
+	h.bucket.fail = nil
+	if w := h.do(t, http.MethodDelete, "/v1/shares/links/"+second.ID, "alice", nil); w.Code != http.StatusNoContent {
+		t.Fatalf("the retry = %d: %s", w.Code, w.Body)
+	}
+	if public, _ := h.bucket.stamped(key); public || h.table.public(object.Path) {
+		t.Error("the last revoke did not clear the object")
 	}
 }
 
@@ -603,15 +662,6 @@ func TestAnUndoThatFailsStillAnswersUnavailable(t *testing.T) {
 			t.Error("the bucket holds an ACL for a create it refused")
 		}
 	})
-	t.Run("another link's mark cannot be read", func(t *testing.T) {
-		h := newHarness(t)
-		object := anObject(h, "files/reports/q3.pdf")
-		h.bucket.fail = errors.New("the bucket is not answering")
-		h.table.failCovering = boom
-		if got := refusalOf(t, askPublic(t, h, object.Path)); got != api.CodeStorageUnavailable {
-			t.Errorf("a create whose undo failed = %q", got)
-		}
-	})
 	t.Run("revoke", func(t *testing.T) {
 		h := newHarness(t)
 		object := anObject(h, "files/reports/q3.pdf")
@@ -626,6 +676,32 @@ func TestAnUndoThatFailsStillAnswersUnavailable(t *testing.T) {
 			t.Error("the grant was revoked over an object the bucket still serves")
 		}
 	})
+}
+
+// TestARevokeThatCannotReadTheOtherLinksChangesNothing: whether a revoke
+// clears the object is read from the other live links, and a read that fails
+// leaves the grant, the row and the ACL as they were for the retry.
+func TestARevokeThatCannotReadTheOtherLinksChangesNothing(t *testing.T) {
+	for name, fail := range map[string]func(*table, error){
+		"the row cannot be held":         func(tb *table, err error) { tb.failHold = err },
+		"the other links cannot be read": func(tb *table, err error) { tb.failCovering = err },
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			object := anObject(h, "files/reports/q3.pdf")
+			link := mint(t, h, object.Path, store.GranteePublic)
+			fail(h.table, errors.New("the connection went away"))
+			if w := h.do(t, http.MethodDelete, "/v1/shares/links/"+link.ID, "alice", nil); w.Code < http.StatusInternalServerError {
+				t.Fatalf("the revoke = %d: %s", w.Code, w.Body)
+			}
+			if kept, _ := h.table.held(link.ID); kept.Status != store.GrantActive {
+				t.Errorf("the grant is %q", kept.Status)
+			}
+			if public, _ := h.bucket.stamped(object.ObjectID.Key("arca/")); !public || !h.table.public(object.Path) {
+				t.Error("the object was cleared by a revoke that failed")
+			}
+		})
+	}
 }
 
 // TestTheFileRouteNeedsTheReadPathOfSpec005: a build that binds none

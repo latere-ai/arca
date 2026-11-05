@@ -192,7 +192,9 @@ func TestE2EAPublicLinkServesTheObjectsBytes(t *testing.T) {
 // carries on from that, as spec 003 has a caller do: the row is marked, a
 // read of the object is the presigned redirect, and the object is not
 // readable from the bucket without a signature, because no bucket policy
-// makes it so. The revoke puts every read back to what it answered before.
+// makes it so. A second public link keeps the object public through the
+// first one's revoke, and the revoke of the last puts every read back to
+// what it answered before.
 func TestE2EAPublicLinkOnAStoreWithoutObjectACLs(t *testing.T) {
 	i := filesInstallation(t)
 	const content = "the quarterly numbers, in plain text"
@@ -242,15 +244,37 @@ func TestE2EAPublicLinkOnAStoreWithoutObjectACLs(t *testing.T) {
 		t.Errorf("the bucket served %s with no signature", unsigned)
 	}
 
+	// A second public link on the object keeps it public when the first is
+	// revoked, and the revoke of the last makes it private again.
+	code, body, _ = i.sharesCall(t, http.MethodPost, "/v1/shares/links", filesCaller, map[string]any{
+		"owner": "me", "path_prefix": path, "kind": "public",
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("the second public link = %d: %s", code, body)
+	}
+	var other sharesLink
+	sharesDecodeJSON(t, body, &other)
+
 	code, body, _ = i.sharesCall(t, http.MethodDelete, "/v1/shares/links/"+minted.ID, filesCaller, nil)
 	if code != http.StatusNoContent {
 		t.Fatalf("the revoke = %d: %s", code, body)
 	}
-	if got := ownerRead(); got != http.StatusOK {
-		t.Errorf("after the revoke the owner's read = %d, want what it answered before", got)
-	}
 	if code, _, _ := i.sharesCall(t, http.MethodGet, minted.URL+"/files/"+path, "", nil); code != http.StatusNotFound {
 		t.Errorf("after the revoke the link read = %d", code)
+	}
+	if got := ownerRead(); got != http.StatusFound {
+		t.Errorf("with the second link live the owner's read = %d, want the public redirect", got)
+	}
+	if code, _, _ := i.sharesCall(t, http.MethodGet, other.URL+"/files/"+path, "", nil); code != http.StatusFound {
+		t.Errorf("with the first link revoked the second link's read = %d", code)
+	}
+
+	code, body, _ = i.sharesCall(t, http.MethodDelete, "/v1/shares/links/"+other.ID, filesCaller, nil)
+	if code != http.StatusNoContent {
+		t.Fatalf("the revoke of the last link = %d: %s", code, body)
+	}
+	if got := ownerRead(); got != http.StatusOK {
+		t.Errorf("after the last revoke the owner's read = %d, want what it answered before", got)
 	}
 }
 

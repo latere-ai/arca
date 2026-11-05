@@ -116,6 +116,11 @@ func (s *Service) CreateLink(w http.ResponseWriter, r *http.Request) {
 // bucket call (spec 004), and never before it: an ACL on an object no grant
 // covers would be a leak.
 //
+// The row is held first, so the public grants on one object are decided one
+// transaction at a time. Only the first public link on an object marks and
+// stamps it: a row already marked has its ACL from the link that marked it,
+// and a second link changes neither, so it makes no bucket call.
+//
 // A stamp the bucket refuses is answered as an unavailable store, and the
 // transaction's work is taken back first (unmint). The caller was given no
 // token, so a grant left live would be one nobody holds, and a row left
@@ -124,7 +129,10 @@ func (s *Service) mint(ctx context.Context, g store.Grant) (store.Grant, error) 
 	var written store.Grant
 	var object store.File
 	err := s.db.Tx(ctx, func(q store.Querier) error {
-		var err error
+		held, err := s.hold(ctx, q, g)
+		if err != nil {
+			return err
+		}
 		if written, err = s.store.Create(ctx, q, g); err != nil {
 			return err
 		}
@@ -138,6 +146,9 @@ func (s *Service) mint(ctx context.Context, g store.Grant) (store.Grant, error) 
 			},
 		}); err != nil {
 			return err
+		}
+		if held.IsPublic {
+			return nil
 		}
 		object, err = s.publicRow(ctx, q, written, true)
 		return err
@@ -154,9 +165,13 @@ func (s *Service) mint(ctx context.Context, g store.Grant) (store.Grant, error) 
 
 // unmint takes back a public grant whose stamp the bucket refused, in one
 // transaction: the grant is revoked, the revoke is recorded beside the
-// create under the same id, and the row's flag is cleared unless another
-// live public grant names the same object, so the row reads as it did
-// before the request.
+// create under the same id, and the row's flag is cleared. The create marked
+// the row only because it was not marked, so the row then reads as it did
+// before the request, which is what the bucket that was not stamped holds.
+//
+// A link another create made in between, on the row this one marked, is
+// left live over a row that is not marked: it grants less than was asked
+// until the next public link on the object stamps it, and never more.
 //
 // A database that will not take it back is logged and the caller still reads
 // the unavailable store. What it leaves is a grant whose token nobody was
@@ -164,14 +179,13 @@ func (s *Service) mint(ctx context.Context, g store.Grant) (store.Grant, error) 
 // grants less than was asked and never more.
 func (s *Service) unmint(ctx context.Context, g store.Grant) {
 	err := s.db.Tx(ctx, func(q store.Querier) error {
+		if _, err := s.hold(ctx, q, g); err != nil {
+			return err
+		}
 		if err := s.revokeIn(ctx, q, g); err != nil {
 			return err
 		}
-		marked, err := s.markedElsewhere(ctx, q, g)
-		if err != nil || marked {
-			return err
-		}
-		_, err = s.publicRow(ctx, q, g, false)
+		_, err := s.publicRow(ctx, q, g, false)
 		return err
 	})
 	if err != nil {
@@ -180,8 +194,27 @@ func (s *Service) unmint(ctx context.Context, g store.Grant) {
 	}
 }
 
+// hold locks the row a public grant's prefix names, until the transaction
+// ends, and answers it. Every write of a public grant takes it before it
+// reads the other grants on the object, so two of them on one object wait
+// for each other and the second reads what the first committed. A grant
+// that is not public, and a prefix that names no row, hold nothing.
+func (s *Service) hold(ctx context.Context, q store.Querier, g store.Grant) (store.File, error) {
+	if g.GranteeKind != store.GranteePublic {
+		return store.File{}, nil
+	}
+	f, err := s.store.Hold(ctx, q, g.Owner, g.PathPrefix)
+	if missing(err) {
+		return store.File{}, nil
+	}
+	if err != nil {
+		return store.File{}, err
+	}
+	return f, nil
+}
+
 // markedElsewhere reports whether a live public grant other than g names the
-// object g names, which then stays marked when g is taken back.
+// object g names, which then stays marked when g is revoked.
 func (s *Service) markedElsewhere(ctx context.Context, q store.Querier, g store.Grant) (bool, error) {
 	held, err := s.store.Covering(ctx, q, g.Owner, g.PathPrefix)
 	if err != nil {
@@ -292,30 +325,51 @@ func (s *Service) RevokeLink(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// withdraw clears the publicity a public grant stamped and then revokes the
-// grant. The ACL goes first: a bucket that will not answer leaves the grant
-// standing and the caller retrying, which grants no more than before, while
-// revoking first and failing to clear would leave an object readable that no
-// grant covers.
+// withdraw revokes a public grant, and clears the publicity it stamped when
+// it is the last live public grant on the object. While another names it,
+// the object stays marked and stamped for that one, and the revoke is the
+// only write, in the transaction that read the others.
 //
-// The row's flag is cleared in the transaction that answers the object to
-// clear, so a bucket that will not clear has it put back (remark): the row
-// then says public for as long as the bucket's ACL does.
+// The last one clears the ACL before it revokes: a bucket that will not
+// answer leaves the grant standing and the caller retrying, which grants no
+// more than before, while revoking first and failing to clear would leave an
+// object readable that no grant covers.
+//
+// The row is held before the others are read (hold), so two revokes of the
+// last two links on one object do not both read the other as live and both
+// leave the object public. The row's flag is cleared in that transaction,
+// and a bucket that will not clear has it put back (remark): the row then
+// says public for as long as the bucket's ACL does.
 func (s *Service) withdraw(ctx context.Context, g store.Grant) error {
-	if g.GranteeKind == store.GranteePublic {
-		var object store.File
-		err := s.db.Tx(ctx, func(q store.Querier) error {
-			var err error
-			object, err = s.publicRow(ctx, q, g, false)
+	if g.GranteeKind != store.GranteePublic {
+		return s.revoke(ctx, g)
+	}
+	var object store.File
+	last := false
+	err := s.db.Tx(ctx, func(q store.Querier) error {
+		if _, err := s.hold(ctx, q, g); err != nil {
 			return err
-		})
+		}
+		marked, err := s.markedElsewhere(ctx, q, g)
 		if err != nil {
-			return fmt.Errorf("shares: clear the public flag: %w", err)
-		}
-		if err := s.stamp(ctx, object, false); err != nil {
-			s.remark(ctx, g)
 			return err
 		}
+		if marked {
+			return s.revokeIn(ctx, q, g)
+		}
+		last = true
+		object, err = s.publicRow(ctx, q, g, false)
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("shares: withdraw the public link: %w", err)
+	}
+	if !last {
+		return nil
+	}
+	if err := s.stamp(ctx, object, false); err != nil {
+		s.remark(ctx, g)
+		return err
 	}
 	return s.revoke(ctx, g)
 }

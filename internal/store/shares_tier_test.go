@@ -422,3 +422,81 @@ func TestStoreLinksMarkPublicIsARowAndNeverAPath(t *testing.T) {
 		t.Errorf("marking a path that is not there = %v", err)
 	}
 }
+
+// TestStoreLinksAHoldWaitsAndThenReadsTheRevokeBeforeIt is what the revoke
+// of one of two public links on an object stands on: a second transaction
+// that holds the row waits for the first to end, and then reads the grant
+// the first revoked as revoked. Without the wait both would read the other
+// as live, and both would leave the object public.
+func TestStoreLinksAHoldWaitsAndThenReadsTheRevokeBeforeIt(t *testing.T) {
+	db := tier(t)
+	row := aRow(alice, "files/reports/q3.pdf")
+	if _, err := NewFiles().Insert(t.Context(), db.Querier(), row); err != nil {
+		t.Fatal(err)
+	}
+	first := grant(t, db, tokenGrant(alice, row.Path, GranteePublic, "t0ken-first"))
+	second := grant(t, db, tokenGrant(alice, row.Path, GranteePublic, "t0ken-second"))
+	shares := NewShares()
+
+	held, release := make(chan struct{}), make(chan struct{})
+	holder := make(chan error, 1)
+	go func() {
+		holder <- db.Tx(t.Context(), func(q Querier) error {
+			if _, err := shares.Hold(t.Context(), q, alice, row.Path); err != nil {
+				return err
+			}
+			if _, err := shares.Revoke(t.Context(), q, first.ID); err != nil {
+				return err
+			}
+			close(held)
+			<-release
+			return nil
+		})
+	}()
+	select {
+	case <-held:
+	case err := <-holder:
+		t.Fatalf("the first transaction ended before it held the row: %v", err)
+	}
+
+	type read struct {
+		grants []Grant
+		err    error
+	}
+	after := make(chan read, 1)
+	go func() {
+		var r read
+		r.err = db.Tx(t.Context(), func(q Querier) error {
+			if _, err := shares.Hold(t.Context(), q, alice, row.Path); err != nil {
+				return err
+			}
+			var err error
+			r.grants, err = shares.Covering(t.Context(), q, alice, row.Path)
+			return err
+		})
+		after <- r
+	}()
+	select {
+	case r := <-after:
+		close(release)
+		t.Fatalf("the second hold did not wait for the first: %+v, %v", r.grants, r.err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	close(release)
+	if err := <-holder; err != nil {
+		t.Fatalf("the first transaction: %v", err)
+	}
+	r := <-after
+	if r.err != nil {
+		t.Fatalf("the second transaction: %v", r.err)
+	}
+	if containsID(r.grants, first.ID) || !containsID(r.grants, second.ID) {
+		t.Errorf("after the wait the covering read holds %+v", r.grants)
+	}
+
+	// A path that is not there holds nothing, and the caller tells that from
+	// a fault.
+	if _, err := shares.Hold(t.Context(), db.Querier(), alice, "files/avatar"); !errors.Is(err, pgx.ErrNoRows) {
+		t.Errorf("holding a path that is not there = %v", err)
+	}
+}

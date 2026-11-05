@@ -164,3 +164,13 @@ func (shares) MarkPublic(ctx context.Context, q Querier, owner, path string, pub
 	}
 	return f, nil
 }
+
+// Hold locks the row of one path until the transaction ends and answers it,
+// with the lock a write takes ([Files.GetForUpdate]). A second transaction
+// that holds the same path waits for the first to end, and its next
+// statement reads what the first committed, so two public grants on one
+// object are never decided from a read that misses the other's revoke. A
+// path that is not there locks nothing and is pgx.ErrNoRows.
+func (shares) Hold(ctx context.Context, q Querier, owner, path string) (File, error) {
+	return files{}.GetForUpdate(ctx, q, owner, path)
+}
