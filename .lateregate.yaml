@@ -192,3 +192,58 @@ image:
         ARCA_OIDC_ISSUERS: https://127.0.0.1:1
       port: 8080
       probe: /livez
+
+# The two service tiers of spec 014, each against a Postgres and a MinIO
+# that lateregate starts, so a laptop and a runner run the same suites. A
+# test in a tier skips itself when its variables are unset; an unset
+# variable here would therefore turn the suite into skips, and a skipped
+# test fails the suite.
+e2e:
+  # Every package that reaches a store, against the real Postgres and the
+  # real MinIO. The package list is the one `make test-store` runs, and a
+  # test holds the two together, because four packages once ran only
+  # locally while the pipeline stayed green.
+  - name: store
+    why: every package that reaches a store keeps its contract against a real Postgres and a real MinIO
+    test:
+      tags: [tiers]
+      run: '^TestStore'
+      race: true
+      packages:
+        - ./internal/blob/...
+        - ./internal/store/...
+        - ./internal/events/...
+        - ./internal/reaper/...
+        - ./internal/files/...
+        - ./internal/uploads/...
+        - ./tools/migrate-drive/...
+        - ./tools/move-objects/...
+    services: [postgres, minio]
+    # The bucket the tiers read through E2E_S3_BUCKET, created before the
+    # first test so no test makes one of its own.
+    buckets: [arca-test]
+    # The names the tier tests read. They build the ARCA_* values they
+    # start a server with from these; no server reads them.
+    env:
+      E2E_DATABASE_URL: "${postgres.url}"
+      E2E_S3_ENDPOINT: "${minio.endpoint}"
+      E2E_S3_KEY: "${minio.access_key}"
+      E2E_S3_SECRET: "${minio.secret_key}"
+      E2E_S3_BUCKET: arca-test
+  # arcad as a process, with the two stubs in the test's own process. The
+  # test builds arcad once for the run when ARCA_BINARY is unset.
+  - name: e2e
+    why: arcad, started as a process against a real Postgres and a real MinIO, serves what an operator sees
+    test:
+      tags: [tiers]
+      run: '^TestE2E'
+      race: true
+      packages: [./test/e2e/...]
+    services: [postgres, minio]
+    buckets: [arca-test]
+    env:
+      E2E_DATABASE_URL: "${postgres.url}"
+      E2E_S3_ENDPOINT: "${minio.endpoint}"
+      E2E_S3_KEY: "${minio.access_key}"
+      E2E_S3_SECRET: "${minio.secret_key}"
+      E2E_S3_BUCKET: arca-test

@@ -23,7 +23,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -147,19 +146,13 @@ func startWith(t *testing.T, extra ...string) *installation {
 	return i
 }
 
-// binary answers the arcad under test: the one the Makefile built when
-// ARCA_BINARY names it, and one built for the run otherwise.
+// binary answers the arcad under test: the one ARCA_BINARY names, which
+// TestMain sets to a build of its own when the run did not.
 func binary(t *testing.T) string {
 	t.Helper()
-	if path := os.Getenv("ARCA_BINARY"); path != "" {
-		if _, err := os.Stat(path); err == nil {
-			return path
-		}
-	}
-	path := filepath.Join(t.TempDir(), "arcad")
-	build := exec.CommandContext(t.Context(), "go", "build", "-o", path, "latere.ai/x/arca/cmd/arcad")
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build arcad: %v\n%s", err, out)
+	path := os.Getenv("ARCA_BINARY")
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("the arcad under test: %v", err)
 	}
 	return path
 }

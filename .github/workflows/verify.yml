@@ -1,133 +1,26 @@
-# Every push to main and every pull request runs the gate, the shared
-# pipeline of latere-ai/ci, the checks that need the tree and no cluster,
-# and the two service tiers of spec 014, each against the Postgres and
-# MinIO of compose.yaml on a runner of its own. Every third-party action
-# is pinned by commit.
-name: verify
+name: ci
 
-# A push or pull request that changes only markdown outside the exceptions
-# starts no run, because no build or test reads it. The exceptions are specs/,
-# whose route, error and policy tables the suite holds to the code and whose
-# cases the conformance suite counts; docs/api.md and docs/configuration.md,
-# which tests hold to the router and the configuration; and SECURITY.md, whose
-# commitments the threat-model test parses. `lateregate release` runs the whole
-# bar before every tag. A tag is never filtered by paths.
+# The bar lives in latere-ai/ci-gate, pinned in go.mod, and the shared
+# workflow runs it. What this repository decides is in .lateregate.yaml.
+# `lateregate init` writes this file, the same in every repository.
 on:
   push:
     branches: [main]
-    tags: ['v*']
-    paths:
-      - "**"
-      - "!**.md"
-      - "specs/**"
-      - "docs/api.md"
-      - "docs/configuration.md"
-      - "SECURITY.md"
   pull_request:
-    paths:
-      - "**"
-      - "!**.md"
-      - "specs/**"
-      - "docs/api.md"
-      - "docs/configuration.md"
-      - "SECURITY.md"
   workflow_dispatch:
 
 # A newer push to the same ref supersedes this run: its commit carries every
-# change this one would verify, and the runner is better spent on it.
+# change this one would verify.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
+# actions: read lets the gate find the last commit whose CI passed, which it
+# measures the change from.
 permissions:
   contents: read
+  actions: read
 
 jobs:
-  # Every job runs on GitHub's hosted runners. The repository is public,
-  # so they cost nothing, and a hosted runner is a fresh machine per job.
   gate:
-    if: "!startsWith(github.ref, 'refs/tags/')"
     uses: latere-ai/ci/.github/workflows/lateregate.yml@v1
-    with:
-      runs_on: ubuntu-latest
-      test_os: '["ubuntu-latest"]'
-
-  # The two service tiers of spec 014. Each job starts the stack from
-  # compose.yaml, the same file a contributor runs, so a tier reads one
-  # definition of the services rather than a second one written for CI.
-  # The ports are fixed here and derived from the directory name locally,
-  # because a runner is a machine of its own and a checkout is not.
-  store:
-    name: the store tier on MinIO and Postgres
-    if: "!startsWith(github.ref, 'refs/tags/')"
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      DEV_PROJECT: arca
-      DEV_DB_PORT: "5432"
-      DEV_S3_PORT: "9000"
-      DEV_S3_CONSOLE_PORT: "9001"
-      E2E_DATABASE_URL: postgres://arca:arca@127.0.0.1:5432/arca?sslmode=disable
-      E2E_S3_ENDPOINT: http://127.0.0.1:9000
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-      - name: Start Postgres and MinIO
-        run: make up
-      - name: Run the store tier
-        run: |
-          go test -tags=tiers -race -count=1 -run '^TestStore' \
-            -covermode=atomic -coverprofile=store.out \
-            ./internal/blob/... ./internal/store/... ./internal/events/... ./internal/reaper/... ./internal/files/... ./internal/uploads/... ./tools/migrate-drive/... ./tools/move-objects/...
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: store-coverage
-          path: store.out
-          retention-days: 7
-          if-no-files-found: error
-      - name: What the stack looked like when a test failed
-        if: failure()
-        run: |
-          docker compose -f compose.yaml -p "$DEV_PROJECT" ps
-          docker compose -f compose.yaml -p "$DEV_PROJECT" logs --tail=50
-
-  e2e:
-    name: the e2e tier, arcad as a process
-    if: "!startsWith(github.ref, 'refs/tags/')"
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      DEV_PROJECT: arca
-      DEV_DB_PORT: "5432"
-      DEV_S3_PORT: "9000"
-      DEV_S3_CONSOLE_PORT: "9001"
-      E2E_DATABASE_URL: postgres://arca:arca@127.0.0.1:5432/arca?sslmode=disable
-      E2E_S3_ENDPOINT: http://127.0.0.1:9000
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-      - name: Start Postgres and MinIO
-        run: make up
-      - name: Build the binary the tier runs
-        run: make build build-stubs
-      - name: Run the e2e tier
-        env:
-          ARCA_BINARY: ${{ github.workspace }}/out/arcad
-        run: |
-          go test -tags=tiers -race -count=1 -run '^TestE2E' \
-            -covermode=atomic -coverprofile=e2e.out ./test/e2e/...
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: e2e-coverage
-          path: e2e.out
-          retention-days: 7
-          if-no-files-found: error
-      - name: What the stack looked like when a test failed
-        if: failure()
-        run: |
-          docker compose -f compose.yaml -p "$DEV_PROJECT" ps
-          docker compose -f compose.yaml -p "$DEV_PROJECT" logs --tail=50

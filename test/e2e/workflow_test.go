@@ -14,14 +14,15 @@ import (
 	"testing"
 )
 
-// TestWorkflowJobsMatchTheTable reads verify.yml and holds it to spec
-// 014's table: one job per service tier, on hosted runners, running the
-// command the spec names. A job that drifts from the table is a tier that
-// stops running without anyone noticing.
+// TestWorkflowJobsMatchTheTable holds the pipeline to spec 014's table: one
+// e2e suite per service tier in .lateregate.yaml, running the command the
+// spec names, and verify.yml calling the shared gate that runs them. A suite
+// that drifts from the table is a tier that stops running without anyone
+// noticing.
 //
-// The store job's package list is not written here. It is read out of the
+// The store suite's package list is not written here. It is read out of the
 // Makefile's test-store target, which is the list a contributor runs, so
-// the job and the target cannot disagree: they did, for a day, and four
+// the suite and the target cannot disagree: they did, for a day, and four
 // packages with store-tier tests (files, uploads, and both migration tools)
 // never ran in CI while every local run was green. The e2e list is one
 // package and is written.
@@ -30,45 +31,91 @@ func TestWorkflowJobsMatchTheTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	workflow := string(raw)
+	if !strings.Contains(string(raw), "uses: latere-ai/ci/.github/workflows/lateregate.yml@v1") {
+		t.Error("verify.yml does not call the shared gate, which is what runs the tiers")
+	}
 
-	for _, job := range []struct {
+	config, err := os.ReadFile("../../.lateregate.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	suites := e2eSuites(string(config))
+
+	for _, suite := range []struct {
 		name     string
 		selector string
-		packages string
+		packages []string
 	}{
-		{"store", "-run '^TestStore'", storePackages(t)},
-		{"e2e", "-run '^TestE2E'", "./test/e2e/..."},
+		{"store", "run: '^TestStore'", storePackages(t)},
+		{"e2e", "run: '^TestE2E'", []string{"./test/e2e/..."}},
 	} {
-		if !strings.Contains(workflow, "\n  "+job.name+":\n") {
-			t.Errorf("verify.yml has no %s job", job.name)
+		body, ok := suites[suite.name]
+		if !ok {
+			t.Errorf(".lateregate.yaml has no %s e2e suite", suite.name)
 			continue
 		}
 		for _, want := range []string{
-			job.selector,
-			job.packages,
-			"-tags=tiers",
-			"-race",
-			"-covermode=atomic",
-			"-coverprofile=" + job.name + ".out",
+			suite.selector,
+			"tags: [tiers]",
+			"race: true",
+			"services: [postgres, minio]",
 		} {
-			if !strings.Contains(workflow, want) {
-				t.Errorf("the %s job does not run %q", job.name, want)
+			if !strings.Contains(body, want) {
+				t.Errorf("the %s suite does not declare %q", suite.name, want)
+			}
+		}
+		got := map[string]bool{}
+		for _, pkg := range packagePattern.FindAllString(body, -1) {
+			got[pkg] = true
+		}
+		for _, pkg := range suite.packages {
+			if !got[pkg] {
+				t.Errorf("the %s suite does not run %s", suite.name, pkg)
+			}
+			delete(got, pkg)
+		}
+		for pkg := range got {
+			t.Errorf("the %s suite runs %s, which the table does not name", suite.name, pkg)
+		}
+		// A tier test that finds a variable unset skips itself, and a
+		// skipped test fails the suite, so each variable is declared.
+		for _, name := range []string{
+			"E2E_DATABASE_URL", "E2E_S3_ENDPOINT", "E2E_S3_KEY", "E2E_S3_SECRET", "E2E_S3_BUCKET",
+		} {
+			if !strings.Contains(body, name+":") {
+				t.Errorf("the %s suite sets no %s", suite.name, name)
 			}
 		}
 	}
-	if strings.Count(workflow, "runs-on: ubuntu-latest") < 2 {
-		t.Error("a job left GitHub's hosted runners; the repository is public and they cost nothing")
-	}
-	if !strings.Contains(workflow, "run: make up") {
-		t.Error("a tier job starts the stack from something other than compose.yaml")
-	}
 }
 
-// storePackages reads the packages the Makefile's test-store target runs,
-// joined the way verify.yml writes them on one line, so the CI job is held
-// to the target rather than to a second copy of the list.
-func storePackages(t *testing.T) string {
+// packagePattern matches a Go package pattern in a suite's body.
+var packagePattern = regexp.MustCompile(`\./[A-Za-z0-9_./-]+\.\.\.`)
+
+// e2eSuites splits the e2e key of .lateregate.yaml into its entries, each
+// answered whole under its name. The file is read as text because the keys
+// are few and flat, and a YAML dependency would join the module for one test.
+func e2eSuites(config string) map[string]string {
+	_, rest, found := strings.Cut(config, "\ne2e:\n")
+	if !found {
+		return nil
+	}
+	// The key ends at the next line that starts a top-level key.
+	if end := regexp.MustCompile(`\n[a-z]`).FindStringIndex(rest); end != nil {
+		rest = rest[:end[0]]
+	}
+	suites := map[string]string{}
+	for _, entry := range strings.Split(rest, "\n  - name: ")[1:] {
+		name, _, _ := strings.Cut(entry, "\n")
+		suites[strings.TrimSpace(name)] = entry
+	}
+	return suites
+}
+
+// storePackages reads the packages the Makefile's test-store target runs, so
+// the CI suite is held to the target rather than to a second copy of the
+// list.
+func storePackages(t *testing.T) []string {
 	t.Helper()
 	raw, err := os.ReadFile("../../Makefile")
 	if err != nil {
@@ -94,7 +141,7 @@ func storePackages(t *testing.T) string {
 	if len(pkgs) < 4 {
 		t.Fatalf("read %d packages out of the Makefile's test-store target; the parse is wrong, not the target", len(pkgs))
 	}
-	return strings.Join(pkgs, " ")
+	return pkgs
 }
 
 // TestMakeRun reads the run target and holds it to the seven steps of spec

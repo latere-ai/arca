@@ -162,9 +162,11 @@ a kind cluster before anything is deployed.
 
 ## Continuous integration
 
-`.github/workflows/verify.yml` runs on every push and pull request: the
-shared gate, the store tier, and the e2e tier. The shared gate checks that
-`go.mod` and `go.sum` are tidy, builds and starts the image, and parses
-the alert rules.
+`.github/workflows/verify.yml` runs on every push and pull request and calls
+the shared gate. The gate checks that `go.mod` and `go.sum` are tidy, builds
+and starts the image, parses the alert rules, and runs the store tier and the
+e2e tier, which `.lateregate.yaml` declares under `e2e` and `go tool
+lateregate e2e` runs on a laptop the same way. lateregate starts the Postgres
+and MinIO each tier needs.
 `.github/workflows/release.yml` runs on a tag; see
 [Releasing](releasing.md).

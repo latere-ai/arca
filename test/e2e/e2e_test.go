@@ -112,6 +112,11 @@ func TestE2EReapRunsOneSequenceAndExits(t *testing.T) {
 // whose variables are unset skips with the remediation in its message, so
 // a clean clone with no services is green and a reader knows what to run.
 func TestE2ETheTierSkipsWithoutTheStack(t *testing.T) {
+	// The defaults are what the tier uses when the run names no bucket and
+	// no keys, so the run that carries them does not decide this test.
+	for _, name := range []string{"E2E_S3_BUCKET", "E2E_S3_KEY", "E2E_S3_SECRET"} {
+		t.Setenv(name, "")
+	}
 	t.Setenv("E2E_DATABASE_URL", "")
 	t.Setenv("E2E_S3_ENDPOINT", "")
 	if _, reason := readStack(); reason != skipWithoutTheStack {

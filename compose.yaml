@@ -2,10 +2,10 @@
 # metadata store of spec 004, MinIO for the object store of spec 003, and a
 # one-shot client that creates the bucket.
 #
-# It is the only definition of the stack. `make up` starts it, `make down`
-# stops it, `make clean` removes it with its volumes, and CI starts it with
-# this same file, so a tier reads the endpoints of the stack a contributor
-# runs.
+# It is the only definition of the stack a contributor runs. `make up` starts it, `make down`
+# stops it, and `make clean` removes it with its volumes. The tiers read the
+# endpoints of this stack through the E2E_* variables of the Makefile; CI runs
+# them against the Postgres and MinIO that `lateregate e2e` starts.
 #
 # Every image is pinned by digest as well as by tag. The tag says which
 # version a reader is running; the digest says which bytes, so a rebuild
