@@ -6,6 +6,22 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Fixed
+
+- **A list filter that names a label returns no space.** Arca writes no
+  label on a space, and the filter was ignored, so the page was wider than
+  the authorizer allowed.
+
+- **An IPv4-mapped client address is told as plain IPv4,** in the peer
+  address and in a forwarded entry alike.
+
+- **A request id with a space is replaced,** so it no longer splits a log
+  line.
+
+- **A replica that starts while another runs the migrations waits up to 5
+  minutes for them,** and `pool_*` parameters of the database URL no
+  longer reach Postgres.
+
 ## v0.12.1 - 2026-11-05
 
 ### Changed
