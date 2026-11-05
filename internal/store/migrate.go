@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -26,33 +25,14 @@ import (
 // crash the incoming pod, and the pool the migrator opened for itself closed
 // afterwards.
 func Migrate(databaseURL string) error {
-	if err := pgxmigrate.Up(migrateURL(databaseURL), migrations.Files, "."); err != nil {
+	dsn, err := pgxmigrate.DriverURL(databaseURL)
+	if err != nil {
+		return fmt.Errorf("store: read the database url for the migrator: %w", err)
+	}
+	if err := pgxmigrate.Up(dsn, migrations.Files, "."); err != nil {
 		return fmt.Errorf("store: apply the migrations: %w", err)
 	}
 	return nil
-}
-
-// migrateURL rewrites the connection string for the migrator. Two things
-// differ from what the pool reads: the scheme selects the golang-migrate
-// driver, and the driver this package registers answers to pgx5; and the
-// pool_* parameters pgxpool understands are forwarded to the server as
-// settings by anything else, where they fail the connection.
-func migrateURL(databaseURL string) string {
-	u, err := url.Parse(databaseURL)
-	if err != nil {
-		return databaseURL
-	}
-	if u.Scheme == "postgres" || u.Scheme == "postgresql" {
-		u.Scheme = "pgx5"
-	}
-	q := u.Query()
-	for k := range q {
-		if strings.HasPrefix(k, "pool_") {
-			q.Del(k)
-		}
-	}
-	u.RawQuery = q.Encode()
-	return u.String()
 }
 
 // Pending answers the migrations the database has not applied, in the order

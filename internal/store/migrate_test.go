@@ -12,18 +12,13 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-func TestTheMigratorReadsAURLOfItsOwn(t *testing.T) {
-	for raw, want := range map[string]string{
-		"postgres://arca:arca@db:5432/arca?sslmode=disable":         "pgx5://arca:arca@db:5432/arca?sslmode=disable",
-		"postgresql://arca@db/arca":                                 "pgx5://arca@db/arca",
-		"postgres://arca@db/arca?pool_max_conns=4&sslmode=disable":  "pgx5://arca@db/arca?sslmode=disable",
-		"postgres://arca@db/arca?pool_max_conns=4&pool_min_conns=1": "pgx5://arca@db/arca",
-		"pgx5://arca@db/arca":                                       "pgx5://arca@db/arca",
-		"://not a url":                                              "://not a url",
-	} {
-		if got := migrateURL(raw); got != want {
-			t.Errorf("migrateURL(%q) = %q, want %q", raw, got, want)
-		}
+func TestMigrateRefusesAURLThatIsNotPostgres(t *testing.T) {
+	err := Migrate("mysql://arca:secret@db/arca")
+	if err == nil {
+		t.Fatal("Migrate on a mysql url applied migrations")
+	}
+	if strings.Contains(err.Error(), "secret") {
+		t.Errorf("the refusal echoes the password: %v", err)
 	}
 }
 
