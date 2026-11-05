@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.12.1 - 2026-11-05
+
 ### Changed
 
 - **A release deploys through the shared image-deploy stage.** The deploy job
