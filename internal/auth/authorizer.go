@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"slices"
 	"time"
 
 	"latere.ai/x/pkg/authz"
@@ -60,19 +59,19 @@ type Decision struct {
 	// the members its own question carries.
 	Limits json.RawMessage
 	// Filter narrows a list action's page to the owners and labels the
-	// authorizer named. The handler applies it to its own query, so a
-	// selector outside the filter yields an empty page and never a 403.
+	// authorizer named. [Decision.Admits] applies it to the space asked
+	// about, so a selector outside the filter yields an empty page and never
+	// a 403.
 	Filter *authz.Filter
 }
 
 // Admits reports whether the answer's filter covers one space. An answer
-// with no filter, or a filter naming no owner, narrows nothing. Labels are
-// not read: Arca writes no label on a space, so no row could match one.
+// with no filter, or a filter naming no owner and no label, narrows nothing.
+// Arca writes no label on a space, so a space carries none, and a filter that
+// names a label admits no space: the page is empty rather than wider than
+// the authorizer allowed.
 func (d Decision) Admits(owner string) bool {
-	if d.Filter == nil || len(d.Filter.Owners) == 0 {
-		return true
-	}
-	return slices.Contains(d.Filter.Owners, owner)
+	return d.Filter.Admits(owner, nil)
 }
 
 // Authorizer asks one question per request. It is the seam: an operator's

@@ -66,7 +66,7 @@ func TestAnAllowNeitherOwnershipNorAGrantExplainsIsAdministrative(t *testing.T) 
 		{
 			name:   "an anonymous caller on a public link",
 			caller: "", held: auth.PermissionNone,
-			action: authorizer.ActionLinkRead, res: aFile("01J8R4"), want: false,
+			action: authorizer.ActionLinkRead, res: authorizer.Link{ID: "01J8R4"}.Resource(), want: false,
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {

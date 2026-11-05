@@ -301,15 +301,18 @@ func (allowEverything) Authorize(context.Context, authz.Request) (authz.Decision
 }
 
 // TestAFilterAdmitsTheSpacesItNamesAndAnAnswerWithNoneNarrowsNothing: a
-// list action's answer narrows a page to the owners its filter names, and an
-// answer that carries no owner leaves the page as the handler read it.
+// list action's answer narrows a page to the owners its filter names, a
+// filter that names a label admits no space because a space carries none, and
+// an answer that names neither leaves the page as the handler read it.
 func TestAFilterAdmitsTheSpacesItNamesAndAnAnswerWithNoneNarrowsNothing(t *testing.T) {
 	for name, c := range map[string]struct {
 		filter *authz.Filter
 		want   bool
 	}{
 		"no filter":          {filter: nil, want: true},
-		"a filter of labels": {filter: &authz.Filter{Labels: map[string]string{"team": "a"}}, want: true},
+		"a filter of labels": {filter: &authz.Filter{Labels: map[string]string{"team": "a"}}, want: false},
+		"owners and labels":  {filter: &authz.Filter{Owners: []string{alice}, Labels: map[string]string{"team": "a"}}, want: false},
+		"empty owners":       {filter: &authz.Filter{}, want: true},
 		"inside the filter":  {filter: &authz.Filter{Owners: []string{bob, alice}}, want: true},
 		"outside the filter": {filter: &authz.Filter{Owners: []string{bob}}, want: false},
 	} {

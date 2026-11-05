@@ -183,11 +183,7 @@ func (p *OwnerPolicy) restrict(d authz.Decision, req authz.Request) authz.Decisi
 		// reading.
 		return d
 	}
-	grants, err := authz.ParseGrants(req.Claims)
-	if err != nil {
-		return authz.Decision{Reason: authz.ReasonGrant}
-	}
-	return authz.Restrict(authorizer.Core, d, req, grants)
+	return authz.RestrictByClaims(authorizer.Core, d, req)
 }
 
 // decide is the policy's own answer, before the grants narrow it: the
