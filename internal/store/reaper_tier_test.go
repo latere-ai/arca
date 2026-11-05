@@ -282,3 +282,75 @@ func TestStoreTheGrantSweepTakesOnlyWhatExpiredAWholeWindowAgo(t *testing.T) {
 		t.Errorf("the sweep left %d rows, want the recent expiry and the revoked one", held)
 	}
 }
+
+// TestStoreAnObjectWhoseLastPublicGrantExpiredIsLapsedUntilItClears is the
+// first half of pass 7 against Postgres: Lapsed answers a marked row whose
+// every public grant has expired, and the purge keeps the expired grant that
+// names it, however old, until the row is unmarked. A row a live public
+// grant still holds, a row already cleared, a row marked with no grant at
+// all and a trashed row are none of its business.
+func TestStoreAnObjectWhoseLastPublicGrantExpiredIsLapsedUntilItClears(t *testing.T) {
+	db := tier(t)
+	shares := NewShares()
+	owner := aSpaceOf(t)
+	long := time.Now().Add(-800 * time.Hour)
+	cutoff := time.Now().Add(-720 * time.Hour)
+
+	lapsed := reaperFile(t, db, owner, "files/lapsed.pdf", 1)
+	held := reaperFile(t, db, owner, "files/held.pdf", 1)
+	cleared := reaperFile(t, db, owner, "files/cleared.pdf", 1)
+	carried := reaperFile(t, db, owner, "files/carried.pdf", 1)
+	trashed := reaperFile(t, db, owner, "files/trashed.pdf", 1)
+	for _, f := range []File{lapsed, held, carried, trashed} {
+		if _, err := shares.MarkPublic(t.Context(), db.Querier(), owner, f.Path, true); err != nil {
+			t.Fatalf("mark %q: %v", f.Path, err)
+		}
+	}
+	if _, err := db.Querier().Exec(t.Context(),
+		`UPDATE files SET deleted_at = now() WHERE owner = $1 AND path = $2`, owner, trashed.Path); err != nil {
+		t.Fatalf("trash %q: %v", trashed.Path, err)
+	}
+	expiredOn := func(path, token string) Grant {
+		g := tokenGrant(owner, path, GranteePublic, token)
+		g.ExpiresAt = &long
+		return grant(t, db, g)
+	}
+	kept := expiredOn(lapsed.Path, "t0ken-lapsed")
+	expiredOn(held.Path, "t0ken-held-expired")
+	grant(t, db, tokenGrant(owner, held.Path, GranteePublic, "t0ken-held-live"))
+	expiredOn(cleared.Path, "t0ken-cleared")
+	expiredOn(trashed.Path, "t0ken-trashed")
+
+	got, err := shares.Lapsed(t.Context(), db.Querier(), 10)
+	if err != nil {
+		t.Fatalf("Lapsed: %v", err)
+	}
+	if len(got) != 1 || got[0].Path != lapsed.Path || got[0].ObjectID != lapsed.ObjectID {
+		t.Fatalf("Lapsed answered %+v, want only %q", got, lapsed.Path)
+	}
+
+	counted, err := shares.Expired(t.Context(), db.Querier(), cutoff)
+	if err != nil {
+		t.Fatalf("Expired: %v", err)
+	}
+	gone, err := shares.PurgeExpired(t.Context(), db.Querier(), cutoff)
+	if err != nil {
+		t.Fatalf("PurgeExpired: %v", err)
+	}
+	if counted != 3 || gone != 3 {
+		t.Fatalf("the count is %d and the purge took %d, want the three whose objects are not lapsed", counted, gone)
+	}
+	if _, err := shares.Get(t.Context(), db.Querier(), kept.ID); err != nil {
+		t.Fatalf("the purge took the only grant naming an object still public: %v", err)
+	}
+
+	if _, err := shares.MarkPublic(t.Context(), db.Querier(), owner, lapsed.Path, false); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := shares.Lapsed(t.Context(), db.Querier(), 10); err != nil || len(got) != 0 {
+		t.Fatalf("a cleared row is still lapsed: %+v, %v", got, err)
+	}
+	if gone, err := shares.PurgeExpired(t.Context(), db.Querier(), cutoff); err != nil || gone != 1 {
+		t.Fatalf("once the row cleared the purge took %d, %v, want its grant", gone, err)
+	}
+}

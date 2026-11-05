@@ -125,7 +125,7 @@ func reap(ctx context.Context, args []string, getenv config.Getenv, stdout, stde
 	// wherever the two stores are reachable, and this process runs the same
 	// eight a replica does.
 	log := events.NewLog()
-	grants, err := grantPass(cfg, store.NewShares())
+	grants, err := grantPass(cfg, db, bucket, store.NewShares())
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -192,9 +192,14 @@ func uploadPass(cfg config.Config, db *store.DB, bucket blob.Store, log events.L
 // grantPass builds pass 7: the grant hygiene of spec 008, over the table
 // that spec owns. The window is the trash retention, because an expired
 // grant is kept for an audit as long as a deleted object is kept for a
-// restore and there is no second retention setting.
-func grantPass(cfg config.Config, grants store.Shares) (reaper.Pass, error) {
-	return shares.NewExpiry(shares.ExpiryOptions{Store: grants, Window: cfg.TrashRetention})
+// restore and there is no second retention setting. The bucket is the one
+// the service stamps a public object through, so the pass takes off the ACL
+// a public grant that has since expired put on.
+func grantPass(cfg config.Config, db *store.DB, bucket blob.Store, grants store.Shares) (reaper.Pass, error) {
+	return shares.NewExpiry(shares.ExpiryOptions{
+		DB: db, Store: grants, Publisher: bucket, BucketPrefix: cfg.BucketPrefix,
+		Window: cfg.TrashRetention,
+	})
 }
 
 // The seams the packages above declared and spec 010 fills. They are here
@@ -583,7 +588,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	// ARCA_REAP_INTERVAL to 0 here and runs arcad reap as a process of its
 	// own. It starts before the listeners, so a reconciler that cannot be
 	// built fails the start-up before a port is bound.
-	expiredGrants, err := grantPass(cfg, grants)
+	expiredGrants, err := grantPass(cfg, db, bucket, grants)
 	if err != nil {
 		return fail(stderr, err)
 	}

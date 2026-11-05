@@ -125,8 +125,8 @@ type ObjectReader interface {
 
 // Publisher stamps the bucket's public-read ACL on one object, or removes
 // it. It is the one call of spec 003 this package makes: a public grant on a
-// prefix that names one object marks that object public, and a revoke clears
-// it.
+// prefix that names one object marks that object public, and the revoke or
+// the expiry of the last one clears it.
 type Publisher interface {
 	SetPublic(ctx context.Context, key string, public bool) error
 }
@@ -164,15 +164,16 @@ type Options struct {
 // Service answers the routes of spec 008. It is built once at start and
 // serves every request; it holds its seams and no state.
 type Service struct {
-	authorizer   *auth.Authorizer
-	db           Database
-	store        store.Shares
-	ledger       Ledger
-	reader       ObjectReader
-	publisher    Publisher
-	bucketPrefix string
-	basePath     string
-	clock        func() time.Time
+	// publicity is the grants table and the bucket, which every route reads
+	// the table through and a public grant's object is marked and stamped
+	// through.
+	publicity
+	authorizer *auth.Authorizer
+	db         Database
+	ledger     Ledger
+	reader     ObjectReader
+	basePath   string
+	clock      func() time.Time
 }
 
 // New builds the service. It refuses to build without the three seams every
@@ -188,10 +189,9 @@ func New(o Options) (*Service, error) {
 		return nil, errNoStore
 	}
 	s := &Service{
-		authorizer: o.Authorizer, db: o.DB, store: o.Store,
-		ledger: o.Ledger, reader: o.Reader, publisher: o.Publisher,
-		bucketPrefix: o.BucketPrefix, basePath: cmp.Or(o.BasePath, api.DefaultBasePath),
-		clock: o.Now,
+		store: o.Store, publisher: o.Publisher, bucketPrefix: o.BucketPrefix,
+		authorizer: o.Authorizer, db: o.DB, ledger: o.Ledger, reader: o.Reader,
+		basePath: cmp.Or(o.BasePath, api.DefaultBasePath), clock: o.Now,
 	}
 	if s.ledger == nil {
 		s.ledger = NoLedger{}

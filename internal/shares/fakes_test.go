@@ -4,6 +4,7 @@
 package shares_test
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"maps"
@@ -43,6 +44,12 @@ type table struct {
 	failSubtree  error
 	failPublic   error
 	failHold     error
+	failLapsed   error
+
+	// beforeHold runs once, at the next Hold and before it reads, for a case
+	// that lands a write between a read and the transaction that holds the
+	// row. It runs without the lock, so it may write through the table.
+	beforeHold func()
 }
 
 func newTable() *table { return &table{} }
@@ -165,7 +172,7 @@ func (t *table) Expired(_ context.Context, _ store.Querier, before time.Time) (i
 	}
 	var n int64
 	for _, g := range t.grants {
-		if g.ExpiresAt != nil && g.ExpiresAt.Before(before) {
+		if t.purgeable(g, before) {
 			n++
 		}
 	}
@@ -181,7 +188,7 @@ func (t *table) PurgeExpired(_ context.Context, _ store.Querier, before time.Tim
 	kept := t.grants[:0]
 	var gone int64
 	for _, g := range t.grants {
-		if g.ExpiresAt != nil && g.ExpiresAt.Before(before) {
+		if t.purgeable(g, before) {
 			gone++
 			continue
 		}
@@ -189,6 +196,56 @@ func (t *table) PurgeExpired(_ context.Context, _ store.Querier, before time.Tim
 	}
 	t.grants = kept
 	return gone, nil
+}
+
+// purgeable is the condition the expired-grant statement carries: expired
+// before the cutoff, unless it is an active public grant on an object still
+// lapsed. The caller holds the lock.
+func (t *table) purgeable(g store.Grant, before time.Time) bool {
+	if g.ExpiresAt == nil || !g.ExpiresAt.Before(before) {
+		return false
+	}
+	if g.GranteeKind != store.GranteePublic || g.Status != store.GrantActive {
+		return true
+	}
+	return !slices.ContainsFunc(t.files, func(f store.File) bool {
+		return f.Owner == g.Owner && f.Path == g.PathPrefix && t.lapsed(f)
+	})
+}
+
+// lapsed is the condition on a row the store reads: live, marked, and named
+// by no live public grant. The caller holds the lock.
+func (t *table) lapsed(f store.File) bool {
+	return f.IsPublic && f.DeletedAt == nil && !slices.ContainsFunc(t.grants, func(g store.Grant) bool {
+		return g.Owner == f.Owner && g.PathPrefix == f.Path && g.GranteeKind == store.GranteePublic && t.live(g)
+	})
+}
+
+// Lapsed answers the live marked rows an expired, active public grant names
+// and no live one does, in the statement's order.
+func (t *table) Lapsed(_ context.Context, _ store.Querier, limit int) ([]store.File, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.failLapsed != nil {
+		return nil, t.failLapsed
+	}
+	if limit <= 0 {
+		return nil, fmt.Errorf("store: the page holds %d rows", limit)
+	}
+	var out []store.File
+	for _, f := range t.files {
+		expired := slices.ContainsFunc(t.grants, func(g store.Grant) bool {
+			return g.Owner == f.Owner && g.PathPrefix == f.Path && g.GranteeKind == store.GranteePublic &&
+				g.Status == store.GrantActive && g.ExpiresAt != nil && !g.ExpiresAt.After(t.now())
+		})
+		if expired && t.lapsed(f) {
+			out = append(out, f)
+		}
+	}
+	slices.SortFunc(out, func(a, b store.File) int {
+		return cmp.Or(strings.Compare(a.Owner, b.Owner), strings.Compare(a.Path, b.Path))
+	})
+	return out[:min(len(out), limit)], nil
 }
 
 func (t *table) Covering(_ context.Context, _ store.Querier, owner, path string) ([]store.Grant, error) {
@@ -304,6 +361,10 @@ func (t *table) MarkPublic(_ context.Context, _ store.Querier, owner, path strin
 // or not. The fake runs one request at a time, so there is nothing to wait
 // for; the store tier proves the wait.
 func (t *table) Hold(_ context.Context, _ store.Querier, owner, path string) (store.File, error) {
+	if hook := t.beforeHold; hook != nil {
+		t.beforeHold = nil
+		hook()
+	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.failHold != nil {
@@ -479,6 +540,8 @@ type bucket struct {
 	mu     sync.Mutex
 	public map[string]bool
 	fail   error
+	// calls counts every SetPublic asked, answered or refused.
+	calls int
 }
 
 func newBucket() *bucket { return &bucket{public: map[string]bool{}} }
@@ -486,6 +549,7 @@ func newBucket() *bucket { return &bucket{public: map[string]bool{}} }
 func (b *bucket) SetPublic(_ context.Context, key string, public bool) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.calls++
 	if b.fail != nil {
 		return b.fail
 	}

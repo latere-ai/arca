@@ -315,6 +315,38 @@ func TestTheExpiredGrantsAreCountedAndRemovedByOneCondition(t *testing.T) {
 	}
 }
 
+// Pass 7 reads the lapsed objects from the expired public grants, and the
+// purge keeps a grant whose object the same condition still holds lapsed, so
+// the pass never removes the only row that names an object still public.
+func TestTheLapsedObjectsAreTheOnesThePurgeKeeps(t *testing.T) {
+	owner := "https://issuer.example|alice"
+	q := &fakeQuerier{rows: rowsOf(aFileRow(owner, "files/reports/q3.pdf"))}
+	page, err := NewShares().Lapsed(t.Context(), q, 10)
+	if err != nil || len(page) != 1 || page[0].Path != "files/reports/q3.pdf" {
+		t.Fatalf("Lapsed = %+v, %v", page, err)
+	}
+	if q.args[0][0] != 10 {
+		t.Errorf("Lapsed bound %v as the page", q.args[0])
+	}
+	for _, want := range []string{"e.expires_at <= now()", "e.grantee_kind = 'public'", lapsedRow} {
+		if !strings.Contains(q.statements[0], want) {
+			t.Errorf("the statement does not read %q:\n%s", want, q.statements[0])
+		}
+	}
+	if !strings.Contains(expiredGrants, lapsedRow) {
+		t.Errorf("the purge does not keep a lapsed object's grant:\n%s", expiredGrants)
+	}
+	if !strings.Contains(lapsedRow, "deleted_at IS NULL") {
+		t.Errorf("a trashed row is lapsed:\n%s", lapsedRow)
+	}
+	if _, err := NewShares().Lapsed(t.Context(), q, 0); err == nil {
+		t.Error("a page of no rows answered no error")
+	}
+	if _, err := NewShares().Lapsed(t.Context(), &fakeQuerier{queryErr: errFault}, 10); !errors.Is(err, errFault) {
+		t.Errorf("a failed read answered %v", err)
+	}
+}
+
 func TestTheExpiredGrantsCarryWhatTheDatabaseAnswered(t *testing.T) {
 	if _, err := NewShares().Expired(t.Context(), &fakeQuerier{row: failing(errFault)}, time.Now()); !errors.Is(err, errFault) {
 		t.Errorf("a failed count answered %v", err)

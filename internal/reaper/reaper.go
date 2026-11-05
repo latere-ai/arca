@@ -58,9 +58,11 @@ const (
 	KindMissingBytes Kind = "missing_bytes"
 	// KindTrashPurged is a trashed object past its retention (pass 5).
 	KindTrashPurged Kind = "trash_purged"
-	// KindShareExpired is a grant removed for age (pass 7). An expired
-	// grant already grants nothing, because every read of one filters on
-	// the expiry, so what the pass does is remove the row and not revoke it.
+	// KindShareExpired is a grant removed for age, or an object whose last
+	// public grant expired taken out of the bucket's public reach (pass 7).
+	// An expired grant already grants nothing, because every read of one
+	// filters on the expiry, so what the pass does is remove the row and
+	// not revoke it; the object's ACL is what outlives it until the pass.
 	KindShareExpired Kind = "share_expired"
 	// KindEventPruned is a log row past thirty days (pass 9).
 	KindEventPruned Kind = "event_pruned"

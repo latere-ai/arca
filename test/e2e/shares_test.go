@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"latere.ai/x/arca/test/stubs/authorizer"
 )
@@ -275,6 +276,48 @@ func TestE2EAPublicLinkOnAStoreWithoutObjectACLs(t *testing.T) {
 	}
 	if got := ownerRead(); got != http.StatusOK {
 		t.Errorf("after the last revoke the owner's read = %d, want what it answered before", got)
+	}
+}
+
+// TestE2EAnExpiredPublicLinkIsClearedByTheReaper is pass 7 through the
+// binary: a public link stops reading the moment it expires, and the next
+// arcad reap takes the file's public mark off, so the owner's read answers
+// as it did before the link.
+func TestE2EAnExpiredPublicLinkIsClearedByTheReaper(t *testing.T) {
+	i := filesInstallation(t)
+	const path = "files/reports/q3.txt"
+	if resp := i.filesPut(t, path, "the quarterly numbers, in plain text"); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("the put = %d: %s", resp.StatusCode, filesRead(t, resp))
+	}
+	ownerRead := func() int {
+		t.Helper()
+		resp := i.filesDo(t, http.MethodGet, i.filesObject(path), nil)
+		_ = filesRead(t, resp)
+		return resp.StatusCode
+	}
+	expires := time.Now().Add(2 * time.Second)
+	code, body, _ := i.sharesCall(t, http.MethodPost, "/v1/shares/links", filesCaller, map[string]any{
+		"owner": "me", "path_prefix": path, "kind": "public",
+		"expires_at": expires.UTC().Format(time.RFC3339Nano),
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("POST /v1/shares/links with an expiry = %d: %s", code, body)
+	}
+	var minted sharesLink
+	sharesDecodeJSON(t, body, &minted)
+	if got := ownerRead(); got != http.StatusFound {
+		t.Fatalf("with the link live the owner's read = %d, want the public redirect", got)
+	}
+
+	time.Sleep(time.Until(expires) + 500*time.Millisecond)
+	if code, _, _ := i.sharesCall(t, http.MethodGet, minted.URL+"/files/"+path, "", nil); code != http.StatusNotFound {
+		t.Errorf("after its expiry the link read = %d", code)
+	}
+	if out, err := i.command(t, "reap", "-once"); err != nil {
+		t.Fatalf("arcad reap -once: %v\n%s", err, out)
+	}
+	if got := ownerRead(); got != http.StatusOK {
+		t.Errorf("after the reaper the owner's read = %d, want what it answered before the link", got)
 	}
 }
 

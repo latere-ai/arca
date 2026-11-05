@@ -194,16 +194,27 @@ func (s *Service) unmint(ctx context.Context, g store.Grant) {
 	}
 }
 
+// publicity is what a public grant's object is decided through: the grants
+// table, which holds the object's row and reads the other grants on it, and
+// the bucket, which carries the ACL. The service's routes and pass 7 share
+// it, so a revoke and an expiry read one rule for when an object stops
+// being public.
+type publicity struct {
+	store        store.Shares
+	publisher    Publisher
+	bucketPrefix string
+}
+
 // hold locks the row a public grant's prefix names, until the transaction
 // ends, and answers it. Every write of a public grant takes it before it
 // reads the other grants on the object, so two of them on one object wait
 // for each other and the second reads what the first committed. A grant
 // that is not public, and a prefix that names no row, hold nothing.
-func (s *Service) hold(ctx context.Context, q store.Querier, g store.Grant) (store.File, error) {
+func (p publicity) hold(ctx context.Context, q store.Querier, g store.Grant) (store.File, error) {
 	if g.GranteeKind != store.GranteePublic {
 		return store.File{}, nil
 	}
-	f, err := s.store.Hold(ctx, q, g.Owner, g.PathPrefix)
+	f, err := p.store.Hold(ctx, q, g.Owner, g.PathPrefix)
 	if missing(err) {
 		return store.File{}, nil
 	}
@@ -214,9 +225,10 @@ func (s *Service) hold(ctx context.Context, q store.Querier, g store.Grant) (sto
 }
 
 // markedElsewhere reports whether a live public grant other than g names the
-// object g names, which then stays marked when g is revoked.
-func (s *Service) markedElsewhere(ctx context.Context, q store.Querier, g store.Grant) (bool, error) {
-	held, err := s.store.Covering(ctx, q, g.Owner, g.PathPrefix)
+// object g names, which then stays marked when g is revoked. A g with no id
+// is no grant, so any live public grant on the object answers true.
+func (p publicity) markedElsewhere(ctx context.Context, q store.Querier, g store.Grant) (bool, error) {
+	held, err := p.store.Covering(ctx, q, g.Owner, g.PathPrefix)
 	if err != nil {
 		return false, err
 	}
@@ -229,11 +241,11 @@ func (s *Service) markedElsewhere(ctx context.Context, q store.Querier, g store.
 // row it wrote. A prefix that names a subtree rather than one object, or
 // names nothing yet, marks nothing: publicity is a property of an object's
 // row, derived from a grant and never from a path (spec 008).
-func (s *Service) publicRow(ctx context.Context, q store.Querier, g store.Grant, public bool) (store.File, error) {
+func (p publicity) publicRow(ctx context.Context, q store.Querier, g store.Grant, public bool) (store.File, error) {
 	if g.GranteeKind != store.GranteePublic {
 		return store.File{}, nil
 	}
-	f, err := s.store.MarkPublic(ctx, q, g.Owner, g.PathPrefix, public)
+	f, err := p.store.MarkPublic(ctx, q, g.Owner, g.PathPrefix, public)
 	if missing(err) {
 		return store.File{}, nil
 	}
@@ -252,17 +264,25 @@ func (s *Service) publicRow(ctx context.Context, q store.Querier, g store.Grant,
 // presigned redirect, and whether the world reads it directly is the bucket
 // policy's, which the operator sets and arcad does not. There is no ACL to
 // put on, so there is none to take off either.
-func (s *Service) stamp(ctx context.Context, f store.File, public bool) error {
-	if s.publisher == nil || f.ObjectID == "" {
+//
+// A clear of a key the bucket does not hold is done: an object that is not
+// there carries no ACL, and refusing would keep the last public grant on a
+// row whose bytes are gone from ever clearing it.
+func (p publicity) stamp(ctx context.Context, f store.File, public bool) error {
+	if p.publisher == nil || f.ObjectID == "" {
 		return nil
 	}
-	err := s.publisher.SetPublic(ctx, f.ObjectID.Key(s.bucketPrefix), public)
+	err := p.publisher.SetPublic(ctx, f.ObjectID.Key(p.bucketPrefix), public)
 	switch {
 	case err == nil:
 		return nil
 	case errors.Is(err, blob.ErrNotSupported):
 		slog.InfoContext(ctx, "shares: the store holds no object ACLs; the row is marked and the bucket is not",
 			"object_id", f.ObjectID, "public", public)
+		return nil
+	case !public && errors.Is(err, blob.ErrNotFound):
+		slog.WarnContext(ctx, "shares: the bucket does not hold the object whose public flag is cleared",
+			"object_id", f.ObjectID)
 		return nil
 	default:
 		slog.ErrorContext(ctx, "shares: stamp the object's public flag", "object_id", f.ObjectID, "public", public, "error", err)

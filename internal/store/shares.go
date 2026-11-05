@@ -142,6 +142,9 @@ type Shares interface {
 	// halves of pass 7 of spec 010.
 	Expired(ctx context.Context, q Querier, before time.Time) (int64, error)
 	PurgeExpired(ctx context.Context, q Querier, before time.Time) (int64, error)
+	// Lapsed answers the objects whose last public grant has expired, which
+	// pass 7 unmarks and unstamps before the grant may be purged.
+	Lapsed(ctx context.Context, q Querier, limit int) ([]File, error)
 	// MarkPublic stamps or clears the public flag on one path (links.go).
 	MarkPublic(ctx context.Context, q Querier, owner, path string, public bool) (File, error)
 	// Hold locks the row of one path until the transaction ends, so the
@@ -238,7 +241,27 @@ func (shares) Revoke(ctx context.Context, q Querier, id string) (bool, error) {
 // and a revoked row is kept so an audit can see the grant existed (spec
 // 008); what leaves is a grant that stopped granting on its own long enough
 // ago that nothing will ask about it again.
-const expiredGrants = `shares WHERE expires_at IS NOT NULL AND expires_at < $1`
+//
+// An expired public grant whose object is still lapsed stays, however long
+// ago it expired: it is the only row that names an object the bucket may
+// still serve to anyone, and the pass clears the object before the grant may
+// leave (Lapsed).
+const expiredGrants = `shares WHERE expires_at IS NOT NULL AND expires_at < $1
+	AND NOT (grantee_kind = 'public' AND status = 'active' AND EXISTS (
+	    SELECT 1 FROM files f
+	     WHERE f.owner = shares.owner AND f.path = shares.path_prefix AND ` + lapsedRow + `))`
+
+// lapsedRow is the condition on a files row f that no live public grant
+// holds it public any more: the row is live and marked, and no active,
+// unexpired public grant names its path. The live half is the condition
+// Covering reads, so the pass and a revoke agree on which grants still hold
+// an object public.
+const lapsedRow = `f.is_public AND f.deleted_at IS NULL
+	AND NOT EXISTS (
+	    SELECT 1 FROM shares l
+	     WHERE l.owner = f.owner AND l.path_prefix = f.path
+	       AND l.grantee_kind = 'public' AND l.status = 'active'
+	       AND (l.expires_at IS NULL OR l.expires_at > now()))`
 
 // Expired counts the grants that expired before the cutoff.
 func (shares) Expired(ctx context.Context, q Querier, before time.Time) (int64, error) {
@@ -262,6 +285,32 @@ func (shares) PurgeExpired(ctx context.Context, q Querier, before time.Time) (in
 		return 0, classify("purge the expired grants", err)
 	}
 	return tag.RowsAffected(), nil
+}
+
+// Lapsed answers up to limit objects whose last public grant has expired:
+// a live row still marked public, named by an active public grant whose
+// expiry has passed, and by no live one. A public grant stops granting the
+// moment it expires, and the mark and the bucket's ACL it put on are what
+// pass 7 clears (spec 008).
+//
+// It starts from the expired grants and never from the marked rows. A row
+// can be marked with no grant behind it at all, such as one a migration
+// carried over public, and publicity this server never derived from a grant
+// is not this pass's to take away.
+func (shares) Lapsed(ctx context.Context, q Querier, limit int) ([]File, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("store: the lapsed public objects: the page holds %d rows", limit)
+	}
+	return scanFiles(ctx, q, "read the lapsed public objects", `
+		SELECT `+fileColumns+`
+		  FROM files f
+		 WHERE (f.owner, f.path) IN (
+		        SELECT e.owner, e.path_prefix FROM shares e
+		         WHERE e.grantee_kind = 'public' AND e.status = 'active'
+		           AND e.expires_at IS NOT NULL AND e.expires_at <= now())
+		   AND `+lapsedRow+`
+		 ORDER BY f.owner, f.path
+		 LIMIT $1`, limit, limit)
 }
 
 // ListSpace answers one page of a space's grants.
