@@ -9,7 +9,7 @@ depends_on:
 affects: [space/, authorizer/, internal/shares/, internal/api/, internal/store/, docs/]
 effort: large
 created: 2026-09-18
-updated: 2026-10-18
+updated: 2026-11-05
 author: changkun
 ---
 
@@ -155,12 +155,29 @@ What the implementation decided, where this spec was silent:
   the caller asked for and never more: the row is marked inside the
   transaction and the bucket is stamped after it commits, and a revoke
   clears the bucket first. A bucket that will not answer is
-  `storage_unavailable`. A create whose stamp fails has already written the
-  grant and marked the row, and the object is not public in the bucket: the
-  link serves through this server, the world does not read the object
-  directly, and repeating the create stamps what the first attempt could
-  not. A revoke whose stamp fails leaves the grant live over an object that
-  is no longer public. Both failures land on the side that grants less.
+  `storage_unavailable`. **Amended 2026-11-05:** a create whose stamp fails
+  takes back what its transaction wrote, in a second one: the grant is
+  revoked, the revoke is recorded beside the create under the same id, and
+  the row's mark is cleared unless another live public grant names the
+  object. Before, both stayed: the caller was given no token, so the grant
+  was one nobody held, and the mark sent every read of the object to a
+  redirect over an object the bucket did not serve. A revoke whose clear
+  fails puts the mark back, so the row says public for as long as the
+  bucket's ACL does, and the grant stays live for the retry. A database
+  that will not take either back is logged, and what it leaves grants less
+  than was asked. `TestARefusedStampLeavesNoLinkBehind`,
+  `TestARefusedStampKeepsAnotherPublicLinksMark` and
+  `TestARefusedClearLeavesTheLinkAndItsMark` hold it.
+- **Amended 2026-11-05:** a store that holds no object ACLs answers
+  `ErrNotSupported`, which [[003-object-store]] has a caller carry on from,
+  and the create carries on: the grant is written and the row marked, and
+  nothing is stamped or cleared. A read of the object is then the presigned
+  redirect, and whether the world reads it directly is the bucket policy's,
+  which the operator sets and `arcad` does not. The MinIO the local stack
+  and the tiers run is such a store, so a public link is made there too;
+  before, every create there answered `storage_unavailable`.
+  `TestAStoreWithoutObjectACLsStillMakesAPublicLink` and
+  `TestE2EAPublicLinkOnAStoreWithoutObjectACLs` hold it.
 - The prefix a grant carries is normalized: a trailing slash is not part of
   a subtree's name, and the whole of a plane is a prefix, since a path in no
   plane is a path this server does not serve.
@@ -387,6 +404,10 @@ therefore a property of the object recorded in its row, derived from the
 grant and never from the path: the service Arca replaces read
 `files/avatar` and `files/public/**` as public by name, and Arca reads
 no such convention. Nothing else depends on the distinction.
+
+**Amended 2026-11-05:** on a store that holds no object ACLs the row is
+marked and the bucket is not, as [[003-object-store]] describes, and the
+create still succeeds; Current state records it.
 
 **Amended 2026-10-18 ([[031-download-only-link-reads]]):** the `302` to
 `ARCA_PUBLIC_CDN_URL` is the owner's own read of a public object. A read

@@ -24,7 +24,7 @@ depends_on:
 affects: [internal/auth/, internal/api/, internal/blob/, internal/files/, internal/shares/, internal/admin/, internal/uploads/, internal/events/, internal/reaper/, internal/config/, object/, deploy/base/, deploy/prod/, test/e2e/, test/deploy/, SECURITY.md]
 effort: medium
 created: 2026-09-18
-updated: 2026-10-18
+updated: 2026-11-05
 author: changkun
 ---
 
@@ -80,7 +80,12 @@ and without touching this server, so the revoke path is the control
 that matters: `withdraw` clears the ACL before it revokes the row, so a
 bucket that will not answer leaves the grant standing and the caller
 retrying, which grants no more than before. Revoking first and failing
-to clear would leave an object readable that no grant covers.
+to clear would leave an object readable that no grant covers. A create
+the bucket will not stamp is taken back (`unmint`): the grant is revoked
+and the mark cleared, so no grant is left whose token nobody was given.
+On a store that holds no object ACLs nothing is stamped, and the bytes
+are readable without a token only where the operator's bucket policy
+makes them so.
 
 ### Trust boundaries
 
@@ -366,7 +371,7 @@ it. Names are as they appear in the tree.
 | a link token in a listing | the token is answered once at creation and is absent from every other shape | 008 | `TestMintingALinkAnswersTheTokenOnce` |
 | a link that grants more than reading | a token grant carries `read`; a create asking for more is `link_read_only` | 008 | `TestALinkThatWouldGrantMoreThanReadingIsRefused`, `TestE2EALinkThatWouldWriteIsRefused` |
 | a link read outside the subtree it names | the prefix is matched by segment, so `files/reports` covers `files/reports/q3.pdf` and not `files/reports-archive` | 008 | `TestALinkServesNothingOutsideItsPrefix` |
-| a public object readable after its grant is gone | the ACL is cleared before the row is revoked, and a bucket that will not answer leaves the grant standing rather than the object readable. A prefix naming a subtree marks no object at all | 008, 003 | `TestAPublicGrantMarksTheObjectItNames`, `TestAPublicGrantOverASubtreeMarksNoObject`, `TestABucketThatWillNotStampIsAnUnavailableStore`, `TestStoreACopyOfAPublicObjectIsStampedAndNotCarried` |
+| a public object readable after its grant is gone | the ACL is cleared before the row is revoked, and a bucket that will not answer leaves the grant standing and its mark put back rather than the object readable. A create the bucket will not stamp leaves no grant and no mark behind. A prefix naming a subtree marks no object at all | 008, 003 | `TestAPublicGrantMarksTheObjectItNames`, `TestAPublicGrantOverASubtreeMarksNoObject`, `TestARefusedStampLeavesNoLinkBehind`, `TestARefusedClearLeavesTheLinkAndItsMark`, `TestStoreACopyOfAPublicObjectIsStampedAndNotCarried` |
 | usage accounting bypass through multipart | the session is charged its declared size, and the completion charges the difference against the assembled size read back from the store | 007, 010 | `TestACompletionPastTheAnswersLimitIsRefusedAndTheObjectGoes`, `TestTheCompletionReadsTheAssembledSizeBack` |
 | usage accounting bypass by holding many open sessions | an open session's declared bytes are charged from the moment it opens until it completes or is reaped | 007, 010 | `TestASessionThatCouldNotBeOpenedLeavesNoMultipartAndNoCharge`, `TestAnExpiredSessionIsSweptWithItsPartsAndItsCharge` |
 | a usage charge that fails open | the charge and the check are one statement inside the write's own transaction, so a failure refuses the write and records no charge | 010 | `TestUsageFailsClosed`, `TestStoreUsageFailsClosed`, `TestALedgerThatCannotBeWrittenTakesTheWriteDownWithIt`, `TestAWriteRefusedByTheLedgerLeavesNoRowAndNoBytes` |
@@ -519,7 +524,7 @@ their own tier.
 | 11 | A path holding a relative or empty segment, a leading or trailing slash, a control character, or an unknown plane is refused before the bucket is reached, and no bucket key is derived from a path | `TestAPathIsTheShapeSpec005Names`, `TestAPathThatIsNotOneIsRefusedBeforeTheBucketIsReached`, `TestKeyPutsTheShardFromTheTailUnderThePrefix`, `TestAMoveTouchesNoBucketKey` |
 | 12 | A link token carries 256 bits, is answered once, is absent from every listing, never grants a write, serves nothing outside its prefix, and every refusal of a link route is one sentence naming neither token nor path | `TestTheTokenCarriesTheEntropySpec015Requires`, `TestMintingALinkAnswersTheTokenOnce`, `TestALinkThatWouldGrantMoreThanReadingIsRefused`, `TestALinkServesNothingOutsideItsPrefix`, `TestARefusedRedemptionNamesNoToken`, `TestATokenThatResolvesToNothingIsNotFoundBeforeAnyQuestion` |
 | 13 | A link response carries `Referrer-Policy: no-referrer` on all three routes | `TestTheThreeRoutesRedeemATokenWithNoBearer`, `TestE2EAPublicLinkIsReadWithNoBearer`, `TestE2EAPublicLinkServesTheObjectsBytes` |
-| 14 | A public grant marks only the object its prefix names, a bucket that will not stamp is an unavailable store rather than a silent partial grant, and publicity does not travel with copied bytes | `TestAPublicGrantMarksTheObjectItNames`, `TestAPublicGrantOverASubtreeMarksNoObject`, `TestABucketThatWillNotStampIsAnUnavailableStore`, `TestStoreACopyOfAPublicObjectIsStampedAndNotCarried` |
+| 14 | A public grant marks only the object its prefix names, a bucket that will not stamp is an unavailable store rather than a silent partial grant and leaves no grant and no mark behind, and publicity does not travel with copied bytes | `TestAPublicGrantMarksTheObjectItNames`, `TestAPublicGrantOverASubtreeMarksNoObject`, `TestARefusedStampLeavesNoLinkBehind`, `TestARefusedClearLeavesTheLinkAndItsMark`, `TestStoreACopyOfAPublicObjectIsStampedAndNotCarried` |
 | 15 | A completion past the answer's limit is refused and the object goes, and the charge is read against the assembled size the store reports | `TestACompletionPastTheAnswersLimitIsRefusedAndTheObjectGoes`, `TestTheCompletionReadsTheAssembledSizeBack` |
 | 16 | A ledger read or write that fails refuses the write rather than admitting it, and a ledger altered behind the server's back is corrected and reported, with a correction losing to a live charge | `TestUsageFailsClosed`, `TestStoreUsageFailsClosed`, `TestAWriteRefusedByTheLedgerLeavesNoRowAndNoBytes`, `TestLedgerReconciles`, `TestLedgerCorrectionLosesToALiveCharge` |
 | 17 | Retired 2026-10-12 by [[028-one-tree]] with the writer lease it held to | none |
