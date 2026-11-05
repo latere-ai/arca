@@ -356,7 +356,7 @@ pool sizing ([[016-release-and-installation]]); the wire ([[013-api]]).
 | 1 | `arcad migrate` against an empty database creates every table above, and a second run changes nothing | the store tier against Postgres |
 | 2 | `arcad serve` against a database behind the embedded set exits 1 naming the pending file | `cmd/arcad` test with a stub version reader |
 | 3 | A write inside `Tx` that returns an error leaves no row, and one that returns nil leaves exactly one | `internal/store` tests against Postgres |
-| 4 | A rollback after the caller's context is cancelled returns the connection usable, and `UpdateIfChecksum` with a stale checksum changes nothing and reports false | `internal/store` tests, two concurrent writers |
+| 4 | A rollback after the caller's context is canceled returns the connection usable, and `UpdateIfChecksum` with a stale checksum changes nothing and reports false | `internal/store` tests, two concurrent writers |
 | 5 | A unique violation on `(owner, path)` surfaces as a distinguishable conflict, and a missing row as `pgx.ErrNoRows` while a closed pool does not | `internal/store` tests |
 | 6 | `ObjectReferenced` is true for an id held by any of the three tables and false otherwise | `internal/store` tests, one case per table |
 | 7 | Keyset listing returns each row once under concurrent inserts, and its cursor round-trips | the store tier, inserting during the walk |
