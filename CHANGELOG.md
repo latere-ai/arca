@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.12.2 - 2026-11-05
+
 ### Fixed
 
 - **A list filter that names a label returns no space.** Arca writes no
