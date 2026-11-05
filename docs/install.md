@@ -113,7 +113,7 @@ Set the URL when who may see what is a decision your product makes rather
 than a property of storage. The endpoint answers one question per action,
 and a question it cannot answer is a refusal, never an allow. What it
 receives and what it must answer is in the
-[API guide](api.md#the-authorization-endpoint).
+[authorizer guide](authorizer.md).
 
 `arcad check` asks your endpoint one probe question, about a reserved
 resource that belongs to nobody, and passes only when the answer is a deny.

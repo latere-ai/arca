@@ -60,7 +60,7 @@ optional: a Secret without it serves over the direct endpoint.
 
 Every API request carries a bearer token from an issuer you list. Whether
 the caller may act is decided by an authorization endpoint you run, or by the
-built-in owner policy when you run none. The [API guide](api.md#authorization)
+built-in owner policy when you run none. The [authorizer guide](authorizer.md)
 describes both.
 
 | Variable | Required | Default | What it is |
@@ -91,7 +91,7 @@ behind, and expires what has a deadline. See
 | Variable | Required | Default | What it is |
 |---|---|---|---|
 | `ARCA_REAP_INTERVAL` | no | `5m` | How often `arcad serve` runs the reconciler. `0` turns the in-process loop off, for an installation that runs `arcad reap` on its own. |
-| `ARCA_TRASH_RETENTION` | no | `720h` (30 days) | How long a trashed object stays restorable before it is purged. An expired grant is kept for the same window. Must be above zero. A delete made permanent, by the request or by an authorizer's answer, never enters the trash; see the [API guide](api.md#what-an-answer-may-limit). |
+| `ARCA_TRASH_RETENTION` | no | `720h` (30 days) | How long a trashed object stays restorable before it is purged. An expired grant is kept for the same window. Must be above zero. A delete made permanent, by the request or by an authorizer's answer, never enters the trash; see [writing an authorizer](authorizer.md#what-an-answer-may-limit). |
 
 ## Telemetry
 
