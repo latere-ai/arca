@@ -6,6 +6,20 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Fixed
+
+- **A public link the bucket will not mark leaves nothing behind.** The
+  create still answers `503 storage_unavailable`, and now takes back the
+  link and the file's public mark, so other reads of the file answer as
+  before and the same request can be retried. A revoke the bucket will
+  not apply keeps the file marked public, as the bucket still has it,
+  until the retry.
+
+- **A public link can be made on a bucket with no per-object public
+  setting,** such as the MinIO that `make run` starts. The file is then
+  read through Arca's redirects, and the bucket's own policy decides
+  whether anyone can read it directly.
+
 ## v0.12.2 - 2026-11-05
 
 ### Fixed
