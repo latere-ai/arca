@@ -41,11 +41,11 @@ survive.
 ## What the workflow does
 
 `.github/workflows/release.yml` runs on the tag, in five jobs. The build,
-the signatures and the publish run through the shared image release stages
-of [latere-ai/ci](https://github.com/latere-ai/ci): `image-build.yml`,
-`image-publish.yml` and `release-verify.yml`. The conformance run and the
-deploy are Arca's own and run between them, against the digests the build
-pushed.
+the signatures, the deploy and the publish run through the shared image
+release stages of [latere-ai/ci](https://github.com/latere-ai/ci):
+`image-build.yml`, `image-deploy.yml`, `image-publish.yml` and
+`release-verify.yml`. The conformance run is Arca's own and runs between the
+build and the deploy, against the digests the build pushed.
 
 **build** produces everything from the tag's tree and nothing reaches a
 cluster. It first requires that the tag's commit is on `main`, that the
@@ -72,14 +72,19 @@ conformance suite against it. A release that does not serve the API does
 not publish.
 
 **deploy** runs only when the repository variable `ARCA_RELEASE_DEPLOY` is
-set, so a fork deploys nothing. The images carry no tag yet, so it pins the
-`arcad` digest the build pushed in place of the tag `deploy/prod` names and
-applies the overlay with the kubeconfig in the `ARCA_KUBECONFIG` secret, so
-`arcad` and the reaper, which runs the same image, roll to this release and
-to no other build on the way. It waits for both rollouts and runs
-`tools/smoke/release.sh` against the live origin, which checks the probes,
-the OpenAPI document, the served version against the tag, and that the
-origin routes the API prefix to the new build.
+set, so a fork deploys nothing. The job calls `image-deploy.yml` with the
+`arcad` image the build pushed and the kubeconfig in the `ARCA_KUBECONFIG`
+secret. The images carry no tag yet, so the stage sets `arcad` in
+`deploy/prod` to its digest in place of the tag the overlay names, applies
+the overlay, and waits for the `arcad` and `arcad-reaper` rollouts, so both
+roll to this release and to no other build on the way. It then drops the
+kubeconfig and runs `tools/smoke/release.sh` against the live origin every
+five seconds for up to two minutes, until it passes. The smoke checks the
+probes, the OpenAPI document, the served version against the tag, and that
+the origin routes the API prefix to the new build, and its evidence is the
+`smoke-evidence` artifact the publish stage appends to the release body. Only
+`arcad` is passed: `arca-stubs` is pushed too, but `deploy/prod` does not run
+it.
 
 **publish** gives each digest the release tag, writes `checksums.txt` over
 the archives and the SPDX documents and signs it with the publish stage's

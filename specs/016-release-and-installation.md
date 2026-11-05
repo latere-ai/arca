@@ -182,10 +182,11 @@ is set, with the kubeconfig held in the repository secret
 is in [[002-repository-scaffold]]'s table. The operator
 who runs the hosted platform that builds on Arca sets them on their own
 repository; a fork sets neither, so a tag on a fork publishes every
-artifact and the job is skipped. The job applies `deploy/prod`, sets
-the image on the Deployment to the tag, waits for the rollout, and then
-runs `tools/smoke/release.sh` against the installation's own origin,
-whose markdown output is the evidence in the release body.
+artifact and the job is skipped. The job calls the shared `image-deploy.yml`
+stage of latere-ai/ci, which sets the image in `deploy/prod` to the digest the
+build pushed, applies `deploy/prod`, waits for the rollout, and then runs
+`tools/smoke/release.sh` against the installation's own origin until it
+serves the tag, whose markdown output is the evidence in the release body.
 
 The every-push install walk is a separate `install` job in
 `verify.yml`, not in `release.yml`: no tag exists at push time, so it

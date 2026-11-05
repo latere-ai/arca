@@ -45,31 +45,15 @@ func job(t *testing.T, text, name string) string {
 	return "\n" + strings.Join(lines, "\n")
 }
 
-// step returns the block of one named step, from its `- name:` line to the
-// next step at the same indentation.
-func step(t *testing.T, text, name string) string {
-	t.Helper()
-	const marker = "\n      - name: "
-	_, after, ok := strings.Cut(text, marker+name+"\n")
-	if !ok {
-		t.Fatalf("the workflow has no step named %q", name)
-	}
-	before, _, _ := strings.Cut(after, marker)
-	if next := strings.Index(after, "\n      - uses: "); next >= 0 && next < len(before) {
-		before = after[:next]
-	}
-	return before
-}
-
 // stage is where the shared image release stages live. Each is called at
 // one version, a commit or a release tag of latere-ai/ci.
 const stage = "latere-ai/ci/.github/workflows/"
 
 // TestTheReleaseRunsThroughTheSharedStagesInOrder holds the pipeline's
 // shape. The shared build stage builds, signs and attests both images; the
-// conformance run and the deploy, which are Arca's own, run against what it
-// pushed; only then does the shared publish stage tag the digests and
-// create the release, and the verify stage read it back. Signing, attesting
+// conformance run, which is Arca's own, and the shared deploy stage run
+// against what it pushed; only then does the shared publish stage tag the
+// digests and create the release, and the verify stage read it back. Signing, attesting
 // and tagging are the stages' alone: this file calls none of those tools.
 func TestTheReleaseRunsThroughTheSharedStagesInOrder(t *testing.T) {
 	text := workflow(t)
@@ -79,7 +63,7 @@ func TestTheReleaseRunsThroughTheSharedStagesInOrder(t *testing.T) {
 	}{
 		{"build", "image-build.yml", ""},
 		{"conformance", "", "build"},
-		{"deploy", "", "[build, conformance]"},
+		{"deploy", "image-deploy.yml", "[build, conformance]"},
 		{"publish", "image-publish.yml", "[build, conformance, deploy]"},
 		{"verify", "release-verify.yml", "publish"},
 	} {
@@ -139,56 +123,61 @@ func TestReleasePublishesUnderTheOwnersNamespace(t *testing.T) {
 	}
 }
 
-// TestTheDeployJobIsGatedAndNamesTheEnvironment holds the one job that
+// TestTheDeployJobIsGatedAndCallsTheDeployStage holds the one job that
 // reaches a cluster to the two things that keep it off every other
-// repository, and to the environment that makes a release a deployment
-// GitHub records rather than a step in a log.
-func TestTheDeployJobIsGatedAndNamesTheEnvironment(t *testing.T) {
-	text := workflow(t)
+// repository: the repository variable that gates it and the secret it hands
+// the shared stage. The stage runs under the production environment, which
+// makes a release a deployment GitHub records rather than a step in a log.
+func TestTheDeployJobIsGatedAndCallsTheDeployStage(t *testing.T) {
+	block := job(t, workflow(t), "deploy")
 	for _, want := range []string{
 		// The repository variable and the secret of spec 016. A fork sets
 		// neither, so a tag there publishes every artifact and skips this.
-		"vars.ARCA_RELEASE_DEPLOY != ''",
-		"secrets.ARCA_KUBECONFIG",
-		"      name: production",
-		"kubectl apply -k deploy/prod/",
-		"rollout status deployment/arcad",
-		"tools/smoke/release.sh",
+		"\n    if: ${{ vars.ARCA_RELEASE_DEPLOY != '' }}",
+		"\n    uses: " + stage + "image-deploy.yml@",
+		"\n      DEPLOY_KUBECONFIG: ${{ secrets.ARCA_KUBECONFIG }}",
+		"\n      contents: read",
+		// The origin the smoke reads and the environment records: a rollout
+		// returns as soon as the new replicas are ready and only a request
+		// through the ingress proves what answers there.
+		"\n      url: https://api.latere.ai",
 	} {
-		if !strings.Contains(text, want) {
-			t.Errorf("the release workflow does not carry %q", want)
+		if !strings.Contains(block, want) {
+			t.Errorf("the deploy job does not carry %q", strings.TrimSpace(want))
 		}
 	}
-	// The smoke must read the origin the environment records, because a
-	// rollout returns as soon as the new replicas are ready and only a
-	// request through the ingress proves what answers there.
-	deploy := step(t, text, "Smoke the live service")
-	if !strings.Contains(deploy, "BASE_URL: https://api.latere.ai") {
-		t.Error("the smoke does not read the origin the production environment names")
+	// Both Deployments that run the image are waited for, in this order.
+	if !strings.Contains(block, "\n      deployments: |\n        arcad\n        arcad-reaper\n") {
+		t.Error("the deploy job does not wait for arcad and then arcad-reaper")
 	}
-	if !strings.Contains(deploy, "TAG: ${{ github.ref_name }}") {
-		t.Error("the smoke is given no TAG, so it cannot fail a rollout that still serves the old version")
+	// The stage owns the kubeconfig, the apply and the smoke; none of them
+	// is written out again here.
+	for _, gone := range []string{"kubectl", "kustomize", "sed -i", "tools/smoke/release.sh"} {
+		if strings.Contains(block, gone) {
+			t.Errorf("the deploy job runs %q itself; image-deploy.yml does", gone)
+		}
 	}
 }
 
-// TestTheDeployRollsTheDigestTheBuildPushed: the build stage pushes each
-// image by digest under no tag, and the publish stage gives the tag only
-// after the deploy has passed. A deploy that named the image by the tag
-// would pull a reference that does not exist yet, so both the overlay and
-// the set image pin the digest the build output.
-func TestTheDeployRollsTheDigestTheBuildPushed(t *testing.T) {
-	apply := step(t, workflow(t), "Apply deploy/prod and roll the new image")
-	for _, want := range []string{
-		"ARCAD_DIGEST: ${{ needs.build.outputs.digest_1 }}",
-		`\1digest: ${ARCAD_DIGEST}|`,
-		`"arcad=${ARCAD_REF}@${ARCAD_DIGEST}"`,
-	} {
-		if !strings.Contains(apply, want) {
-			t.Errorf("the deploy does not carry %q", want)
+// TestTheDeployPassesOnlyTheDeployedImage: the build stage pushes each image
+// by digest under no tag, and the publish stage gives the tag only after the
+// deploy has passed, so the stage is given arcad by digest and never by the
+// tag. The build also pushes arca-stubs, which deploy/prod does not run, and
+// the stage fails on an image the overlay does not name, so the job passes
+// the one image, under the overlay's own name for it.
+func TestTheDeployPassesOnlyTheDeployedImage(t *testing.T) {
+	block := job(t, workflow(t), "deploy")
+	want := "\n      images: ghcr.io/latere-ai/arcad=${{ needs.build.outputs.ref_1 }}@${{ needs.build.outputs.digest_1 }}\n"
+	if !strings.Contains(block, want) {
+		t.Errorf("the deploy job does not pass arcad as the overlay's name for it, pinned by digest")
+	}
+	for _, not := range []string{"needs.build.outputs.images", "ref_2", "digest_2", ":${TAG}", "github.ref_name"} {
+		if strings.Contains(block, not) {
+			t.Errorf("the deploy job names %q; it passes only the arcad image, by digest", not)
 		}
 	}
-	if strings.Contains(apply, ":${TAG}") {
-		t.Error("the deploy names the image by the tag, which the image does not carry until publish")
+	if n := strings.Count(block, "\n      images:"); n != 1 {
+		t.Errorf("the deploy job has %d images inputs, want 1", n)
 	}
 }
 
@@ -196,13 +185,15 @@ func TestTheDeployRollsTheDigestTheBuildPushed(t *testing.T) {
 // floating tag is a name somebody else can move, and this workflow signs
 // artifacts and holds a kubeconfig. The shared stages are latere-ai/ci's,
 // the same organization's, and are called at a commit or a release tag of
-// it, all three at the same one, so the build, publish and verify stages
-// agree on what passes between them.
+// it. The build, publish and verify stages are called at the same one, so
+// they agree on what passes between them; the deploy stage is a commit of
+// its own until a release of latere-ai/ci carries it.
 func TestEveryThirdPartyActionIsPinned(t *testing.T) {
 	commit := regexp.MustCompile(`^[0-9a-f]{40}$`)
 	release := regexp.MustCompile(`^v\d+(\.\d+\.\d+(-[0-9A-Za-z.]+)?)?$`)
 	pinned := 0
 	var stages []string
+	calls := 0
 	for i, line := range strings.Split(workflow(t), "\n") {
 		trimmed := strings.TrimSpace(line)
 		ref, ok := strings.CutPrefix(trimmed, "- uses: ")
@@ -223,7 +214,10 @@ func TestEveryThirdPartyActionIsPinned(t *testing.T) {
 			if !commit.MatchString(version) && !release.MatchString(version) {
 				t.Errorf("release.yml:%d: %s is called at %q, which is neither a commit nor a release tag", i+1, name, version)
 			}
-			stages = append(stages, version)
+			if !strings.HasSuffix(name, "/image-deploy.yml") {
+				stages = append(stages, version)
+			}
+			calls++
 		case !commit.MatchString(version):
 			t.Errorf("release.yml:%d: %s is pinned to %q, which is not a commit", i+1, ref, version)
 		default:
@@ -233,8 +227,8 @@ func TestEveryThirdPartyActionIsPinned(t *testing.T) {
 	if pinned == 0 {
 		t.Fatal("the workflow uses no action, so this test proves nothing")
 	}
-	if len(stages) != 3 {
-		t.Errorf("the workflow calls %d shared stages, want build, publish and verify", len(stages))
+	if calls != 4 {
+		t.Errorf("the workflow calls %d shared stages, want build, deploy, publish and verify", calls)
 	}
 	if versions := slices.Compact(slices.Sorted(slices.Values(stages))); len(versions) > 1 {
 		t.Errorf("the shared stages are called at %v, want one version of them", versions)

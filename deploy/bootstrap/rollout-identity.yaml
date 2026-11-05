@@ -25,8 +25,8 @@ metadata:
   name: arcad-rollout
   namespace: latere
 rules:
-  # `kubectl apply` reads each object before it writes it, and
-  # `set image` patches the Deployment.
+  # `kubectl apply` reads each object before it writes it and patches the
+  # Deployment to the image digest the release pinned.
   - apiGroups: ["apps"]
     resources: ["deployments"]
     verbs: ["get", "list", "create", "update", "patch"]

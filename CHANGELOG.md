@@ -6,6 +6,15 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Changed
+
+- **A release deploys through the shared image-deploy stage.** The deploy job
+  of the release workflow now calls latere-ai/ci's `image-deploy.yml`: it pins
+  `arcad` by digest in `deploy/prod`, applies the overlay, waits for `arcad`
+  and `arcad-reaper` to roll, and runs the smoke again until the live service
+  serves the tag. Nothing changes for an installation that deploys from its
+  own tooling.
+
 ## v0.12.0 - 2026-11-04
 
 ### Added

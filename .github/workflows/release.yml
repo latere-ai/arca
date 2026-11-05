@@ -1,7 +1,7 @@
 # A vX.Y.Z tag is a release. This workflow produces the artifacts spec 016
-# names. The build, the signatures and the publish run through the shared
-# image release stages of latere-ai/ci, and the two jobs that are Arca's
-# own, the conformance run and the deploy, run between them against the
+# names. The build, the signatures, the deploy and the publish run through
+# the shared image release stages of latere-ai/ci, and the conformance run,
+# which is Arca's own, runs between the build and the deploy against the
 # digests the build outputs:
 #
 #   build        the shared build stage: the tag's commit is on main and
@@ -13,9 +13,10 @@
 #                SBOM and provenance attestations
 #   conformance  the kind stack of spec 016 brought up from those digests,
 #                with the suite of spec 017 run against it
-#   deploy       only with the repository variable ARCA_RELEASE_DEPLOY:
-#                deploy/prod applied with arcad pinned by digest, the
-#                rollout waited for, the smoke
+#   deploy       the shared deploy stage, only with the repository variable
+#                ARCA_RELEASE_DEPLOY: deploy/prod applied with arcad pinned
+#                by digest, both Deployments waited for, and the smoke
+#                repeated until the live service serves the tag
 #   publish      the shared publish stage: each digest gets the tag, then
 #                checksums.txt over every attached file, signed, and the
 #                GitHub release, its body the CHANGELOG section for the tag
@@ -268,99 +269,43 @@ jobs:
           path: release-evidence/conformance.md
           if-no-files-found: error
 
-  # Step 3. Latere's own installation. The repository variable and the
-  # kubeconfig secret are set on this repository and on no fork, so a tag on
-  # a fork publishes every artifact and skips this step.
+  # Step 3. Latere's own installation, deployed by the shared image-deploy
+  # stage of latere-ai/ci. The repository variable and the kubeconfig secret
+  # are set on this repository and on no fork, so a tag on a fork publishes
+  # every artifact and skips this step.
   #
-  # The job runs under the production environment, so the rollout is a
+  # The stage runs under the production environment, so the rollout is a
   # GitHub deployment with a URL on the repository's Deployments page and
-  # not a step buried in a log, and the environment's required reviewer is
-  # what holds the run here until the maintainer approves it.
+  # not a step buried in a log, and the environment's required reviewer,
+  # where it has one, holds the run here until the maintainer approves it.
+  #
+  # Only the arcad image is passed. The build also pushes arca-stubs, which
+  # deploy/prod does not run, and the stage refuses an image the overlay does
+  # not name. The image is given as the overlay's own name for it, so a fork,
+  # whose packages have another ref, is still rewritten in deploy/prod and in
+  # both containers that run it, arcad and the reaper. deploy/prod holds only
+  # re-appliable manifests; deploy/bootstrap is never read, and the migration
+  # Job it holds is run by hand before the tag, because a forward-only schema
+  # cannot be applied by two processes at once.
   deploy:
     name: deploy and smoke
     # build is named for its outputs: a job reads the outputs of the jobs it
     # needs directly, and of no other.
     needs: [build, conformance]
     if: ${{ vars.ARCA_RELEASE_DEPLOY != '' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    environment:
-      name: production
+    # Called at a commit of latere-ai/ci. It moves to @v1, with the other
+    # stages, once ci v1.31.0 is cut.
+    uses: latere-ai/ci/.github/workflows/image-deploy.yml@12fc0c8ce53940211c521a3dc27561c75b3b78f1
+    permissions:
+      contents: read
+    with:
+      images: ghcr.io/latere-ai/arcad=${{ needs.build.outputs.ref_1 }}@${{ needs.build.outputs.digest_1 }}
+      deployments: |
+        arcad
+        arcad-reaper
       url: https://api.latere.ai
-    outputs:
-      evidence: ${{ steps.smoke.outputs.evidence }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Write the kubeconfig
-        env:
-          KUBECONFIG_CONTENT: ${{ secrets.ARCA_KUBECONFIG }}
-        run: |
-          set -euo pipefail
-          install -m 700 -d "$RUNNER_TEMP/kube"
-          printf '%s' "$KUBECONFIG_CONTENT" > "$RUNNER_TEMP/kube/config"
-          chmod 600 "$RUNNER_TEMP/kube/config"
-          echo "KUBECONFIG=$RUNNER_TEMP/kube/config" >> "$GITHUB_ENV"
-
-      # deploy/prod holds only re-appliable manifests; deploy/bootstrap is
-      # never read here, and the migration Job it holds is run by hand
-      # before the tag, because a forward-only schema cannot be applied by
-      # two processes at once.
-      - name: Apply deploy/prod and roll the new image
-        env:
-          ARCAD_REF: ${{ needs.build.outputs.ref_1 }}
-          ARCAD_DIGEST: ${{ needs.build.outputs.digest_1 }}
-        run: |
-          set -euo pipefail
-          # The namespace is the overlay's, not a name repeated here: an
-          # installation chooses where it runs, and this job deploys
-          # whatever deploy/prod declares.
-          NS=$(kubectl kustomize deploy/prod | awk '/^  namespace: /{print $2; exit}')
-          test -n "$NS"
-          # deploy/prod pins the image by its Latere name. A repository
-          # publishing elsewhere applies the same manifests against its own
-          # packages, so the name moves with the images before the apply
-          # rather than only on the set image below.
-          if [ "$ARCAD_REF" != "ghcr.io/latere-ai/arcad" ]; then
-            sed -i "s|ghcr.io/latere-ai/arcad|${ARCAD_REF}|g" deploy/prod/kustomization.yaml deploy/base/deployment.yaml deploy/base/reaper.yaml
-          fi
-          # deploy/prod names the image's tag as committed, and the image
-          # gets this release's tag only when publish runs, after this job.
-          # The apply pins the digest the build pushed in place of the tag,
-          # so neither arcad nor the reaper, which runs the same image, is
-          # rolled to any other build on the way.
-          sed -i "s|^\(  *\)newTag: .*|\1digest: ${ARCAD_DIGEST}|" deploy/prod/kustomization.yaml
-          grep -q "digest: ${ARCAD_DIGEST}\$" deploy/prod/kustomization.yaml
-          kubectl apply -k deploy/prod/
-          kubectl -n "$NS" set image deployment/arcad "arcad=${ARCAD_REF}@${ARCAD_DIGEST}"
-          kubectl -n "$NS" rollout status deployment/arcad --timeout=600s
-          kubectl -n "$NS" rollout status deployment/arcad-reaper --timeout=600s
-
-      # The smoke reads the origin GitHub records as the deployment, not a
-      # forwarded port: the rollout returns as soon as the new replicas are
-      # ready, and only a request through the ingress proves that what
-      # answers there is the version just built.
-      - name: Smoke the live service
-        id: smoke
-        env:
-          BASE_URL: https://api.latere.ai
-          TAG: ${{ github.ref_name }}
-          COMMIT: ${{ github.sha }}
-          DEPLOY_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          mkdir -p release-evidence
-          OUTPUT_MD=release-evidence/smoke.md tools/smoke/release.sh
-          cat release-evidence/smoke.md >> "$GITHUB_STEP_SUMMARY"
-          {
-            echo 'evidence<<CI_EOF'
-            cat release-evidence/smoke.md
-            echo CI_EOF
-          } >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: smoke-evidence
-          path: release-evidence/smoke.md
-          if-no-files-found: error
+    secrets:
+      DEPLOY_KUBECONFIG: ${{ secrets.ARCA_KUBECONFIG }}
 
   # Step 4. The GitHub release: each digest gets the tag, every file the
   # build wrote is attached with checksums.txt over them and its signature,
