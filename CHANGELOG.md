@@ -195,22 +195,6 @@ refused before it is pushed.
 
 ## v0.9.0 - 2026-10-18
 
-### Security
-
-- **A file read through a link is always a download.** Every answer of
-  the three link routes, `GET /v1/shares/links/{token}`, its `/meta` and
-  its `/files/{path}`, refusals included, carries
-  `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`
-  and `Content-Security-Policy: sandbox`, so a browser that opens a link
-  saves the file and never renders it as a page of the server's origin.
-  The file route names the file, `attachment; filename="..."; filename*=UTF-8''...`,
-  with a name outside ASCII carried exactly and no name able to break the
-  header. Above the inline size the redirect asks the bucket for the same
-  disposition whatever `?download=` says, and a public object read
-  through its link is presigned rather than sent to `ARCA_PUBLIC_CDN_URL`,
-  whose address cannot ask for one. A page that frames a link's file now
-  saves it; an `img` element and `fetch` read it as before.
-
 ### Changed
 
 - **An owner's read is never sniffed, and `?download=1` works at every
@@ -227,6 +211,22 @@ refused before it is pushed.
   presigned URL's disposition was written with Go's quoting, which put
   raw UTF-8 or Go escape sequences in the header. It is now written in
   both of RFC 6266's forms.
+
+### Security
+
+- **A file read through a link is always a download.** Every answer of
+  the three link routes, `GET /v1/shares/links/{token}`, its `/meta` and
+  its `/files/{path}`, refusals included, carries
+  `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`
+  and `Content-Security-Policy: sandbox`, so a browser that opens a link
+  saves the file and never renders it as a page of the server's origin.
+  The file route names the file, `attachment; filename="..."; filename*=UTF-8''...`,
+  with a name outside ASCII carried exactly and no name able to break the
+  header. Above the inline size the redirect asks the bucket for the same
+  disposition whatever `?download=` says, and a public object read
+  through its link is presigned rather than sent to `ARCA_PUBLIC_CDN_URL`,
+  whose address cannot ask for one. A page that frames a link's file now
+  saves it; an `img` element and `fetch` read it as before.
 
 ## v0.8.1 - 2026-10-18
 
@@ -313,19 +313,6 @@ refused before it is pushed.
 
 ## v0.5.0 - 2026-10-13
 
-### Breaking
-
-- **A space is one tree under `files/`.** The `/v1/workspaces` routes, the
-  `workspace.*` actions, the `Workspace` kind, the `workspaces` plane, the
-  `attach`, `release` and `sync` events, the reaper's lease passes, the
-  lease metrics and the codes `slug_taken`, `writer_held`,
-  `lease_not_held`, `manifest_incomplete` and `attachment_gone` are
-  removed. Migration `0006_one_tree` moves each workspace's objects, with
-  their versions, stars, grants and links, to `files/workspaces/<slug>/`
-  in the same space, and drops the two workspace tables. It runs forward
-  only. A `/v1/workspaces` route now answers `404` `not_found`, and a path
-  under `workspaces/` answers `400` `unknown_plane`.
-
 ### Added
 
 - **A folder is deleted or copied in one call.**
@@ -343,6 +330,19 @@ refused before it is pushed.
   downloads of a folder, the trash, the stars, the event log, the share
   and link lists, and a folder delete or copy. A space's usage stays the
   whole space's.
+
+### Removed
+
+- **Breaking: a space is one tree under `files/`.** The `/v1/workspaces` routes, the
+  `workspace.*` actions, the `Workspace` kind, the `workspaces` plane, the
+  `attach`, `release` and `sync` events, the reaper's lease passes, the
+  lease metrics and the codes `slug_taken`, `writer_held`,
+  `lease_not_held`, `manifest_incomplete` and `attachment_gone` are
+  removed. Migration `0006_one_tree` moves each workspace's objects, with
+  their versions, stars, grants and links, to `files/workspaces/<slug>/`
+  in the same space, and drops the two workspace tables. It runs forward
+  only. A `/v1/workspaces` route now answers `404` `not_found`, and a path
+  under `workspaces/` answers `400` `unknown_plane`.
 
 ### Fixed
 
