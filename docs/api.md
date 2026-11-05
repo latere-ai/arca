@@ -581,6 +581,11 @@ bucket's own policy lets anyone read it.
 Several `public` links can name one object. It stays public until the last of
 them is revoked, so revoking one leaves the others reading as before.
 
+A `public` link with an `expires_at` stops reading at that time. The object
+stays public in the bucket until the reconciler next runs, every
+`ARCA_REAP_INTERVAL` or on the schedule `arcad reap` runs on, and is then
+private unless another live `public` link names it.
+
 ## Events
 
 | Method | Path | Action | What it does |

@@ -26,7 +26,7 @@ others.
 
 | What | Kept in | Who can read it |
 |---|---|---|
-| File contents | the bucket, as the client sent them, under a key made from the object's id and `ARCA_BUCKET_PREFIX`. Arca sends no encryption setting with a write | whoever holds the bucket or its credentials, and anyone with a presigned URL or a public link for the object until it expires or is revoked |
+| File contents | the bucket, as the client sent them, under a key made from the object's id and `ARCA_BUCKET_PREFIX`. Arca sends no encryption setting with a write | whoever holds the bucket or its credentials, and anyone with a presigned URL or a public link for the object until it expires or is revoked. A public object stays readable in the bucket until the reconciler next runs after its last public link expires |
 | Names and paths | Postgres: a file's path and owner, and the path in a version, a star, a share, an upload session and an event. The bucket key holds no path or name | whoever reads the database; callers see them through the API as the authorizer's decisions allow |
 | Sizes, checksums and content types | Postgres, on the file and on each version. The content type is also stored with the object in the bucket | whoever reads the database or the bucket |
 | Versions and the trash | the bytes of an earlier version, and of a trashed file, stay in the bucket. Postgres holds a row for each, with the time it was superseded or trashed | the same readers as file contents and paths |
