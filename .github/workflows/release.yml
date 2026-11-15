@@ -25,12 +25,11 @@
 #                from a runner with no checkout, with the commands
 #                docs/operations.md gives an operator
 #
-# Of the three jobs spec 016 designs and its Outcome lists as not written,
-# `release-verify` is the verify stage above. The other two are not here
-# yet: `candidate`, which starts the published image beside a fresh
-# Postgres and MinIO before anything reaches a cluster, and
-# `install-release`, which walks docs/install.md against the published
-# artifacts alone. They join when the stores they need exist.
+# Of the jobs spec 016 designs, `release-verify` is the verify stage above.
+# `candidate` (the published image started beside a fresh Postgres and MinIO
+# before anything reaches a cluster) and `install-release` (docs/install.md
+# walked against the published artifacts alone) are specified in spec 026
+# and are not part of this workflow.
 #
 # The images publish under ghcr.io/<repository owner>, lowered, or under
 # ghcr.io/<RELEASE_IMAGE_NAMESPACE> where that repository variable is set,
