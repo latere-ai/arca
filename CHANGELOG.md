@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.13.0 - 2026-11-15
+
 ### Changed
 
 - Built with Go 1.27.4, which fixes GO-2026-6859.
