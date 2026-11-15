@@ -6,6 +6,10 @@ refused before it is pushed.
 
 ## Unreleased
 
+- **v0.13.0 is published with this release.** Its own release stopped before
+  publishing, because the shared release pipeline wrongly refused the version
+  its image reported. Nothing else changed; the notes for v0.13.0 below apply.
+
 ## v0.13.0 - 2026-11-15
 
 ### Changed
