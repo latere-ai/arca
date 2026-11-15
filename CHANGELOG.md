@@ -6,6 +6,10 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Changed
+
+- Built with Go 1.27.4, which fixes GO-2026-6859.
+
 ### Fixed
 
 - **A file whose public link expired stops being public.** The link
