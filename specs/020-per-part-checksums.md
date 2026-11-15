@@ -3,8 +3,8 @@ title: "Per-part checksums: a digest the client declares, the store verifies, an
 status: validated
 track: core
 depends_on:
-  - specs/003-object-store.md
-  - specs/007-uploads.md
+  - specs/.archive/003-object-store.md
+  - specs/.archive/007-uploads.md
   - specs/013-api.md
 affects: [internal/blob/, internal/uploads/, internal/store/, internal/store/migrations/, internal/api/, api/, docs/]
 effort: medium
@@ -30,7 +30,7 @@ own: a per-part sha256 the client declares, the store verifies on
 receipt, and the completion carries so the store recomputes the
 composite over the digests it already checked.
 
-It is criterion 12 of [[007-uploads]], split out of that spec on
+It is criterion 12 of [007-uploads](.archive/007-uploads.md), split out of that spec on
 2026-09-19 because it is not one field in one package.
 
 ## Design
@@ -49,8 +49,8 @@ That places one piece in each of three specs.
 
 | Piece | Spec | What changes |
 |---|---|---|
-| the algorithm on an opened multipart, the digest on a signed part URL, and the digest on a completed part | [[003-object-store]] | `blob.PutOptions` gains a checksum algorithm, `CreateMultipart` passes it, `PresignPart` takes the part's digest and signs the header, and `blob.Part` gains the digest `CompleteMultipart` sends |
-| the digests a create declares and the session row keeps | [[007-uploads]] | `createRequest` gains `checksum` and one digest per part; the `upload_sessions` row keeps them, because a session that resumes must mint the same URLs it minted before |
+| the algorithm on an opened multipart, the digest on a signed part URL, and the digest on a completed part | [003-object-store](.archive/003-object-store.md) | `blob.PutOptions` gains a checksum algorithm, `CreateMultipart` passes it, `PresignPart` takes the part's digest and signs the header, and `blob.Part` gains the digest `CompleteMultipart` sends |
+| the digests a create declares and the session row keeps | [007-uploads](.archive/007-uploads.md) | `createRequest` gains `checksum` and one digest per part; the `upload_sessions` row keeps them, because a session that resumes must mint the same URLs it minted before |
 | the wire | [[013-api]] | the create request body and the error a malformed digest answers |
 
 The store tier already holds the machinery for the whole-object path:
@@ -58,13 +58,13 @@ The store tier already holds the machinery for the whole-object path:
 `.lateregate.yaml` as "the trailing sha256 a put carries over TLS (spec
 003)". What is missing is not a dependency, it is the multipart side of
 a contract the single put already keeps. That is why the piece is
-[[003-object-store]]'s before it is [[007-uploads]]'s.
+[003-object-store](.archive/003-object-store.md)'s before it is [007-uploads](.archive/007-uploads.md)'s.
 
 The migration is the reason the split is not an hour's work by itself.
 A session is resumable for twenty-four hours and a client may ask for
 its URLs again, so the digests are row state and not request state, and
-row state on `upload_sessions` is a migration [[004-metadata-store]]'s
-ownership table assigns [[007-uploads]].
+row state on `upload_sessions` is a migration [004-metadata-store](.archive/004-metadata-store.md)'s
+ownership table assigns [007-uploads](.archive/007-uploads.md).
 
 ### The shape
 
@@ -95,10 +95,10 @@ reads once, is not locked out of resumable uploads.
 |---|---|---|
 | the store, on receipt of a part | bytes that are not the bytes the digest names | the store's own refusal, at the presigned URL, to the client |
 | the store, at assembly | a digest that reached the completion and not the part | `400` from the completion, as a wrong ETag does today |
-| the head, after assembly | a size that is not the size that was declared | `413` and the deletion of [[007-uploads]]'s criterion 4 |
+| the head, after assembly | a size that is not the size that was declared | `413` and the deletion of [007-uploads](.archive/007-uploads.md)'s criterion 4 |
 
 The composite the row records is unchanged: an object assembled from
-parts carries `checksum_kind = 'etag'` ([[004-metadata-store]]), because
+parts carries `checksum_kind = 'etag'` ([004-metadata-store](.archive/004-metadata-store.md)), because
 the store's composite is a digest of digests and not a digest of the
 content. What this spec buys is that every digest the composite is taken
 over was verified against real bytes.
@@ -106,8 +106,8 @@ over was verified against real bytes.
 ### Not in this spec
 
 The whole-object path, which hashes over the stream already
-([[005-files]]). A checksum the server computes for a client, which it
-cannot: it never reads the bytes (invariant 4 of [[001-architecture]]).
+([005-files](.archive/005-files.md)). A checksum the server computes for a client, which it
+cannot: it never reads the bytes (invariant 4 of [001-architecture](.archive/001-architecture.md)).
 An algorithm other than sha256; the field names one so a second can be
 added without a wire change, and nothing here adds one.
 

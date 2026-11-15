@@ -3,8 +3,8 @@ title: "Object store: the bucket contract, keys, integrity, presigned reads, mul
 status: complete
 track: core
 depends_on:
-  - specs/001-architecture.md
-  - specs/002-repository-scaffold.md
+  - specs/.archive/001-architecture.md
+  - specs/.archive/002-repository-scaffold.md
 affects: [object/, internal/blob/, internal/config/, cmd/arcad/, .lateregate.yaml]
 effort: medium
 created: 2026-09-18

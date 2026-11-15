@@ -3,10 +3,10 @@ title: "Uploads: sessions, size classes, direct-to-bucket parts, integrity"
 status: complete
 track: core
 depends_on:
-  - specs/001-architecture.md
-  - specs/003-object-store.md
-  - specs/004-metadata-store.md
-  - specs/005-files.md
+  - specs/.archive/001-architecture.md
+  - specs/.archive/003-object-store.md
+  - specs/.archive/004-metadata-store.md
+  - specs/.archive/005-files.md
 affects: [internal/uploads/, internal/api/, internal/store/, internal/store/migrations/, internal/config/, cmd/arcad/, test/e2e/]
 effort: medium
 created: 2026-09-18

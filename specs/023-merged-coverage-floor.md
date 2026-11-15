@@ -3,7 +3,7 @@ title: "Merged coverage floor: the 90% bar judged over the unit, store and e2e p
 status: validated
 track: core
 depends_on:
-  - specs/014-test-stubs-and-tiers.md
+  - specs/.archive/014-test-stubs-and-tiers.md
 affects: [.github/workflows/verify.yml, .lateregate.yaml]
 effort: small
 created: 2026-09-19
@@ -15,13 +15,13 @@ author: changkun
 
 ## Overview
 
-[[014-test-stubs-and-tiers]] splits the suite into three tiers because
+[014-test-stubs-and-tiers](.archive/014-test-stubs-and-tiers.md) splits the suite into three tiers because
 the two stores and the two endpoints Arca stands between cannot all be
 faked and cannot all be required on every push. A package whose only
 exercise is the store tier or the e2e tier therefore measures low in the
 unit run, and the floor the gate enforces is the unit run's alone.
 
-The criterion that says otherwise is [[014-test-stubs-and-tiers]]'s
+The criterion that says otherwise is [014-test-stubs-and-tiers](.archive/014-test-stubs-and-tiers.md)'s
 criterion 11, carried here verbatim: coverage over the three profiles is
 at least 90% for every package, `test/stubs` included. It was split out
 of that spec when Arca closed at v0.1.7 rather than built, because
@@ -97,7 +97,7 @@ floor would be the unit profile with two missing files.
 
 Ordering the `gate` job behind the two tier jobs makes every push wait
 for the stack, which is the cost of the merged number and is what
-[[014-test-stubs-and-tiers]]'s Design already asks for.
+[014-test-stubs-and-tiers](.archive/014-test-stubs-and-tiers.md)'s Design already asks for.
 
 ## Acceptance criteria
 

@@ -3,9 +3,9 @@ title: "Conformance suite: the contract as an importable test package against an
 status: complete
 track: core
 depends_on:
-  - specs/001-architecture.md
+  - specs/.archive/001-architecture.md
   - specs/013-api.md
-  - specs/014-test-stubs-and-tiers.md
+  - specs/.archive/014-test-stubs-and-tiers.md
 affects: [test/conformance/, internal/auth/, internal/config/, .github/workflows/verify.yml, .github/workflows/release.yml, docs/]
 effort: large
 created: 2026-09-18

@@ -3,11 +3,11 @@ title: "Download-only link reads: every answer of the three link routes is an at
 status: complete
 track: core
 depends_on:
-  - specs/003-object-store.md
-  - specs/005-files.md
-  - specs/008-shares-and-links.md
+  - specs/.archive/003-object-store.md
+  - specs/.archive/005-files.md
+  - specs/.archive/008-shares-and-links.md
   - specs/013-api.md
-affects: [internal/api/, internal/files/, internal/blob/, internal/shares/, api/openapi.yaml, test/conformance/, test/e2e/, docs/api.md, docs/configuration.md, SECURITY.md, specs/003-object-store.md, specs/005-files.md, specs/008-shares-and-links.md, specs/013-api.md, specs/015-security-and-threat-model.md]
+affects: [internal/api/, internal/files/, internal/blob/, internal/shares/, api/openapi.yaml, test/conformance/, test/e2e/, docs/api.md, docs/configuration.md, SECURITY.md, specs/.archive/003-object-store.md, specs/.archive/005-files.md, specs/.archive/008-shares-and-links.md, specs/013-api.md, specs/015-security-and-threat-model.md]
 effort: small
 created: 2026-10-18
 updated: 2026-10-18

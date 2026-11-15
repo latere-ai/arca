@@ -3,8 +3,8 @@ title: "Identity: verification, the subject, the action vocabulary, the authoriz
 status: complete
 track: core
 depends_on:
-  - specs/001-architecture.md
-  - specs/002-repository-scaffold.md
+  - specs/.archive/001-architecture.md
+  - specs/.archive/002-repository-scaffold.md
 affects: [authorizer/, internal/auth/, internal/api/, cmd/arcad/, .lateregate.yaml, docs/]
 effort: medium
 created: 2026-09-18
@@ -40,7 +40,7 @@ authorizer written for one core answers for all of them.
 
 ## Current state
 
-Built and in the tree on 2026-09-18, phase 2 of [[019-migration-from-drive]].
+Built and in the tree on 2026-09-18, phase 2 of [019-migration-from-drive](.archive/019-migration-from-drive.md).
 `authorizer/` publishes the vocabulary and the resource shapes,
 `internal/auth` holds the verifier, the authorizer client, the owner
 policy and the `Decide` seam, `cmd/arcad` builds both at start and mounts
@@ -50,10 +50,10 @@ identity rules run. The gate passes with all fifteen gates on.
 
 Criteria 1, 2, 3, 6, 8, 11 and 12 have passing tests. Four are open and
 belong to later phases: criterion 4 and criterion 9's second half wait
-for `test/conformance` ([[017-conformance-suite]]), criterion 5's fault
-modes for the stub tiers of [[014-test-stubs-and-tiers]], criterion 7
+for `test/conformance` ([017-conformance-suite](.archive/017-conformance-suite.md)), criterion 5's fault
+modes for the stub tiers of [014-test-stubs-and-tiers](.archive/014-test-stubs-and-tiers.md), criterion 7
 for the usage ledger of [[010-events-and-reaper]], and criterion 10 for
-the `check` command of [[012-administration]]. The spec stays at
+the `check` command of [012-administration](.archive/012-administration.md). The spec stays at
 `testing` until they close.
 
 What the implementation decided, where this spec was silent:
@@ -67,7 +67,7 @@ What the implementation decided, where this spec was silent:
   grant on a workspace is read against is `workspaces/<slug>`.
 - The grants table and the public link table are the `GrantLookup` and
   `LinkResolver` interfaces of `internal/auth`, which
-  [[008-shares-and-links]] implements. Both nil is an installation that
+  [008-shares-and-links](.archive/008-shares-and-links.md) implements. Both nil is an installation that
   has issued neither, which is every installation until that spec lands.
 - A table that cannot answer is no decision: a store failure in the
   grant step or the link step reaches the seam as
@@ -79,7 +79,7 @@ What the implementation decided, where this spec was silent:
 - The tests use the family's own stubs, `latere.ai/x/pkg/authkit/issuertest`
   and `latere.ai/x/pkg/authz/stub`, so Arca stands up no issuer and no
   authorizer of its own. The stub issuer and stub authorizer of
-  [[014-test-stubs-and-tiers]] are for the tiers that run arcad as a
+  [014-test-stubs-and-tiers](.archive/014-test-stubs-and-tiers.md) are for the tiers that run arcad as a
   process.
 
 ## Design
@@ -87,7 +87,7 @@ What the implementation decided, where this spec was silent:
 ### Verification
 
 `latere.ai/x/pkg/authkit/jwt` verifies every token, configured from the
-table of [[002-repository-scaffold]]:
+table of [002-repository-scaffold](.archive/002-repository-scaffold.md):
 
 | Rule | Value |
 |---|---|
@@ -99,12 +99,12 @@ table of [[002-repository-scaffold]]:
 | algorithms | RS256 and ES256 |
 | size | the package's bound |
 | grants | read: a token carrying `authorization_details` is narrowed by them, and a verifier that has not read the claim refuses the token (`grants_unread`) |
-| warm-up | `Warm` at start against every issuer, so the first request does not pay for discovery. It is best-effort: a warm that fails writes one line in the developer register, is retried in the background from one second doubling to thirty, and holds the `issuers` readiness check of [[002-repository-scaffold]] failing until an issuer answers. The process serves either way, and a request that arrives before the retry pays for the discovery itself. A start that exited here would make an installation's start order-dependent on its issuer and would crash-loop a replica through a transient outage |
+| warm-up | `Warm` at start against every issuer, so the first request does not pay for discovery. It is best-effort: a warm that fails writes one line in the developer register, is retried in the background from one second doubling to thirty, and holds the `issuers` readiness check of [002-repository-scaffold](.archive/002-repository-scaffold.md) failing until an issuer answers. The process serves either way, and a request that arrives before the retry pays for the discovery itself. A start that exited here would make an installation's start order-dependent on its issuer and would crash-loop a replica through a transient outage |
 
 A failure is a 401 with the package's reason table in the developer
 detail and one fixed sentence in `message`. The verifier is one
 middleware over `/v1`; the probes, `/`, `/openapi.json`, and the three
-public link routes of [[008-shares-and-links]] are outside it, and
+public link routes of [008-shares-and-links](.archive/008-shares-and-links.md) are outside it, and
 nothing else is.
 
 Arca mints no tokens. A sandbox that attaches to a workspace presents a
@@ -113,7 +113,7 @@ reaches the sandbox is the sandbox runtime's and the platform's, not
 Arca's. This is rule R4 of the family: each core accepts its own
 workload credentials back and no other core's.
 
-**Amended 2026-09-20 ([[027-serving-under-the-capability-prefix]]).**
+**Amended 2026-09-20 ([027-serving-under-the-capability-prefix](.archive/027-serving-under-the-capability-prefix.md)).**
 `ARCA_OIDC_AUDIENCE` is a comma list of distinct names, default `arca`, and
 a token is verified when its `aud` names any of them. The first entry is the
 primary: the name this core answers to, what `Verifier.Audience()` reports,
@@ -147,7 +147,7 @@ and its authorizer answers for the people who may act in it.
 `Vocabulary` with labels, and a test holds the package's table equal
 to this one. Fifteen actions over six kinds.
 
-**Amended 2026-10-12 ([[028-one-tree]]).** The kind `Workspace` and its
+**Amended 2026-10-12 ([028-one-tree](.archive/028-one-tree.md)).** The kind `Workspace` and its
 eight `workspace.*` actions are removed with the plane they acted on, a
 `File` gains `recursive` and `copy`, and `plane` is always `files`. The
 table was twenty-three actions over seven kinds before.
@@ -167,7 +167,7 @@ Rules of the table:
   the resource's `path` is the target and, on a move and on a copy,
   `from` carries the source. A question that carries `from` without
   `copy` is a move. `plane` is `files` and nothing else
-  ([[001-architecture]]); the member stays so an endpoint that reads it
+  ([001-architecture](.archive/001-architecture.md)); the member stays so an endpoint that reads it
   keeps answering.
 - `recursive` says that `path`, and `from` where there is one, name a
   folder and everything under it. An endpoint that does not know the
@@ -175,15 +175,15 @@ Rules of the table:
   as a move, and a folder move as the move of one path, which is never
   wider than what was asked; an endpoint that manages folders of its own
   reads it, because a delete of a folder is a delete of every folder
-  under it ([[028-one-tree]]). The folder move joined it on 2026-10-18
-  ([[030-moving-a-folder]]).
+  under it ([028-one-tree](.archive/028-one-tree.md)). The folder move joined it on 2026-10-18
+  ([030-moving-a-folder](.archive/030-moving-a-folder.md)).
 - `file.read` covers get, head, and a version's read; `file.list`
   covers a directory page, a version list, and the trash listing;
   `file.restore` is the one action that brings an object back from
   trash or a version forward.
 - Starring is `file.write` on the caller's own space, because a star
   is a row the caller owns; the object starred may be one shared with
-  them, and [[005-files]] records the tension with the service Arca
+  them, and [005-files](.archive/005-files.md) records the tension with the service Arca
   replaces, which asked read access only.
 - The three public link routes, `GET /v1/shares/links/{token}`, its
   `/meta` and its `/files/{path...}`, are the one exception to the
@@ -196,7 +196,7 @@ Rules of the table:
   names.
 - `space.admin` is the administrator's action, asked for the overview and
   the restore under `/v1/admin`. `space.delete` is a separate action,
-  asked for the deletion of a whole space ([[032-space-delete]]), so a
+  asked for the deletion of a whole space ([032-space-delete](.archive/032-space-delete.md)), so a
   caller that closes accounts does not also read every space's overview
   or restore across owners.
 - A personal key's grants intersect with this vocabulary through
@@ -214,7 +214,7 @@ not read at all for the cases where the field would be absent, which is
 what keeps a read of one's own object at the cost it had. It is here because an
 authorizer that is handed an owner, a path, a plane and a size cannot
 tell a grantee from a stranger, so every read of a shared object is a
-deny and the grants of [[008-shares-and-links]] reach nothing: `POST
+deny and the grants of [008-shares-and-links](.archive/008-shares-and-links.md) reach nothing: `POST
 /v1/shares` would write a row no decision consults. Arca reads no claim
 for meaning to fill it; it reads its own table, which this spec already
 allows for the owner policy, because a grant is a resource of the core
@@ -319,9 +319,9 @@ is not a grant.
 | unavailable | anything but a 200 with `allow`: 503 `authorizer_unavailable`, never an allow |
 | deny | 403 `forbidden` with the reason in the developer detail; a deny at lookup is 404 `not_found`, indistinguishable from a missing object |
 | `limits.quota_bytes` | the space's byte limit for the answer's `ttl`; without it a space has no limit, because Arca stores none ([[010-events-and-reaper]]) |
-| `limits.versions` | read on the answer to `file.write`, `upload.write` and `file.restore`. `false`: the write this answer admits keeps no version of the content it replaces. Absent or `true`: versions as [[005-files]] keeps them ([[028-one-tree]]) |
-| `limits.trash` | read on the answer to `file.delete`. `false`: the delete this answer admits is permanent, as `?permanent=1` is. Absent or `true`: the trash of [[005-files]] ([[028-one-tree]]) |
-| `limits.omit` | read on the answer to a question that enumerates. A list of path prefixes of the space: the enumeration leaves out every path at or under one of them. It shapes no question about one object ([[028-one-tree]]) |
+| `limits.versions` | read on the answer to `file.write`, `upload.write` and `file.restore`. `false`: the write this answer admits keeps no version of the content it replaces. Absent or `true`: versions as [005-files](.archive/005-files.md) keeps them ([028-one-tree](.archive/028-one-tree.md)) |
+| `limits.trash` | read on the answer to `file.delete`. `false`: the delete this answer admits is permanent, as `?permanent=1` is. Absent or `true`: the trash of [005-files](.archive/005-files.md) ([028-one-tree](.archive/028-one-tree.md)) |
+| `limits.omit` | read on the answer to a question that enumerates. A list of path prefixes of the space: the enumeration leaves out every path at or under one of them. It shapes no question about one object ([028-one-tree](.archive/028-one-tree.md)) |
 | a limit that does not decode | a `limits` object or a member of it that is not the type its row gives, and an `omit` entry that is not a path under `files/`, is no decision: 503 `storage_unavailable` with nothing written, the answer a `quota_bytes` that is not a number already gets |
 | `filter` | on a `list` action, the owners and labels the page is narrowed to |
 | probe | the shared contract's reserved resource id, `authz.ProbeID`, of kind `Space`, which every authorizer denies for every subject; `arcad check` asks it and refuses an endpoint that allows. The id is the family's one value and not a word of Arca's own, so one check command reads one answer from every endpoint of the family; `authorizer.Probe` builds the resource |
@@ -347,7 +347,7 @@ flowchart TD
   L -- no --> N[deny]
 ```
 
-The ladder a grant is read against is [[008-shares-and-links]]'s:
+The ladder a grant is read against is [008-shares-and-links](.archive/008-shares-and-links.md)'s:
 `read` admits `file.read`, `file.list`; `write` adds `file.write`,
 `file.delete`, `file.restore`, `upload.write`; `manage` adds
 `share.create`, `share.read`, `share.list`, `share.revoke` on the
@@ -365,7 +365,7 @@ of the flowchart answers it and no grant does.
 actions of the table the owner step does not reach either. Administration is a
 capability and not ownership: a space's owner is not an administrator of
 its own space, and the owner's own equivalents of what `/v1/admin` serves
-ask the actions they always ask ([[012-administration]]). This policy
+ask the actions they always ask ([012-administration](.archive/012-administration.md)). This policy
 admits the action for a subject in `ARCA_ADMIN_SUBJECTS` and denies it to
 everyone else, the space's own owner included, so the flowchart's first
 step is the only one that answers it.
@@ -387,7 +387,7 @@ and the owner policy is not consulted.
 | `drive/internal/handler/handler.go`, `NewVerifier` | `internal/auth/verifier.go` | the same package, with `ReadsGrants`, `RequireIssuedAt`, the 24 hour age, `Warm` |
 | `drive/internal/handler/authz.go`, `parseOwner` with `u-` and `o-` | `space/` subjects | a space is addressed by subject; the two-letter prefixes go |
 | `drive/internal/handler/authz.go`, `zoneWriteAllowed` by `PrincipalType` | nothing | a claim read for meaning; a platform that wants machine-only zones says so in its authorizer |
-| `drive/internal/handler/visibility.go`, agent visibility | nothing | a hosted policy over the platform's principals; left behind, [[019-migration-from-drive]] |
+| `drive/internal/handler/visibility.go`, agent visibility | nothing | a hosted policy over the platform's principals; left behind, [019-migration-from-drive](.archive/019-migration-from-drive.md) |
 | Drive's `platform_admin` role in the token | the authorizer's answer | Arca reads no role |
 
 ## Acceptance criteria
@@ -398,7 +398,7 @@ and the owner policy is not consulted.
 | 2 | No handler under `/v1` other than the three public link routes runs before the verifier, and no request path calls the issuer for anything but the key set | `latere.ai/x/pkg/authkit/conformance.Run` in `internal/auth`, the family audience suite once per configured audience, and a route-table test that names the three exceptions and no more |
 | 3 | Every handler asks exactly one action from the table before it acts, and the table equals `authorizer/`'s | a test that walks the route table of [[013-api]] against the vocabulary; `TestVocabularyMatchesSpec006` reads this file |
 | 4 | A deny at lookup is a 404 identical in body and headers to a missing object | `test/conformance` case |
-| 5 | An authorizer that answers anything but a 200 with `allow` yields a 503 and never an allow | the stub authorizer's fault modes in [[014-test-stubs-and-tiers]] |
+| 5 | An authorizer that answers anything but a 200 with `allow` yields a 503 and never an allow | the stub authorizer's fault modes in [014-test-stubs-and-tiers](.archive/014-test-stubs-and-tiers.md) |
 | 6 | An allow is cached for `ttl` and a deny for 5 seconds, keyed by subject, action, and resource id | `internal/auth` cache test with a counting stub |
 | 7 | A write past an answer's `limits.quota_bytes` is refused for that answer's `ttl` and admitted once the answer expires or stops carrying the field, and no store holds a limit | [[010-events-and-reaper]]'s test |
 | 8 | The owner policy admits the owner, an administrator, a grantee within the ladder, and a resolving link, and denies everything else | `internal/auth` policy table test |
@@ -414,7 +414,7 @@ and the owner policy is not consulted.
 ## Not in this spec
 
 The wire shapes of the handlers ([[013-api]]), the grants table
-([[008-shares-and-links]]), the stubs ([[014-test-stubs-and-tiers]]),
+([008-shares-and-links](.archive/008-shares-and-links.md)), the stubs ([014-test-stubs-and-tiers](.archive/014-test-stubs-and-tiers.md)),
 and the platform's authorizer, which lives with the platform.
 
 ## Outcome
@@ -465,7 +465,7 @@ What proves each criterion:
 Coverage of the owning packages: `authorizer` 100.0% of statements,
 `internal/auth` 90.6%.
 
-**Amended 2026-10-12 by [[028-one-tree]].** The vocabulary is fifteen
+**Amended 2026-10-12 by [028-one-tree](.archive/028-one-tree.md).** The vocabulary is fifteen
 actions over six kinds: the kind `Workspace`, its eight actions, its
 resource type and the `workspaces/<slug>` reading of `grantPath` are
 gone, and no grant reaches five actions where it reached eight. `File`

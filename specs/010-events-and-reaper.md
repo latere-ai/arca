@@ -3,8 +3,8 @@ title: "Events and the reaper: the ledger, the log, the reconciliation of the tw
 status: complete
 track: core
 depends_on:
-  - specs/003-object-store.md
-  - specs/004-metadata-store.md
+  - specs/.archive/003-object-store.md
+  - specs/.archive/004-metadata-store.md
   - specs/006-identity.md
 affects: [authorizer/, internal/events/, internal/reaper/, internal/api/, cmd/arcad/, docs/]
 effort: large
@@ -56,7 +56,7 @@ action `CHECK` dropped in favor of the table in `internal/events`. What
 changed on the way is the table in "What arrives from Drive" below, as
 written.
 
-The merge with [[005-files]] and [[007-uploads]] bound the last two seams
+The merge with [005-files](.archive/005-files.md) and [007-uploads](.archive/007-uploads.md) bound the last two seams
 this spec offers. `cmd/arcad`'s `fileLedger` is the usage counter and the
 log behind those specs' `Ledger`: a write's delta is charged inside the
 write's own transaction against the limit the authorizer's answer carried, a
@@ -64,10 +64,10 @@ delete and an abandoned session give the bytes back, and a put, a move, a
 delete and a restore are rows of the closed vocabulary. A charge the limit
 does not admit is rendered as the file plane's own refusal, so a space with
 no room left reaches the handler as `quota_exceeded` and not as a fault of
-the counter. Pass 4 is [[007-uploads]]' `Service.Sweep`, so an expired
+the counter. Pass 4 is [007-uploads](.archive/007-uploads.md)' `Service.Sweep`, so an expired
 session's parts and row leave and its declared bytes go back.
 
-The merge with [[012-administration]] bound the last two passes. Pass 6 is
+The merge with [012-administration](.archive/012-administration.md) bound the last two passes. Pass 6 is
 `workspaces.Tombstones` and pass 7 is `shares.Expiry`, each a value of the
 package that owns the rows it removes rather than a method of that package's
 service: a service refuses to build without the authorizer its handlers
@@ -83,7 +83,7 @@ taking the subtree of a workspace somebody just brought back; then the
 subtree's rows go, the trashed ones and the superseded contents with them,
 the bytes they counted go back to the ledger, and a `purge` event is
 appended in the same transaction. The keys go after the commit, which is
-invariant 1 of [[001-architecture]]'s order for a delete. The pass reports
+invariant 1 of [001-architecture](.archive/001-architecture.md)'s order for a delete. The pass reports
 `workspace_purged` and not `file_purged`: a `Pass` answers one number, and
 the second count would be a second seam rather than a binding, so the rows
 the subtree held are visible in the `purge` event's detail and not in the
@@ -91,10 +91,10 @@ findings table.
 
 Pass 7 removes what expired a whole retention window ago. It appends no
 event: every read of a grant filters on `expires_at`, so one of these rows
-has granted nothing since the moment it expired ([[008-shares-and-links]]),
+has granted nothing since the moment it expired ([008-shares-and-links](.archive/008-shares-and-links.md)),
 and the deletion is housekeeping rather than a change to who may act on a
 space. The pass table said "revokes it" and now says "deletes it", which is
-what [[008-shares-and-links]] states and the only one of the two that has an
+what [008-shares-and-links](.archive/008-shares-and-links.md) states and the only one of the two that has an
 effect: a revoke of a row that already grants nothing changes nothing.
 
 **Amended 2026-11-06:** pass 7 also clears what an expired public grant left
@@ -103,7 +103,7 @@ and the bucket's ACL stayed, so the object was readable through the bucket
 long after, and the purge deleted the only row that named it. The pass now
 reads the objects whose last public grant expired, takes each one's ACL off
 and then its mark, and the purge keeps an expired public grant whose object
-is still marked; [[008-shares-and-links]] records the order and why it is
+is still marked; [008-shares-and-links](.archive/008-shares-and-links.md) records the order and why it is
 the reverse of a revoke's. The purge runs first, so the dry count and the
 live run read one state: a dry run counts the grants the purge takes and the
 objects the clear would reach, and a live run answers the grants it removed
@@ -147,7 +147,7 @@ row of [[013-api]]'s error table and the developer detail, and the frame
 writes the status, the one user sentence and the request id.
 `events.LimitOf(decision)` reads
 `limits.quota_bytes` off the same answer for the write paths of
-[[005-files]] and [[007-uploads]].
+[005-files](.archive/005-files.md) and [007-uploads](.archive/007-uploads.md).
 
 ### Where each criterion stands
 
@@ -155,33 +155,33 @@ writes the status, the one user sentence and the request id.
 |---|---|
 | 1 | Holds. `TestLimitOfReadsWhatTheAnswerCarried` and `TestChargeHonorsTheLimitTheAnswerCarried` over an answer with no limits, and `0005_usage_events.up.sql` holds no limit column |
 | 2 | Holds. `TestTheLimitLivesAsLongAsTheAnswerAndNoLonger` runs the shared client over a stub authorizer on a clock the test moves |
-| 3 | Holds at the ledger: `TestStoreUsageAdmitsTheLimitAndRefusesTheByteAfterIt` against Postgres carries the used and limit figures. The `413` itself waits on a write route ([[005-files]], [[013-api]]) |
+| 3 | Holds at the ledger: `TestStoreUsageAdmitsTheLimitAndRefusesTheByteAfterIt` against Postgres carries the used and limit figures. The `413` itself waits on a write route ([005-files](.archive/005-files.md), [[013-api]]) |
 | 4 | Holds. The same test releases bytes on a space over the limit |
 | 5 | Holds. `TestDeltaChargesWhatAWriteAdds`, one row per case of the admission table |
 | 6 | Holds. `TestUsageFailsClosed` at the seam and `TestStoreUsageFailsClosed` against Postgres, where the refused charge rolls back with the row. The `storage_unavailable` rendering is `TestTheTailAnswersEveryRowThroughTheFrame` |
 | 7 | Holds. The third term joined: `events.Recompute` sums `files`, `file_versions` and `upload_sessions.declared_size`, and `TestStoreRecomputeCountsAnOpenSessionsDeclaredBytes` holds one settled file and one open session against it at the store tier. The three transitions are the unit tier's, each on the figure a fresh recomputation would answer over the rows left behind: `TestASessionOpensUploadsAndCompletes` for the charge at the open and for the completion settling on the assembled size, the abort cases of `internal/uploads` for the release, and `TestAnExpiredSessionIsSweptWithItsPartsAndItsCharge` for pass 4 |
 | 8 | Holds. `TestEveryAppendedActionIsInTheTable` walks every Go file of the tree for an action built out of a literal |
 | 9 | Holds. `TestStoreTheTailIsGaplessAcrossABurst`, eight writers and a keyset walk that reads each row once |
-| 10 | Holds. `TestEventFilter`, and `TestTheEventTailAnswersThroughTheFrame` over the registered route. The conformance row is [[017-conformance-suite]]'s |
+| 10 | Holds. `TestEventFilter`, and `TestTheEventTailAnswersThroughTheFrame` over the registered route. The conformance row is [017-conformance-suite](.archive/017-conformance-suite.md)'s |
 | 11 | Holds. `TestStoreAPutThatFailedAfterTheBucketWriteIsReapedAfterTheWindow` against MinIO |
 | 12 | Holds. `TestStoreADeleteThatFailedAfterTheRowIsReaped` |
-| 13 | Holds. `upload_sessions` joined the union with the migration that creates it ([[007-uploads]]), and `TestObjectReferencedNamesEveryTableThatHoldsAnObjectID` reads the embedded schema for every table carrying an `object_id` and holds the statement to that list |
+| 13 | Holds. `upload_sessions` joined the union with the migration that creates it ([007-uploads](.archive/007-uploads.md)), and `TestObjectReferencedNamesEveryTableThatHoldsAnObjectID` reads the embedded schema for every table carrying an `object_id` and holds the statement to that list |
 | 14 | Holds. `TestPassTwoReportsARowWithoutItsBytesAndDeletesNothing` and `TestStoreARowWithoutItsBytesIsReportedAndKept` |
-| 15 | Holds. Pass 3 is a `Pass` the reconciler is given, bound in `cmd/arcad` to [[009-workspaces]]' `Service.ExpireLeases`, with a unit test on a fake here and the expiry itself tested in that package. Pass 4 is bound the same way to [[007-uploads]]' `Service.Sweep`, which counts on a dry run and aborts the parts before it drops the row. Passes 6 and 7 are bound to `workspaces.Tombstones` and `shares.Expiry`, which are values of their own packages rather than methods of either service, so both run on `arcad reap` as well as on a replica |
+| 15 | Holds. Pass 3 is a `Pass` the reconciler is given, bound in `cmd/arcad` to [009-workspaces](.archive/009-workspaces.md)' `Service.ExpireLeases`, with a unit test on a fake here and the expiry itself tested in that package. Pass 4 is bound the same way to [007-uploads](.archive/007-uploads.md)' `Service.Sweep`, which counts on a dry run and aborts the parts before it drops the row. Passes 6 and 7 are bound to `workspaces.Tombstones` and `shares.Expiry`, which are values of their own packages rather than methods of either service, so both run on `arcad reap` as well as on a replica |
 | 16 | Holds. The trash half is `TestStoreTrashPastItsRetentionLeavesBothStores`; the tombstone half is pass 6, bound to `workspaces.Tombstones`, with `TestATombstonePastTheWindowTakesItsSubtreeItsBytesAndItsRow` in that package and `TestStoreDroppingASubtreeTakesTheTrashAndTheHistoryWithIt` against Postgres |
-| 16b | Holds at the statement: `TestPassEightDropsAStarWhoseTargetIsGoneAndKeepsOneOnATrashedTarget`. The star routes are [[005-files]]'s |
+| 16b | Holds at the statement: `TestPassEightDropsAStarWhoseTargetIsGoneAndKeepsOneOnATrashedTarget`. The star routes are [005-files](.archive/005-files.md)'s |
 | 17 | Holds. `TestStoreLedgerReconciles` against Postgres, with the healthy run correcting nothing |
 | 18 | Holds. `TestARunTwiceLeavesWhatOneRunLeft` and the settled sweep of the store tier. Two reapers at once are two conditional statements, which is what the second run is |
-| 19 | Holds as the criterion now reads. `TestDryRunReportsWhatARunWouldChange` runs one fixture dry and live and holds the found counts equal, over every pass whose statements this package owns. Pass 3 is the exception the criterion names: its sweep is [[009-workspaces]]' and every statement it issues is a write, so a dry run does not call it and counts nothing for it. Closing that is a counting half in that package and is [[009-workspaces]]' to write. Pass 4's sweep is [[007-uploads]]' in the same way and is not an exception: what it would change is a query, so a dry run counts and changes nothing, which `TestAnExpiredSessionIsSweptWithItsPartsAndItsCharge` holds |
+| 19 | Holds as the criterion now reads. `TestDryRunReportsWhatARunWouldChange` runs one fixture dry and live and holds the found counts equal, over every pass whose statements this package owns. Pass 3 is the exception the criterion names: its sweep is [009-workspaces](.archive/009-workspaces.md)' and every statement it issues is a write, so a dry run does not call it and counts nothing for it. Closing that is a counting half in that package and is [009-workspaces](.archive/009-workspaces.md)' to write. Pass 4's sweep is [007-uploads](.archive/007-uploads.md)' in the same way and is not an exception: what it would change is a query, so a dry run counts and changes nothing, which `TestAnExpiredSessionIsSweptWithItsPartsAndItsCharge` holds |
 | 20 | Holds. `TestServeSaysWhetherThisReplicaReconciles` and `TestE2EReapRunsOneSequenceAndExits` |
 
 ### Divergences
 
 Each is a decision rather than a gap.
 
-- **Migration 0005 applies across a gap.** [[004-metadata-store]] assigns
-  `0005` to this spec and `0002` through `0004` to [[007-uploads]],
-  [[008-shares-and-links]] and [[009-workspaces]], which do not exist yet.
+- **Migration 0005 applies across a gap.** [004-metadata-store](.archive/004-metadata-store.md) assigns
+  `0005` to this spec and `0002` through `0004` to [007-uploads](.archive/007-uploads.md),
+  [008-shares-and-links](.archive/008-shares-and-links.md) and [009-workspaces](.archive/009-workspaces.md), which do not exist yet.
   The migrator records one version, so a database that applies `0005` before
   those three exist will never receive them. No installation is on this
   schema, a fresh database applies all five in order, and a development stack
@@ -189,7 +189,7 @@ Each is a decision rather than a gap.
   at its top and `TestStoreTheLedgerAndTheLogApplyOverTheNumbersTheirSpecsHaveNotFilled`
   proves the gap itself applies.
 - **`events_created_idx` is in the migration** and not in
-  [[004-metadata-store]]'s schema block. Pass 9 deletes by `created_at`, and
+  [004-metadata-store](.archive/004-metadata-store.md)'s schema block. Pass 9 deletes by `created_at`, and
   the predecessor carried the same index.
 - **A thirteenth finding kind, `lease_expired`.** [[018-observability]]'s
   `kind` vocabulary has twelve members and none for an expired attachment,
@@ -208,14 +208,14 @@ Each is a decision rather than a gap.
   ledger row at all is outside the walk, which is what the spec's wording
   says; every write path creates the row with its first charge.
 - **The reaper's sweep statements live in `internal/reaper`.**
-  [[004-metadata-store]] owns one query set per table for the handlers; the
+  [004-metadata-store](.archive/004-metadata-store.md) owns one query set per table for the handlers; the
   reaper sweeps across tables several specs own, and a query set per table
   for one caller would spread one pass over four packages.
 - **`Older` joined the `Log` interface**, the count pass 9 reports in a dry
   run. Without it the dry run would carry the log's own SQL into the reaper.
 - **`ARCA_TRASH_RETENTION` joined `internal/config`** beside
-  `ARCA_REAP_INTERVAL`. It is [[005-files]]'s row of
-  [[002-repository-scaffold]]'s table, and passes 5 and 6 read it.
+  `ARCA_REAP_INTERVAL`. It is [005-files](.archive/005-files.md)'s row of
+  [002-repository-scaffold](.archive/002-repository-scaffold.md)'s table, and passes 5 and 6 read it.
 - **The tail's `id` is a number and `next_cursor` a string**, which is the
   envelope this spec's own example shows. [[013-api]]'s "shapes a consumer
   meets more than once" renders an event id as a string; the tail is keyset
@@ -296,13 +296,13 @@ to the caller rather than to the ledger.
 [[015-security-and-threat-model]] states the same rule as a control.
 
 Usage leaves Arca in two places. The administrative overview of
-[[012-administration]] names a space and the bytes it holds, and the
+[012-administration](.archive/012-administration.md) names a space and the bytes it holds, and the
 authorizer question carries `resource.size` on every write, so a
 platform that keeps its own accounting sees each charge before it lands.
 
 ### The ledger
 
-One row per space in `space_usage` ([[004-metadata-store]]): the owner
+One row per space in `space_usage` ([004-metadata-store](.archive/004-metadata-store.md)): the owner
 and the bytes it holds. Every statement that moves bytes applies its
 delta to that row in the transaction that moves them, so the commit that
 records a file and the commit that records its bytes are one commit and
@@ -311,7 +311,7 @@ there is no window in which the two disagree.
 | Operation | Delta |
 |---|---|
 | a put | the size written, less the size a non-versioned overwrite replaced |
-| an upload session opened | its declared size ([[007-uploads]]) |
+| an upload session opened | its declared size ([007-uploads](.archive/007-uploads.md)) |
 | an upload session completed | the assembled size, less the declared size already charged |
 | an upload session aborted or reaped | minus its declared size |
 | a delete | nothing while the object sits in trash; minus its size when the row leaves |
@@ -347,33 +347,33 @@ metric of [[018-observability]] makes visible.
 Every mutation appends one row after it succeeds. The append is best
 effort: a failed insert is logged and never fails the operation it
 describes, because an event is a notification and the operation already
-happened. There is one exception, and [[012-administration]] owns it: an
+happened. There is one exception, and [012-administration](.archive/012-administration.md) owns it: an
 administrative mutation appends its event inside the mutation's own
 transaction, because that event is the record of what an administrator
 did and a record that can go missing quietly is not a record.
 
-The action vocabulary is closed. [[004-metadata-store]] ships the column
+The action vocabulary is closed. [004-metadata-store](.archive/004-metadata-store.md) ships the column
 without a database constraint, so the closure is a table in
 `internal/events` that every writer and every filter reads:
 
 | Action | Appended by |
 |---|---|
-| `put` | [[005-files]], [[007-uploads]] |
-| `move` | [[005-files]], the folder move of [[030-moving-a-folder]] |
-| `copy` | [[005-files]], the copy of [[028-one-tree]] |
-| `delete` | [[005-files]] |
-| `restore` | [[005-files]] |
+| `put` | [005-files](.archive/005-files.md), [007-uploads](.archive/007-uploads.md) |
+| `move` | [005-files](.archive/005-files.md), the folder move of [030-moving-a-folder](.archive/030-moving-a-folder.md) |
+| `copy` | [005-files](.archive/005-files.md), the copy of [028-one-tree](.archive/028-one-tree.md) |
+| `delete` | [005-files](.archive/005-files.md) |
+| `restore` | [005-files](.archive/005-files.md) |
 | `purge` | this spec's reaper |
 | `reap` | this spec's reaper |
-| `share_created` | [[008-shares-and-links]] |
-| `share_revoked` | [[008-shares-and-links]] |
-| `space_delete` | the deletion of a whole space, [[032-space-delete]] |
+| `share_created` | [008-shares-and-links](.archive/008-shares-and-links.md) |
+| `share_revoked` | [008-shares-and-links](.archive/008-shares-and-links.md) |
+| `space_delete` | the deletion of a whole space, [032-space-delete](.archive/032-space-delete.md) |
 
-Ten actions. **Amended 2026-11-04 ([[032-space-delete]]):** `space_delete` joined the table. **Amended 2026-10-12 ([[028-one-tree]]):** `attach`,
+Ten actions. **Amended 2026-11-04 ([032-space-delete](.archive/032-space-delete.md)):** `space_delete` joined the table. **Amended 2026-10-12 ([028-one-tree](.archive/028-one-tree.md)):** `attach`,
 `release` and `sync` left the table with the plane that appended them,
 and `copy` joined it. A row already in a log under one of the three
 stays until log retention removes it. Adding one is a change to that table and to the
-conformance rows of [[017-conformance-suite]], and it is not a migration.
+conformance rows of [017-conformance-suite](.archive/017-conformance-suite.md), and it is not a migration.
 A consumer that wants finer grain than an action reads `detail`, which is
 why a link share appends `share_created` with its kind in the detail
 rather than claiming an action of its own, and why a refused write
@@ -402,7 +402,7 @@ question with a `filter` and the handler narrows its own query
 ([[006-identity]]); Arca applies no scoping of its own.
 
 An answer's `limits.omit` leaves subtrees out of the tail
-([[028-one-tree]]): an event whose `path`, or whose `detail.from`, is at
+([028-one-tree](.archive/028-one-tree.md)): an event whose `path`, or whose `detail.from`, is at
 or under an omitted prefix is on no page. The omission is in the query,
 so a page is as full as the rows the caller may read allow, and
 `next_cursor` is the id of a row the caller read: the next page starts
@@ -419,19 +419,19 @@ result somewhere built for keeping things.
 One loop, a sequence of passes, each idempotent and each safe to run
 while another replica runs it, because every destructive statement is
 conditional on the state it read. The passes exist because the two stores
-of [[001-architecture]] fail independently and its invariants 1 and 2 say
+of [001-architecture](.archive/001-architecture.md) fail independently and its invariants 1 and 2 say
 what each failure leaves behind.
 
 | # | Pass | Finds | Does |
 |---|---|---|---|
 | 1 | orphan bytes | a key under `ARCA_BUCKET_PREFIX` that no `files`, `file_versions`, or `upload_sessions` row references | deletes it, once it has been a candidate for longer than the grace window |
 | 2 | orphan rows | a row whose key the bucket does not hold | reports it; never deletes |
-| 3 | retired | retired 2026-10-12 by [[028-one-tree]] with the lease it expired; the number is not reused | |
-| 4 | expired uploads | an upload session idle past its TTL | aborts the multipart, then deletes the row ([[007-uploads]]) |
+| 3 | retired | retired 2026-10-12 by [028-one-tree](.archive/028-one-tree.md) with the lease it expired; the number is not reused | |
+| 4 | expired uploads | an upload session idle past its TTL | aborts the multipart, then deletes the row ([007-uploads](.archive/007-uploads.md)) |
 | 5 | trash | a trashed object past `ARCA_TRASH_RETENTION` | deletes the rows, then the keys |
-| 6 | retired | retired 2026-10-12 by [[028-one-tree]] with the record it purged; the number is not reused. What a soft deleted workspace held is trashed objects, which pass 5 purges | |
-| 7 | grant hygiene | a grant expired long ago; an object whose last public grant expired | clears the object's public mark and ACL, the bucket first, then deletes a grant expired long ago once nothing it marked is still public ([[008-shares-and-links]]) |
-| 8 | stale stars | a star whose path has no live `files` row | deletes it ([[005-files]]) |
+| 6 | retired | retired 2026-10-12 by [028-one-tree](.archive/028-one-tree.md) with the record it purged; the number is not reused. What a soft deleted workspace held is trashed objects, which pass 5 purges | |
+| 7 | grant hygiene | a grant expired long ago; an object whose last public grant expired | clears the object's public mark and ACL, the bucket first, then deletes a grant expired long ago once nothing it marked is still public ([008-shares-and-links](.archive/008-shares-and-links.md)) |
+| 8 | stale stars | a star whose path has no live `files` row | deletes it ([005-files](.archive/005-files.md)) |
 | 9 | log retention | an event older than thirty days | deletes it |
 | 10 | ledger reconciliation | a `space_usage` row that differs from the sum over the rows that hold the bytes | corrects the row and reports the difference |
 
@@ -439,7 +439,7 @@ Pass 1 is invariant 1's cleanup: a put writes the bucket first, so a
 crash between the two stores leaves bytes nothing points at. The
 referenced set is the union of three tables and not just `files`, because
 an incomplete multipart's parts are invisible to object listing and the
-session row is their only pointer ([[003-object-store]]). A key seen for
+session row is their only pointer ([003-object-store](.archive/003-object-store.md)). A key seen for
 the first time inside the grace window is left alone, which is what stops
 the pass from deleting bytes whose row is one statement away from
 existing. First-seen times live in the process, so a restart re-arms the
@@ -452,7 +452,7 @@ quiet delete of the only record that something existed.
 
 Passes 5 and 6 delete rows before keys, which is invariant 1's order for
 a delete, so a failure between them leaves bytes that pass 1 will find.
-Deletes are batched through `DeleteMany` ([[003-object-store]]), so a
+Deletes are batched through `DeleteMany` ([003-object-store](.archive/003-object-store.md)), so a
 large subtree costs a number of calls proportional to the keys over a
 thousand. Each applies its delta to the ledger in the transaction that
 removes the rows, so pass 10 has nothing to correct after a healthy run.
@@ -472,15 +472,15 @@ leaving for good, which is the last thing said about it.
 `ARCA_REAP_INTERVAL`. An installation that wants it off the API replicas
 sets `ARCA_REAP_INTERVAL` to `0` there, which disables the in-process
 loop, and runs `arcad reap` as a Deployment or a CronJob of its own
-([[002-repository-scaffold]] owns the subcommand table). `arcad reap`
+([002-repository-scaffold](.archive/002-repository-scaffold.md) owns the subcommand table). `arcad reap`
 runs the same passes on the same interval and takes `-dry-run`, which
 logs every finding and changes nothing; `-once` runs one pass sequence
 and exits, which is the CronJob shape.
 
 `arcad reap` runs every pass a replica runs. Pass 4's sweep is
-[[007-uploads]]' and pass 7's is [[008-shares-and-links]]', and neither
+[007-uploads](.archive/007-uploads.md)' and pass 7's is [008-shares-and-links](.archive/008-shares-and-links.md)', and neither
 puts a question of the authorizer, so each builds wherever the two stores
-are reachable. Until [[028-one-tree]] retired it, pass 3 was the one
+are reachable. Until [028-one-tree](.archive/028-one-tree.md) retired it, pass 3 was the one
 `arcad reap` could not run, because its sweep was a method of a service
 that refused to build without an authorizer.
 
@@ -500,13 +500,13 @@ loses and is recomputed on the next run instead of erasing the charge.
 | `drive/internal/handler/quota.go` | the admission delta and the charge, now applied to a stored counter inside the write's own transaction rather than recomputed per request behind a thirty second cache |
 | `drive/internal/handler/events.go` | the append and the cursor tail |
 | `drive/internal/gc` | every pass, and the first-seen grace window |
-| migrations `000005_quotas_events`, `000008_events_move` | folded into `0005_usage_events.up.sql` of [[004-metadata-store]], with the action `CHECK` dropped in favor of the table in `internal/events` |
+| migrations `000005_quotas_events`, `000008_events_move` | folded into `0005_usage_events.up.sql` of [004-metadata-store](.archive/004-metadata-store.md), with the action `CHECK` dropped in favor of the table in `internal/events` |
 
 Owner addressing changes from `(owner_type, owner_id)` to the subject
 `<issuer>|<sub>`, and the event's `actor_id` becomes the subject
 `actor`. The nightly interval becomes `ARCA_REAP_INTERVAL`, and the two
 purge windows of the predecessor, two constants there, become the one
-`ARCA_TRASH_RETENTION` that [[002-repository-scaffold]] already carries.
+`ARCA_TRASH_RETENTION` that [002-repository-scaffold](.archive/002-repository-scaffold.md) already carries.
 
 Left behind with the hosted service: the stored limit, its two routes,
 and the two defaults beside it, one for a person and one for an
@@ -522,18 +522,18 @@ policy answers for the space.
 
 Also removed: the `share_resolved` action, which recorded an approval,
 because the approval queue does not move into the core
-([[008-shares-and-links]]). The star-pruning pass stays, as pass 8: a
-star is its own row and [[005-files]] hides a star whose target is gone
+([008-shares-and-links](.archive/008-shares-and-links.md)). The star-pruning pass stays, as pass 8: a
+star is its own row and [005-files](.archive/005-files.md) hides a star whose target is gone
 by joining against live rows, so nothing is ever wrong before the pass
 runs and nothing grows without bound after it.
 
 ## Not in this spec
 
-The tables ([[004-metadata-store]]). The bucket calls a pass makes
-([[003-object-store]]). What a trashed object or a version is
-([[005-files]]). The cross-space overview and the administrative
+The tables ([004-metadata-store](.archive/004-metadata-store.md)). The bucket calls a pass makes
+([003-object-store](.archive/003-object-store.md)). What a trashed object or a version is
+([005-files](.archive/005-files.md)). The cross-space overview and the administrative
 restore, which read this spec's numbers but are their own surface
-([[012-administration]]). The metric names and the alert rules
+([012-administration](.archive/012-administration.md)). The metric names and the alert rules
 ([[018-observability]]).
 
 ## Acceptance criteria
@@ -546,17 +546,17 @@ restore, which read this spec's numbers but are their own surface
 | 4 | A delete on a space over the answer's limit is admitted | the same |
 | 5 | A versioned overwrite is charged the full new size and a non-versioned one the difference | `internal/events` table test |
 | 6 | A ledger read or write that fails refuses the write with `storage_unavailable` and leaves neither a row nor a charge | `TestUsageFailsClosed`, with a failing stub |
-| 7 | An open upload session's declared bytes count against the space, and completing, aborting, and reaping each leave the ledger equal to a fresh recomputation | `TestOpenSessionsCount`, a store-tier test with [[007-uploads]] |
+| 7 | An open upload session's declared bytes count against the space, and completing, aborting, and reaping each leave the ledger equal to a fresh recomputation | `TestOpenSessionsCount`, a store-tier test with [007-uploads](.archive/007-uploads.md) |
 | 8 | Every action a handler appends is in the closed table, and no handler appends an action outside it | a test that walks the append sites against `internal/events`'s table |
 | 9 | The tail is gapless for a given cursor across a concurrent write burst | store-tier test |
-| 10 | An `event.read` answer carrying a `filter` narrows the page, and no handler scopes by a claim | `TestEventFilter`, plus [[017-conformance-suite]]'s row with a recording authorizer |
-| 11 | A put that fails after the bucket write leaves bytes with no row, and pass 1 reaps them after the grace window and not before | the fault test [[001-architecture]] criterion 5 names, run against MinIO |
+| 10 | An `event.read` answer carrying a `filter` narrows the page, and no handler scopes by a claim | `TestEventFilter`, plus [017-conformance-suite](.archive/017-conformance-suite.md)'s row with a recording authorizer |
+| 11 | A put that fails after the bucket write leaves bytes with no row, and pass 1 reaps them after the grace window and not before | the fault test [001-architecture](.archive/001-architecture.md) criterion 5 names, run against MinIO |
 | 12 | A delete that fails after the row is gone leaves no visible object, and pass 1 reaps the bytes | criterion 6 of the same |
 | 13 | An incomplete multipart's key is never reaped while its session row lives | store-tier test against MinIO |
 | 14 | A row whose key the bucket does not hold is reported and not deleted | `internal/reaper` test |
-| 15 | Retired 2026-10-12 by [[028-one-tree]] with pass 3. It read: an expired lease is cleared and its attachment marked reaped | none |
+| 15 | Retired 2026-10-12 by [028-one-tree](.archive/028-one-tree.md) with pass 3. It read: an expired lease is cleared and its attachment marked reaped | none |
 | 16 | Trash past `ARCA_TRASH_RETENTION` is purged from both stores, lowers the ledger, and appears as `purge` events. The tombstone half is retired with pass 6 | e2e |
-| 16b | A star whose target was purged is deleted by pass 8, and a star on a trashed but restorable target is kept | store-tier test with [[005-files]] |
+| 16b | A star whose target was purged is deleted by pass 8, and a star on a trashed but restorable target is kept | store-tier test with [005-files](.archive/005-files.md) |
 | 17 | A ledger row altered by hand is corrected by pass 10 and reported as a finding, and a healthy run corrects nothing | `TestLedgerReconciles` in `internal/reaper`, against Postgres |
 | 18 | Every pass is idempotent, and two reapers running together produce the same end state as one | a test that runs the sequence twice and concurrently |
 | 19 | `-dry-run` changes nothing in either store, and reports the same findings for every pass. The exception this row named, pass 3, is retired | `TestDryRunReportsWhatARunWouldChange` in `internal/reaper`, one fixture run dry and live with the found counts held equal |
@@ -565,7 +565,7 @@ restore, which read this spec's numbers but are their own surface
 
 ## Outcome
 
-**Amended 2026-10-12 by [[028-one-tree]].** The event table is nine
+**Amended 2026-10-12 by [028-one-tree](.archive/028-one-tree.md).** The event table is nine
 actions and the reconciler runs eight passes: 3 and 6 are retired and
 their numbers kept unused, the finding kinds `workspace_purged`,
 `file_purged` and `lease_expired` are gone, and `arcad reap` runs every
@@ -584,13 +584,13 @@ space may grow is the platform's decision, carried in the authorizer's
 answer.
 
 Two criteria closed after the first verification pass. Criterion 7's
-recomputation summed two tables when [[007-uploads]]' did not exist; it
+recomputation summed two tables when [007-uploads](.archive/007-uploads.md)' did not exist; it
 exists, and the statement now sums three. That mattered beyond a number: an
 upload session is charged its declared bytes the moment it opens, the reaper
 writes a recomputation over the counter, and a sum that missed the third
 table would have erased every open session's charge once per reap interval.
 Criterion 19 was written as an absolute and the tree could not keep it for
-pass 3, whose sweep belongs to [[009-workspaces]] and issues nothing but
+pass 3, whose sweep belongs to [009-workspaces](.archive/009-workspaces.md) and issues nothing but
 writes; the criterion now says what the implementation does and names the
 one pass that under-reports, and closing that is a counting half in that
 package.
@@ -601,7 +601,7 @@ Where each criterion is proved:
 |---|---|
 | 1 | `TestLimitOfReadsWhatTheAnswerCarried` and `TestChargeHonorsTheLimitTheAnswerCarried`; `0005_usage_events.up.sql` holds no limit column |
 | 2 | `TestTheLimitLivesAsLongAsTheAnswerAndNoLonger`, the shared client over a stub authorizer on a clock the test moves |
-| 3 | `TestStoreUsageAdmitsTheLimitAndRefusesTheByteAfterIt` against Postgres, with the used and limit figures in the refusal; the `413` rendering is [[005-files]]' |
+| 3 | `TestStoreUsageAdmitsTheLimitAndRefusesTheByteAfterIt` against Postgres, with the used and limit figures in the refusal; the `413` rendering is [005-files](.archive/005-files.md)' |
 | 4 | the same test's release arm, on a space already over the answer's limit |
 | 5 | `TestDeltaChargesWhatAWriteAdds`, one row per case of the admission table |
 | 6 | `TestUsageFailsClosed` at the seam and `TestStoreUsageFailsClosed` against Postgres, where the refused charge rolls back with the row |
@@ -613,8 +613,8 @@ Where each criterion is proved:
 | 12 | `TestStoreADeleteThatFailedAfterTheRowIsReaped` |
 | 13 | `TestObjectReferencedNamesEveryTableThatHoldsAnObjectID`, which reads the embedded schema for every table carrying an `object_id` and holds the statement to that list |
 | 14 | `TestPassTwoReportsARowWithoutItsBytesAndDeletesNothing` and `TestStoreARowWithoutItsBytesIsReportedAndKept` |
-| 15 | pass 3 as a `Pass` the reconciler is given, bound in `cmd/arcad` to [[009-workspaces]]' `Service.ExpireLeases`, with a unit test on a fake here and the expiry itself tested in that package |
-| 16 | `TestStoreTrashPastItsRetentionLeavesBothStores` for the trash; pass 6 for the tombstone, with `TestATombstonePastTheWindowTakesItsSubtreeItsBytesAndItsRow` in [[009-workspaces]]' package and `TestStoreDroppingASubtreeTakesTheTrashAndTheHistoryWithIt` against Postgres |
+| 15 | pass 3 as a `Pass` the reconciler is given, bound in `cmd/arcad` to [009-workspaces](.archive/009-workspaces.md)' `Service.ExpireLeases`, with a unit test on a fake here and the expiry itself tested in that package |
+| 16 | `TestStoreTrashPastItsRetentionLeavesBothStores` for the trash; pass 6 for the tombstone, with `TestATombstonePastTheWindowTakesItsSubtreeItsBytesAndItsRow` in [009-workspaces](.archive/009-workspaces.md)' package and `TestStoreDroppingASubtreeTakesTheTrashAndTheHistoryWithIt` against Postgres |
 | 16b | `TestPassEightDropsAStarWhoseTargetIsGoneAndKeepsOneOnATrashedTarget` |
 | 17 | `TestStoreLedgerReconciles` against Postgres, with the healthy run correcting nothing |
 | 18 | `TestARunTwiceLeavesWhatOneRunLeft` and the settled sweep of the store tier |
@@ -628,7 +628,7 @@ above because the three-table sum is a claim about one SQL statement and the
 three transitions are claims about the arithmetic, which a fake ledger
 answers and Postgres need not. Criterion 17 named `TestLedgerReconciles`,
 which is `TestStoreLedgerReconciles` at the store tier. Criterion 3's `413`
-is [[005-files]]' rendering of the refusal this package raises, so the
+is [005-files](.archive/005-files.md)' rendering of the refusal this package raises, so the
 figures are held here and the status there.
 
 The store tier runs green with `make test-store` and the e2e tier with

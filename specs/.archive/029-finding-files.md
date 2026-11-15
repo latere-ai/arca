@@ -3,10 +3,10 @@ title: "Finding files: a folder listing narrowed to names that contain a text, a
 status: complete
 track: core
 depends_on:
-  - specs/005-files.md
+  - specs/.archive/005-files.md
   - specs/013-api.md
-  - specs/028-one-tree.md
-affects: [internal/files/, internal/store/, internal/uploads/, api/openapi.yaml, test/e2e/, docs/api.md, specs/005-files.md, specs/013-api.md]
+  - specs/.archive/028-one-tree.md
+affects: [internal/files/, internal/store/, internal/uploads/, api/openapi.yaml, test/e2e/, docs/api.md, specs/.archive/005-files.md, specs/013-api.md]
 effort: small
 created: 2026-10-18
 updated: 2026-10-18

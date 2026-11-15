@@ -3,11 +3,11 @@ title: "Transactional audit events: the append that commits with the mutation it
 status: validated
 track: core
 depends_on:
-  - specs/005-files.md
-  - specs/008-shares-and-links.md
-  - specs/009-workspaces.md
+  - specs/.archive/005-files.md
+  - specs/.archive/008-shares-and-links.md
+  - specs/.archive/009-workspaces.md
   - specs/010-events-and-reaper.md
-  - specs/012-administration.md
+  - specs/.archive/012-administration.md
 affects: [internal/files/, internal/shares/, internal/workspaces/, internal/uploads/, internal/events/, cmd/arcad/]
 effort: large
 created: 2026-09-20
@@ -19,7 +19,7 @@ author: changkun
 
 ## Overview
 
-[[012-administration]] has no audit table. The record of what an
+[012-administration](.archive/012-administration.md) has no audit table. The record of what an
 administrator did is the event log of [[010-events-and-reaper]], because
 an administrative action is a thing that happened to a space and the
 space's log is where things that happened to it are written. That part
@@ -33,7 +33,7 @@ runs after its mutation, on the pool's querier rather than the
 transaction's, through a seam whose `Append` answers nothing and whose
 implementation swallows a failure into a warning.
 
-This spec is that property. It is criterion 8 of [[012-administration]],
+This spec is that property. It is criterion 8 of [012-administration](.archive/012-administration.md),
 split out on 2026-09-20 because the seam it changes is every write path
 in the tree and not one.
 
@@ -96,16 +96,16 @@ and after the ledger's own delta. An event that named a row the same
 transaction then failed to write would be the failure this spec exists to
 prevent, in the other direction.
 
-The bytes stay outside. Invariant 1 of [[001-architecture]] is that the
+The bytes stay outside. Invariant 1 of [001-architecture](.archive/001-architecture.md) is that the
 database commits before an object is dropped, and nothing here changes
 it: what commits together is the row, the usage delta and the event.
 
 ## Not in this spec
 
-The mark itself, which shipped with [[012-administration]]: the decision
+The mark itself, which shipped with [012-administration](.archive/012-administration.md): the decision
 path sets it and `internal/events` puts it on the row. The reaper's own
 events, which belong to no caller and stay best effort. Any audit table;
-there is still none, and the reason is [[012-administration]]'s.
+there is still none, and the reason is [012-administration](.archive/012-administration.md)'s.
 
 ## Acceptance criteria
 

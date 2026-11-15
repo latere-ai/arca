@@ -4,7 +4,7 @@ status: validated
 track: core
 depends_on:
   - specs/013-api.md
-  - specs/014-test-stubs-and-tiers.md
+  - specs/.archive/014-test-stubs-and-tiers.md
 affects: [test/e2e/, go.mod, .lateregate.yaml]
 effort: medium
 created: 2026-09-19
@@ -35,7 +35,7 @@ one open item that cannot be written without adding a dependency.
 Validating a request and a response against an OpenAPI 3.1 document needs
 an OpenAPI 3.1 request and response validator on the test build list.
 That is a new module in `go.mod` and a new row for whoever reads the
-dependency list, and [[001-architecture]]'s invariant 9 makes a
+dependency list, and [001-architecture](.archive/001-architecture.md)'s invariant 9 makes a
 dependency a decision recorded in `.lateregate.yaml` rather than an
 import somebody adds. `internal/apidocs` builds the document as Go values
 precisely so the server links no YAML parser, and `tools/apidoc` is the
@@ -48,7 +48,7 @@ this one, at `validated`, to be dispatched when the dependency is taken.
 
 ## Design
 
-The e2e tier of [[014-test-stubs-and-tiers]] drives `arcad` as a process
+The e2e tier of [014-test-stubs-and-tiers](.archive/014-test-stubs-and-tiers.md) drives `arcad` as a process
 over HTTP. Every request it makes and every response it reads passes
 through one client, so the seam is one place.
 

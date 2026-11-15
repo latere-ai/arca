@@ -4,11 +4,11 @@ status: complete
 track: core
 depends_on:
   - specs/006-identity.md
-  - specs/012-administration.md
+  - specs/.archive/012-administration.md
   - specs/013-api.md
-  - specs/016-release-and-installation.md
-  - specs/017-conformance-suite.md
-affects: [internal/api/, internal/config/, internal/auth/, internal/shares/, internal/check/, api/openapi.yaml, deploy/base/, deploy/prod/, test/deploy/, test/conformance/, tools/smoke/, docs/, specs/006-identity.md, specs/012-administration.md, specs/013-api.md]
+  - specs/.archive/016-release-and-installation.md
+  - specs/.archive/017-conformance-suite.md
+affects: [internal/api/, internal/config/, internal/auth/, internal/shares/, internal/check/, api/openapi.yaml, deploy/base/, deploy/prod/, test/deploy/, test/conformance/, tools/smoke/, docs/, specs/006-identity.md, specs/.archive/012-administration.md, specs/013-api.md]
 effort: large
 created: 2026-09-20
 updated: 2026-10-02

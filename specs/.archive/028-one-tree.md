@@ -3,17 +3,17 @@ title: "One tree: a space is one tree of files and folders, workspaces are remov
 status: complete
 track: core
 depends_on:
-  - specs/001-architecture.md
-  - specs/004-metadata-store.md
-  - specs/005-files.md
+  - specs/.archive/001-architecture.md
+  - specs/.archive/004-metadata-store.md
+  - specs/.archive/005-files.md
   - specs/006-identity.md
-  - specs/008-shares-and-links.md
-  - specs/009-workspaces.md
+  - specs/.archive/008-shares-and-links.md
+  - specs/.archive/009-workspaces.md
   - specs/010-events-and-reaper.md
-  - specs/012-administration.md
+  - specs/.archive/012-administration.md
   - specs/013-api.md
-  - specs/017-conformance-suite.md
-affects: [object/, authorizer/, internal/files/, internal/store/, internal/store/migrations/, internal/auth/, internal/api/, internal/events/, internal/reaper/, internal/admin/, internal/shares/, internal/uploads/, internal/metrics/, cmd/arcad/, api/openapi.yaml, test/conformance/, test/e2e/, docs/, README.md, specs/001-architecture.md, specs/004-metadata-store.md, specs/005-files.md, specs/006-identity.md, specs/008-shares-and-links.md, specs/010-events-and-reaper.md, specs/012-administration.md, specs/013-api.md, specs/017-conformance-suite.md, specs/018-observability.md]
+  - specs/.archive/017-conformance-suite.md
+affects: [object/, authorizer/, internal/files/, internal/store/, internal/store/migrations/, internal/auth/, internal/api/, internal/events/, internal/reaper/, internal/admin/, internal/shares/, internal/uploads/, internal/metrics/, cmd/arcad/, api/openapi.yaml, test/conformance/, test/e2e/, docs/, README.md, specs/.archive/001-architecture.md, specs/.archive/004-metadata-store.md, specs/.archive/005-files.md, specs/006-identity.md, specs/.archive/008-shares-and-links.md, specs/010-events-and-reaper.md, specs/.archive/012-administration.md, specs/013-api.md, specs/.archive/017-conformance-suite.md, specs/018-observability.md]
 effort: large
 created: 2026-10-12
 updated: 2026-10-12

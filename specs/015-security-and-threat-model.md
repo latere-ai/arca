@@ -3,24 +3,24 @@ title: "Security and threat model: assets, actors, boundaries, every threat with
 status: complete
 track: core
 depends_on:
-  - specs/001-architecture.md
-  - specs/002-repository-scaffold.md
-  - specs/003-object-store.md
-  - specs/004-metadata-store.md
-  - specs/005-files.md
+  - specs/.archive/001-architecture.md
+  - specs/.archive/002-repository-scaffold.md
+  - specs/.archive/003-object-store.md
+  - specs/.archive/004-metadata-store.md
+  - specs/.archive/005-files.md
   - specs/006-identity.md
-  - specs/007-uploads.md
-  - specs/008-shares-and-links.md
-  - specs/009-workspaces.md
-  - specs/028-one-tree.md
+  - specs/.archive/007-uploads.md
+  - specs/.archive/008-shares-and-links.md
+  - specs/.archive/009-workspaces.md
+  - specs/.archive/028-one-tree.md
   - specs/010-events-and-reaper.md
-  - specs/012-administration.md
+  - specs/.archive/012-administration.md
   - specs/013-api.md
-  - specs/014-test-stubs-and-tiers.md
-  - specs/016-release-and-installation.md
-  - specs/017-conformance-suite.md
+  - specs/.archive/014-test-stubs-and-tiers.md
+  - specs/.archive/016-release-and-installation.md
+  - specs/.archive/017-conformance-suite.md
   - specs/018-observability.md
-  - specs/031-download-only-link-reads.md
+  - specs/.archive/031-download-only-link-reads.md
 affects: [internal/auth/, internal/api/, internal/blob/, internal/files/, internal/shares/, internal/admin/, internal/uploads/, internal/events/, internal/reaper/, internal/config/, object/, deploy/base/, deploy/prod/, test/e2e/, test/deploy/, SECURITY.md]
 effort: medium
 created: 2026-09-18
@@ -68,7 +68,7 @@ the whole spec deck.
 | presigned URLs | in flight, in a `302`, in a materialize manifest, in a browser's history | read of one object for five minutes |
 | the public-read ACL a public grant stamps on an object | the bucket, and the CDN in front of it | read of one object by anyone, without reaching `arcad` at all |
 | `ARCA_BUCKET_SECRET_KEY`, `ARCA_DB_URL`, `ARCA_AUTHORIZER_TOKEN` | the server's configuration, mounted from a Secret | the installation |
-| the record of who did what: the event log ([[012-administration]]) | Postgres | the only account of an administrator's actions |
+| the record of who did what: the event log ([012-administration](.archive/012-administration.md)) | Postgres | the only account of an administrator's actions |
 | the installation's availability | `arcad`, and the two stores behind it | every space at once, for as long as it is down |
 
 The public-read ACL is the asset with the longest reach. A public grant
@@ -214,7 +214,7 @@ conjunction turns an allow into a deny and never a deny into an allow.
 
 **`internal/shares`, the three public link routes.** These carry no
 caller. They are the whole of the exception to invariant 5 of
-[[001-architecture]], and `redeem` fixes their order: resolve the token
+[001-architecture](.archive/001-architecture.md), and `redeem` fixes their order: resolve the token
 first, refuse a path the prefix does not cover, and only then ask
 `link.read` with the resolved grant's id, its owner, the path, and an
 empty subject. Every refusal on those routes is one sentence,
@@ -320,11 +320,11 @@ lookup sites rendered the authorizer's reason into `details.detail`
 where an absence rendered the handler's own sentence: `share.read` and
 `share.revoke` (`internal/shares/grants.go`), `link.revoke`
 (`internal/shares/links.go`), and the routes of the second plane, which
-[[028-one-tree]] removed. They now answer through the collapse too.
+[028-one-tree](.archive/028-one-tree.md) removed. They now answer through the collapse too.
 
 Nothing about the exposure forced it. The status line, the error code
 and the user sentence were identical in all four cases, which is what
-[[017-conformance-suite]] compares and what a caller reads; only the
+[017-conformance-suite](.archive/017-conformance-suite.md) compares and what a caller reads; only the
 developer detail differed. The discriminator is the identifier: those
 four are addressed by a `gen_random_uuid()` primary key, so there is
 nothing to enumerate over, and to use the oracle at all a caller must
@@ -396,14 +396,14 @@ it. Names are as they appear in the tree.
 | a visible row whose bytes are gone | a delete writes the database first and the bucket second, so a crash leaves an orphan the reaper sweeps and never a row that lies. A put writes the bucket first for the same reason | 010, 001 | `TestStoreADeleteThatFailedAfterTheRowIsReaped`, `TestStoreAPutThatFailedAfterTheBucketWriteIsReapedAfterTheWindow`, `TestPassFiveTakesTheRowsTheKeysAndTheBytesOfTheLedger`, `TestPassFiveLeavesTheBytesToPassOneWhenTheBucketRefuses` |
 | a compromised replica moving laterally in the cluster | a non-root read-only pod with no capabilities and no service account token, and an egress port list that is the confinement | 016, this spec | `TestBaseIsConfined`, `TestEveryOverlayAdmitsTheEgressItsEndpointsNeed`, `TestProdAdmitsTheDatabasePortsThisInstallationUses` |
 | a consumer of the module deriving another's key | `object.ID.Key` takes a prefix and an id and derives nothing from a path or an owner, and an id that is not one has no key at all | 003 | `TestAnIDThatIsNoIDHasNoShardAndNoKey`, `TestParseIDRefusesEverySpellingButTheCanonicalOne` |
-| a dependency with a known vulnerability | the `vuln` gate on every push, and a dependency list held to invariant 9 of [[001-architecture]] | 002 | the gate |
+| a dependency with a known vulnerability | the `vuln` gate on every push, and a dependency list held to invariant 9 of [001-architecture](.archive/001-architecture.md) | 002 | the gate |
 | an image that is not what was released | keyless cosign signatures, an SBOM attestation, and a build provenance attestation on both images, verified from a clean runner before the release exists | 016 | `TestTheReleaseImageCopiesWhatThePipelineBuilt`, `TestReleasePublishesUnderTheOwnersNamespace`, and the `release-verify` job |
 | this table drifting from the tree, so a control's proof cannot be looked up | every `Test` cell is held to what `go test -list` finds across the repository, every commitment of `SECURITY.md` to a row of this table, and every spec a row cites to this spec's `depends_on` | this spec | `TestEveryControlNamesATestTheTreeHas`, `TestEveryCommitmentOfTheRootFileIsAControl`, `TestEverySpecAControlNamesIsADependency` |
 
 ### Configuration this spec needs
 
 Two variables, both of which are in the table of
-[[002-repository-scaffold]] and both implemented in `internal/config`.
+[002-repository-scaffold](.archive/002-repository-scaffold.md) and both implemented in `internal/config`.
 Every other control here is a constant or reads a variable that table
 already holds.
 
@@ -437,7 +437,7 @@ the subject it names, for the answer's `ttl` ([[006-identity]]).
 - The hosted platform's own policy: who may share with whom, which
   principals may see which paths, and whether an approval queue stands
   between a request and a grant. Arca left all three behind
-  ([[008-shares-and-links]], [[013-api]]) and they are answered in an
+  ([008-shares-and-links](.archive/008-shares-and-links.md), [[013-api]]) and they are answered in an
   authorizer.
 - Denial of service beyond the two rate limits, and the cost a large but
   authorized upload imposes on a shared bucket.
@@ -449,7 +449,7 @@ the subject it names, for the answer's `ttl` ([[006-identity]]).
 - The bucket's and the CDN's own response headers. A signed URL asks the
   bucket for a disposition and for no other header, so `nosniff` and the
   sandbox are on Arca's own answers and a redirected link read is kept a
-  download by its disposition ([[031-download-only-link-reads]]). An
+  download by its disposition ([031-download-only-link-reads](.archive/031-download-only-link-reads.md)). An
   owner's read of a public object is sent to the CDN and answered under
   the type the object was written with, on the CDN's host. The operator
   keeps that host on a registrable domain apart from the origin's and from
@@ -497,20 +497,20 @@ time the reasoning behind it is written down.
 | From | What arrives | What changes |
 |---|---|---|
 | `drive/internal/storage/s3.go` | the five minute `PresignTTL`, the 24 hour part TTL, and the discipline that no signed URL is logged | unchanged, and now stated as a control with a test |
-| `drive/internal/handler/handler.go`'s `validatePath` | the path rule | unchanged in substance; the plane list is [[001-architecture]]'s two rather than five |
+| `drive/internal/handler/handler.go`'s `validatePath` | the path rule | unchanged in substance; the plane list is [001-architecture](.archive/001-architecture.md)'s two rather than five |
 | `drive/internal/handler/shares.go`'s `newToken` | 256 bits from `crypto/rand` | rendered base64url rather than hex, so the URL is shorter at the same entropy. The listing that answered the token does not arrive |
 | `drive/internal/webhook/worker.go`'s `GuardedClient`, `PublicIP`, and its signing | nothing | webhooks were retired on 2026-09-18 before drafting closed. The destination rule, the dialer control hook, the delivery signature, and the whole request-forgery surface they defended go with them; a consumer tails the event log ([[010-events-and-reaper]]) |
 | `drive/internal/handler/quota.go` | the charge and the check after assembly | the stored limit does not arrive; the accounting moves inside the write's own transaction, so the fail-open on a usage query becomes a refusal |
 | `drive/internal/handler/attach.go` | the conditional lease acquisition, the one hour default and twenty-four hour ceiling, and the reaper that frees an orphan lease | unchanged, and now stated as a control with a test |
-| `drive/internal/handler/admin.go`'s `admin_audit` writes | the transactional record rule, applied to the event log | the separate table does not arrive; the mark moves to where the decision is made ([[012-administration]]). The 404 the predecessor answered an administrative deny with does not arrive either |
+| `drive/internal/handler/admin.go`'s `admin_audit` writes | the transactional record rule, applied to the event log | the separate table does not arrive; the mark moves to where the decision is made ([012-administration](.archive/012-administration.md)). The 404 the predecessor answered an administrative deny with does not arrive either |
 | nothing | the rate limits, `Referrer-Policy` on link responses, the conditional-create requirement, the probe question, the pod confinement and the egress policy, and `SECURITY.md` | new. The service Arca replaces had no rate limit of any kind, on any route, including the unauthenticated link routes |
 
 ## Not in this spec
 
 Each control's own design, which its spec owns. The deploy manifests'
-structure ([[016-release-and-installation]]). The redaction rules and
+structure ([016-release-and-installation](.archive/016-release-and-installation.md)). The redaction rules and
 the access log's fields ([[018-observability]]). The suite an
-installation must pass ([[017-conformance-suite]]).
+installation must pass ([017-conformance-suite](.archive/017-conformance-suite.md)).
 
 ## Acceptance criteria
 
@@ -536,8 +536,8 @@ their own tier.
 | 14 | A public grant marks only the object its prefix names, a bucket that will not stamp is an unavailable store rather than a silent partial grant and leaves no grant and no mark behind, and publicity does not travel with copied bytes | `TestAPublicGrantMarksTheObjectItNames`, `TestAPublicGrantOverASubtreeMarksNoObject`, `TestARefusedStampLeavesNoLinkBehind`, `TestARefusedClearLeavesTheLinkAndItsMark`, `TestStoreACopyOfAPublicObjectIsStampedAndNotCarried` |
 | 15 | A completion past the answer's limit is refused and the object goes, and the charge is read against the assembled size the store reports | `TestACompletionPastTheAnswersLimitIsRefusedAndTheObjectGoes`, `TestTheCompletionReadsTheAssembledSizeBack` |
 | 16 | A ledger read or write that fails refuses the write rather than admitting it, and a ledger altered behind the server's back is corrected and reported, with a correction losing to a live charge | `TestUsageFailsClosed`, `TestStoreUsageFailsClosed`, `TestAWriteRefusedByTheLedgerLeavesNoRowAndNoBytes`, `TestLedgerReconciles`, `TestLedgerCorrectionLosesToALiveCharge` |
-| 17 | Retired 2026-10-12 by [[028-one-tree]] with the writer lease it held to | none |
-| 18 | Retired 2026-10-12 by [[028-one-tree]] with the attachment it held to | none |
+| 17 | Retired 2026-10-12 by [028-one-tree](.archive/028-one-tree.md) with the writer lease it held to | none |
+| 18 | Retired 2026-10-12 by [028-one-tree](.archive/028-one-tree.md) with the attachment it held to | none |
 | 19 | A store that refuses a conditional create runs degraded, says so once, and is named by the check; two conditional writers of one path leave one winner | `TestAStoreWithoutConditionalCreateRunsDegradedAndSaysSoOnce`, `TestStoreAConditionalCreateHoldsUnderARaceOfWriters`, `TestStoreTwoConditionalWritersOfOnePathLeaveOneWinner` |
 | 20 | An `event.read` answer carrying a `filter` narrows the tail, a deny refuses it, and an authorizer that answers nothing never opens it | `TestEventFilter`, `TestTheTailRefusesADeny`, `TestTheTailFailsClosedOnAnAuthorizerThatAnswersNothing` |
 | 21 | The subject bucket limits per subject and the address bucket limits what has no subject, a refused bearer is still charged, a rate of zero limits nothing, and behind a trusted proxy the address is the client it forwards and no other header is read | `TestTheSubjectRateLimitIsPerSubject`, `TestTheAddressRateLimitBoundsWhatHasNoSubject`, `TestARefusedBearerIsStillCounted`, `TestARateOfZeroLimitsNothing`, `TestTwoClientsBehindATrustedProxyAreTwoAddresses`, `TestTheClientAddressIsForwardedOnlyByATrustedProxy` |
@@ -550,7 +550,7 @@ their own tier.
 
 ## Outcome
 
-**Amended 2026-10-12 by [[028-one-tree]].** The second plane is gone, and
+**Amended 2026-10-12 by [028-one-tree](.archive/028-one-tree.md).** The second plane is gone, and
 with it the adversary that held a lease, the four controls about the lease
 and the attachment, criteria 17 and 18 (their numbers kept), the
 commitment `SECURITY.md` made about a workspace's writer, and the
@@ -619,7 +619,7 @@ the answer the route reads. A case for them would measure the cache
 rather than the collapse, and the test says so where a reader looks.
 
 What the four sites answer differs only in `details.detail`, so no
-status, code or user sentence moved and [[017-conformance-suite]]'s
+status, code or user sentence moved and [017-conformance-suite](.archive/017-conformance-suite.md)'s
 comparisons are unchanged. The two new tests and the three of
 `test/threatmodel` are named in the controls table, which its own
 harness then checks.

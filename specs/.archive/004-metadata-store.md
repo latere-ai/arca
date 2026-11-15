@@ -3,8 +3,8 @@ title: "Metadata store: the schema, migrations, transactions, the store interfac
 status: complete
 track: core
 depends_on:
-  - specs/001-architecture.md
-  - specs/002-repository-scaffold.md
+  - specs/.archive/001-architecture.md
+  - specs/.archive/002-repository-scaffold.md
 affects: [internal/store/, internal/store/migrations/, cmd/arcad/, .lateregate.yaml]
 effort: large
 created: 2026-09-18

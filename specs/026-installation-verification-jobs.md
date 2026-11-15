@@ -3,9 +3,9 @@ title: "Installation verification jobs: the candidate, the deploy archive, the i
 status: validated
 track: core
 depends_on:
-  - specs/016-release-and-installation.md
-  - specs/014-test-stubs-and-tiers.md
-  - specs/017-conformance-suite.md
+  - specs/.archive/016-release-and-installation.md
+  - specs/.archive/014-test-stubs-and-tiers.md
+  - specs/.archive/017-conformance-suite.md
 affects: [.github/workflows/release.yml, .github/workflows/verify.yml, deploy/, docs/install.md, test/deploy/]
 effort: medium
 created: 2026-09-19
@@ -23,7 +23,7 @@ behind an approval, and a GitHub release with four archives, the
 checksums, the cosign bundle and three SPDX documents. What that run did
 not do is read any of it back the way an operator would.
 
-Three jobs of [[016-release-and-installation]]'s pipeline table were
+Three jobs of [016-release-and-installation](.archive/016-release-and-installation.md)'s pipeline table were
 never written, and one artifact of its table is never built. This spec is
 those four things. It is split out of that spec on 2026-09-19 because
 each is a job of its own rather than a step inside another, so adding
@@ -77,9 +77,9 @@ runner has the tree and the build's own artifact directory on it.
 ### What this spec does not carry
 
 The N-1 conformance run and the `conformance-external` job are adjacent
-and are not here. Both are [[017-conformance-suite]]'s, which split them
+and are not here. Both are [017-conformance-suite](.archive/017-conformance-suite.md)'s, which split them
 into follow-ups of its own on the same day; the N-1 run is
-[[024-conformance-against-a-published-release]]. What changed on
+[024-conformance-against-a-published-release](.archive/024-conformance-against-a-published-release.md). What changed on
 2026-09-19 is only their precondition: `v0.1.7` ships a `test/conformance`
 package, so a next release has a previous suite to check out and a
 consumer has a tagged package to import.

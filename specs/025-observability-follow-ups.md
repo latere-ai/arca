@@ -3,11 +3,11 @@ title: "Observability follow-ups: the request span and its children, the redacti
 status: validated
 track: core
 depends_on:
-  - specs/004-metadata-store.md
-  - specs/005-files.md
+  - specs/.archive/004-metadata-store.md
+  - specs/.archive/005-files.md
   - specs/006-identity.md
   - specs/010-events-and-reaper.md
-  - specs/017-conformance-suite.md
+  - specs/.archive/017-conformance-suite.md
   - specs/018-observability.md
 affects: [internal/api/, internal/auth/, internal/store/, internal/files/, internal/metrics/, internal/reaper/, cmd/arcad/, test/conformance/]
 effort: medium
@@ -113,19 +113,19 @@ Four pieces, in the order they unblock each other.
    request line reads, and nothing new has to be invented to name it.
 2. **`auth.verify` and `auth.ask`**, inside [[006-identity]]'s two
    seams.
-3. **`db.<op>`**, inside [[004-metadata-store]]'s querier, which has no
+3. **`db.<op>`**, inside [004-metadata-store](.archive/004-metadata-store.md)'s querier, which has no
    timed wrapper yet; the same wrapper is where
    `arca_db_query_seconds` and `arca_db_conns` come from, so this item
    and those two rows of spec 018's metric table are one change.
-4. **The order assertions**, on a write route of [[005-files]]: a put
+4. **The order assertions**, on a write route of [005-files](.archive/005-files.md): a put
    reads `auth.verify`, `auth.ask`, `bucket.put`, `db.insert`, and a
    delete reads `db.delete` before `bucket.delete`. The assertion is
    the order and not the presence, because the order is invariant 1 of
-   [[001-architecture]] seen from the tracing side.
+   [001-architecture](.archive/001-architecture.md) seen from the tracing side.
 
 **Why it was split.** A parent span alone closes neither criterion and
 changes what a live installation exports: the cutover of
-[[019-migration-from-drive]] ran the evening before this spec was
+[019-migration-from-drive](.archive/019-migration-from-drive.md) ran the evening before this spec was
 written, and spans at `pkg/otel`'s default sampling would have started
 leaving the process for no criterion's benefit. The children are in
 three other packages, and the assertion the criteria are actually about
@@ -164,7 +164,7 @@ equals a path, an object name, a subject or a workspace slug the run
 used. What holds today is the frame, where a label could carry one, and
 a path no route registers is counted under `unmatched`.
 
-[[017-conformance-suite]] is in the tree, so nothing blocks the sweep
+[017-conformance-suite](.archive/017-conformance-suite.md) is in the tree, so nothing blocks the sweep
 any more. It is a case in that tier: run the suite against an
 installation, scrape `/metrics`, and hold every label value of every
 series against the fixture's paths, names, subjects and slugs.
@@ -198,7 +198,7 @@ registry in this repository, which is what that spec exists to prevent.
 
 Spec 018's criterion 8 is one log line per request, one per stream open
 and close, none per part and none per presigned URL. The request half
-holds. The stream halves need [[005-files]] to say where a stream opens
+holds. The stream halves need [005-files](.archive/005-files.md) to say where a stream opens
 and closes: an inline read, a read answered as a redirect, and a
 multipart part are three different things, and only one of them is a
 stream this process carries bytes through.
@@ -220,7 +220,7 @@ per run and a new ledger read.
 **Why it was split.** It is a change to [[010-events-and-reaper]]'s
 ledger rather than to a metric's recording site. What an operator bills
 and capacity-plans from is answered meanwhile per space by
-[[012-administration]]'s overview and in aggregate by
+[012-administration](.archive/012-administration.md)'s overview and in aggregate by
 `arca_space_usage_bytes`.
 
 ## Not in this spec

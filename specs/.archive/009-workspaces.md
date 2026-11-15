@@ -3,10 +3,10 @@ title: "Workspaces: durable subtrees, the writer lease, materialize and sync"
 status: superseded
 track: core
 depends_on:
-  - specs/004-metadata-store.md
-  - specs/005-files.md
+  - specs/.archive/004-metadata-store.md
+  - specs/.archive/005-files.md
   - specs/006-identity.md
-  - specs/008-shares-and-links.md
+  - specs/.archive/008-shares-and-links.md
 affects: [space/, authorizer/, internal/workspaces/, internal/api/, internal/store/, docs/]
 effort: xlarge
 created: 2026-09-18

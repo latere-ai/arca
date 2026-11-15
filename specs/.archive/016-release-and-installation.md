@@ -3,10 +3,10 @@ title: "Release and installation: the tag pipeline, the deploy tree, installing 
 status: complete
 track: core
 depends_on:
-  - specs/001-architecture.md
-  - specs/002-repository-scaffold.md
-  - specs/014-test-stubs-and-tiers.md
-  - specs/017-conformance-suite.md
+  - specs/.archive/001-architecture.md
+  - specs/.archive/002-repository-scaffold.md
+  - specs/.archive/014-test-stubs-and-tiers.md
+  - specs/.archive/017-conformance-suite.md
 affects: [.github/workflows/release.yml, .github/workflows/verify.yml, Dockerfile, Dockerfile.ci, Dockerfile.stubs, deploy/, test/deploy/, tools/smoke/, docs/install.md, docs/operations.md, SECURITY.md, CHANGELOG.md, .lateregate.yaml]
 effort: medium
 created: 2026-09-18

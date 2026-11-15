@@ -3,8 +3,8 @@ title: "Migration from Drive: the order the code moves, the data, the consumers,
 status: complete
 track: core
 depends_on:
-  - specs/001-architecture.md
-  - specs/002-repository-scaffold.md
+  - specs/.archive/001-architecture.md
+  - specs/.archive/002-repository-scaffold.md
 affects: [internal/, cmd/arcad/, deploy/prod/, tools/migrate-drive/, tools/move-objects/, docs/, specs/]
 effort: xlarge
 created: 2026-09-18

@@ -3,14 +3,14 @@ title: "Moving a folder: every object under a folder renamed to the same path be
 status: complete
 track: core
 depends_on:
-  - specs/003-object-store.md
-  - specs/005-files.md
+  - specs/.archive/003-object-store.md
+  - specs/.archive/005-files.md
   - specs/006-identity.md
-  - specs/008-shares-and-links.md
+  - specs/.archive/008-shares-and-links.md
   - specs/010-events-and-reaper.md
   - specs/013-api.md
-  - specs/028-one-tree.md
-affects: [internal/files/, internal/store/, authorizer/, internal/api/, api/openapi.yaml, test/conformance/, test/e2e/, docs/api.md, specs/005-files.md, specs/006-identity.md, specs/010-events-and-reaper.md, specs/013-api.md, specs/028-one-tree.md]
+  - specs/.archive/028-one-tree.md
+affects: [internal/files/, internal/store/, authorizer/, internal/api/, api/openapi.yaml, test/conformance/, test/e2e/, docs/api.md, specs/.archive/005-files.md, specs/006-identity.md, specs/010-events-and-reaper.md, specs/013-api.md, specs/.archive/028-one-tree.md]
 effort: medium
 created: 2026-10-18
 updated: 2026-10-18

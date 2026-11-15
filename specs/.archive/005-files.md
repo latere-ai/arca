@@ -3,9 +3,9 @@ title: "Files: put, get, list, move, delete; versions, trash, stars"
 status: complete
 track: core
 depends_on:
-  - specs/001-architecture.md
-  - specs/003-object-store.md
-  - specs/004-metadata-store.md
+  - specs/.archive/001-architecture.md
+  - specs/.archive/003-object-store.md
+  - specs/.archive/004-metadata-store.md
 affects: [internal/files/, internal/api/, internal/store/, internal/config/, cmd/arcad/, test/e2e/]
 effort: large
 created: 2026-09-18

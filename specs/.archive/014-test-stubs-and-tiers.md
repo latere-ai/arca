@@ -3,9 +3,9 @@ title: "Test stubs and tiers: the stubs, the unit tier, the store tier, the e2e 
 status: complete
 track: core
 depends_on:
-  - specs/002-repository-scaffold.md
-  - specs/003-object-store.md
-  - specs/004-metadata-store.md
+  - specs/.archive/002-repository-scaffold.md
+  - specs/.archive/003-object-store.md
+  - specs/.archive/004-metadata-store.md
   - specs/006-identity.md
   - specs/013-api.md
 affects: [test/stubs/, test/e2e/, Makefile, compose.yaml, Dockerfile.stubs, .github/workflows/verify.yml, .lateregate.yaml, docs/]

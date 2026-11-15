@@ -3,8 +3,8 @@ title: "Shares and links: grants and the permission ladder, public links, what a
 status: complete
 track: core
 depends_on:
-  - specs/004-metadata-store.md
-  - specs/005-files.md
+  - specs/.archive/004-metadata-store.md
+  - specs/.archive/005-files.md
   - specs/006-identity.md
 affects: [space/, authorizer/, internal/shares/, internal/api/, internal/store/, docs/]
 effort: large

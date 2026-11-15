@@ -1,20 +1,20 @@
 ---
 title: "Space delete: one administrative route removes everything an owner's Storage space holds, under its own action"
-status: validated
+status: complete
 track: core
 depends_on:
-  - specs/005-files.md
+  - specs/.archive/005-files.md
   - specs/006-identity.md
-  - specs/007-uploads.md
-  - specs/008-shares-and-links.md
+  - specs/.archive/007-uploads.md
+  - specs/.archive/008-shares-and-links.md
   - specs/010-events-and-reaper.md
-  - specs/012-administration.md
+  - specs/.archive/012-administration.md
   - specs/013-api.md
   - specs/021-transactional-audit-events.md
 affects: [authorizer/, internal/admin/, internal/erasure/, internal/store/, internal/events/, internal/auth/, cmd/arcad/, api/openapi.yaml, test/conformance/, docs/api.md]
 effort: medium
 created: 2026-11-04
-updated: 2026-11-04
+updated: 2026-11-15
 author: changkun
 ---
 
@@ -162,3 +162,11 @@ added when a measured space needs one.
 | 7 | One `space_delete` event is appended last in the transaction with the counts and no path, survives a repeat, and is the only row the space keeps; a space that held nothing records none | `internal/erasure` `TestTheRecordOfTheDeletionIsAppendedInTheTransactionAndNamesNoPath`, `TestASpaceThatHeldNothingRecordsNothingAndTouchesNoBytes`; `internal/events` `TestEventDetailIsMetadataOnly`; `internal/store` `TestStoreEraseKeepsTheRecordOfAnEarlierDeletion` |
 | 8 | A repeat and a deletion of an owner that never had a space answer zero counts | `internal/store` `TestStoreEraseOfNothingCountsNothing`; `test/conformance` `case032SpaceDelete` |
 | 9 | An installation's deletion is held end to end: a deleted space reads as missing, its log is the one record, the ordinary caller deletes nothing | `test/conformance` `case032SpaceDelete` |
+
+## Outcome
+
+`DELETE /v1/admin/spaces/{owner}` and the `space.delete` action landed in
+7491561 (admin, `internal/erasure`, the authorizer vocabulary, the OpenAPI
+document, `docs/api.md` and the conformance cases of
+`test/conformance/cases032.go`). The deletion appends its `space_delete`
+event inside the same transaction as the row deletes, as designed.

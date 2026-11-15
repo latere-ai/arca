@@ -3,12 +3,12 @@ title: "Observability: the metric table, traces across the two stores, logs with
 status: complete
 track: core
 depends_on:
-  - specs/001-architecture.md
-  - specs/002-repository-scaffold.md
-  - specs/003-object-store.md
-  - specs/004-metadata-store.md
+  - specs/.archive/001-architecture.md
+  - specs/.archive/002-repository-scaffold.md
+  - specs/.archive/003-object-store.md
+  - specs/.archive/004-metadata-store.md
   - specs/006-identity.md
-  - specs/009-workspaces.md
+  - specs/.archive/009-workspaces.md
   - specs/010-events-and-reaper.md
   - specs/013-api.md
 affects: [internal/metrics/, internal/config/, internal/api/, internal/blob/, internal/store/, internal/auth/, internal/events/, internal/files/, internal/uploads/, internal/workspaces/, internal/reaper/, cmd/arcad/, tools/rules/, deploy/base/prometheusrule.yaml, .github/workflows/verify.yml]
@@ -39,7 +39,7 @@ leaves the process until an operator sets an endpoint.
 
 ## Current state
 
-**Amended 2026-10-12 by [[028-one-tree]].** A space is one tree, so what
+**Amended 2026-10-12 by [028-one-tree](.archive/028-one-tree.md).** A space is one tree, so what
 this spec recorded for the second plane is gone: the metrics
 `arca_lease_expiries_total` and `arca_leases_held`, the `kind` values
 `sync` of `arca_bytes_in_total` and `materialize` of
@@ -66,7 +66,7 @@ instrumentation), `2c8e9f3` (the alerts and the tool) and `91542ac` (the
 documentation). The gate passes at each of them.
 
 The endpoint's second name landed on 2026-09-19, before the cutover of
-[[019-migration-from-drive]]: `internal/config` reads the standard
+[019-migration-from-drive](.archive/019-migration-from-drive.md): `internal/config` reads the standard
 `OTEL_EXPORTER_OTLP_ENDPOINT` where the table's own row is unset, which is
 what the namespace this installation deploys into injects into every
 workload. The Design says which name wins and why the injected one is not
@@ -96,13 +96,13 @@ differs is whether a package writes to it yet.
 | `arca_reaper_runs_total`, `arca_reaper_duration_seconds`, `arca_reaper_findings_total`, `arca_space_usage_bytes`, `arca_spaces_by_usage` | recorded, by the reconciler of [[010-events-and-reaper]] |
 | `arca_lease_expiries_total` | recorded, at pass 3's binding |
 | `arca_events_appended_total` | recorded, where a workspace's mutation becomes a row of the log |
-| `arca_bytes_in_total{kind="sync"}`, `arca_bytes_out_total{kind="materialize"}` | recorded, at the boundary of [[009-workspaces]] |
-| `arca_bytes_in_total{kind="inline"}`, `arca_bytes_out_total{kind="inline"}` | recorded, at the put and the inline read of [[005-files]]. What is counted out is what left, so a read that ended early counts fewer bytes than the row holds, and a read answered as a redirect counts none |
-| `arca_bytes_in_total{kind="part"}`, `arca_upload_sessions_total`, `arca_upload_sessions_open`, `arca_upload_parts_total` | recorded, by the session API of [[007-uploads]] through the three seams. A session is counted once by what became of it, and the bytes are the assembled object's head and not the client's declaration |
-| `arca_limit_rejections_total` | recorded, where the ledger refuses a charge: the put of [[005-files]] and the session open of [[007-uploads]], which charges the declared bytes up front |
+| `arca_bytes_in_total{kind="sync"}`, `arca_bytes_out_total{kind="materialize"}` | recorded, at the boundary of [009-workspaces](.archive/009-workspaces.md) |
+| `arca_bytes_in_total{kind="inline"}`, `arca_bytes_out_total{kind="inline"}` | recorded, at the put and the inline read of [005-files](.archive/005-files.md). What is counted out is what left, so a read that ended early counts fewer bytes than the row holds, and a read answered as a redirect counts none |
+| `arca_bytes_in_total{kind="part"}`, `arca_upload_sessions_total`, `arca_upload_sessions_open`, `arca_upload_parts_total` | recorded, by the session API of [007-uploads](.archive/007-uploads.md) through the three seams. A session is counted once by what became of it, and the bytes are the assembled object's head and not the client's declaration |
+| `arca_limit_rejections_total` | recorded, where the ledger refuses a charge: the put of [005-files](.archive/005-files.md) and the session open of [007-uploads](.archive/007-uploads.md), which charges the declared bytes up front |
 | `arca_leases_held` | recorded, from `store.Workspaces.CountHeldLeases`, read at every scrape. It is the exact complement of the sweep's own predicate, so a lease is held or lapsed and never both |
 | `arca_stored_bytes` | waits on a per-plane ledger read; see the divergence below |
-| `arca_db_query_seconds`, `arca_db_conns` | waits on [[004-metadata-store]] exposing the pool's statistics and a timed querier |
+| `arca_db_query_seconds`, `arca_db_conns` | waits on [004-metadata-store](.archive/004-metadata-store.md) exposing the pool's statistics and a timed querier |
 
 The two gauges that read a store rather than a number this process keeps,
 `arca_leases_held` and `arca_upload_sessions_open`, are bound in `cmd/arcad`
@@ -113,7 +113,7 @@ budget and a store that will not answer reads zero with a line naming the
 gauge: a scrape is not where a store outage is reported from.
 
 Share and link counters have no row in the table and need none: what
-[[008-shares-and-links]] does is already counted as requests by route, as
+[008-shares-and-links](.archive/008-shares-and-links.md) does is already counted as requests by route, as
 decisions by outcome, and as `arca_reaper_findings_total{kind="share_expired"}`.
 
 ### Divergences
@@ -166,7 +166,7 @@ decisions by outcome, and as `arca_reaper_findings_total{kind="share_expired"}`.
   criterion 7 of [[025-observability-follow-ups]]. The counters that
   did land are rates of bytes moving, which is the question an operator
   actually alerts on; how much is stored is answered per space by
-  [[012-administration]]'s overview and in aggregate by
+  [012-administration](.archive/012-administration.md)'s overview and in aggregate by
   `arca_space_usage_bytes`.
 - **Two alerts read what Arca publishes rather than what the table's words
   say.** `ArcaReaperFailing` fires at fifteen minutes, three times the
@@ -188,8 +188,8 @@ decisions by outcome, and as `arca_reaper_findings_total{kind="share_expired"}`.
   non-recording span and `otel.TraceIDs` answers the empty string: the
   request line carries `trace_id` as a key with nothing in it. `auth.verify`
   and `auth.ask` wait on spans inside [[006-identity]]'s two, `db.<op>` on
-  [[004-metadata-store]]'s querier, and the order assertions of criterion 5
-  on a write route, which is [[005-files]]'s. The parent has a shape to take
+  [004-metadata-store](.archive/004-metadata-store.md)'s querier, and the order assertions of criterion 5
+  on a write route, which is [005-files](.archive/005-files.md)'s. The parent has a shape to take
   in the shared package, `otel.Handler` with `otel.WithRouteTemplate`, and
   the whole of it is criteria 3 and 4 of [[025-observability-follow-ups]].
 - **The request middleware sits inside the request id and not outside it.**
@@ -234,7 +234,7 @@ what each gave up is carried verbatim by
 ### The scrape surface and the exporter
 
 `GET /metrics` is on the internal listener only
-([[002-repository-scaffold]]), in the Prometheus text format, from one
+([002-repository-scaffold](.archive/002-repository-scaffold.md)), in the Prometheus text format, from one
 registry. `arcad reap` as a process of its own opens no listener, so
 its counters leave over OTLP and nothing else; an installation that
 runs the reaper on the API replicas scrapes the same counters from
@@ -248,7 +248,7 @@ no local signal. Sampling is `pkg/otel`'s default of 0.2, which `arcad`
 does not override and the conformance run sets to always-on.
 
 **Two variables carry the endpoint, and the prefixed one wins.**
-`ARCA_OTEL_EXPORTER_OTLP_ENDPOINT` is [[002-repository-scaffold]]'s
+`ARCA_OTEL_EXPORTER_OTLP_ENDPOINT` is [002-repository-scaffold](.archive/002-repository-scaffold.md)'s
 row, and it is what an installation that configures Arca sets. With
 that row unset the server reads the standard
 `OTEL_EXPORTER_OTLP_ENDPOINT`. The reason is first-principles rather
@@ -281,9 +281,9 @@ vocabularies, so a series exists before the first event.
 | `arca_requests_total` | counter | `route`, `status_class` (`2xx` to `5xx`), `code` (the error code of [[013-api]], `ok` when there is none) | 013 |
 | `arca_request_duration_seconds` | histogram, 5 ms to 10 s, 12 bounds | `route` | 013 |
 | `arca_requests_in_flight` | gauge | | 013 |
-| `arca_bytes_in_total` | counter | `kind` (`inline`, `part`) | [[005-files]], [[007-uploads]] |
+| `arca_bytes_in_total` | counter | `kind` (`inline`, `part`) | [005-files](.archive/005-files.md), [007-uploads](.archive/007-uploads.md) |
 | `arca_bytes_out_total` | counter | `kind` (`inline`) | 005 |
-| `arca_presigned_urls_total` | counter | `method` (`get`, `put`), `kind` (`download`, `part`) | [[003-object-store]], 007 |
+| `arca_presigned_urls_total` | counter | `method` (`get`, `put`), `kind` (`download`, `part`) | [003-object-store](.archive/003-object-store.md), 007 |
 | `arca_upload_sessions_total` | counter | `outcome` (`created`, `completed`, `aborted`, `expired`) | 007 |
 | `arca_upload_sessions_open` | gauge | | 007 |
 | `arca_upload_parts_total` | counter | `outcome` (`presigned`, `completed`, `missing`) | 007 |
@@ -297,7 +297,7 @@ vocabularies, so a series exists before the first event.
 | `arca_events_appended_total` | counter | `kind` (the event kinds of [[010-events-and-reaper]]) | 010 |
 | `arca_bucket_ops_total` | counter | `op` (`get`, `put`, `head`, `delete`, `list`, `presign`, `multipart_create`, `multipart_complete`, `multipart_abort`), `result` (`ok`, `not_found`, `exists`, `error`) | 003 |
 | `arca_bucket_op_seconds` | histogram, 5 ms to 10 s, 12 bounds | `op` | 003 |
-| `arca_db_query_seconds` | histogram, 1 ms to 5 s, 12 bounds | `op` | [[004-metadata-store]] |
+| `arca_db_query_seconds` | histogram, 1 ms to 5 s, 12 bounds | `op` | [004-metadata-store](.archive/004-metadata-store.md) |
 | `arca_db_conns` | gauge | `state` (`in_use`, `idle`) | 004 |
 | `arca_decisions_total` | counter | `source` (`authorizer`, `owner_policy`), `outcome` (`allow`, `deny`, `unavailable`) | [[006-identity]] |
 | `arca_authorizer_seconds` | histogram, 5 ms to 10 s, 12 bounds | | 006 |
@@ -315,7 +315,7 @@ reports none. `missing_bytes` is
 the finding of invariant 2, a row whose object the bucket does not
 hold, and it is the one a human always reads.
 
-The vocabulary is ten members. It was thirteen until [[028-one-tree]]
+The vocabulary is ten members. It was thirteen until [028-one-tree](.archive/028-one-tree.md)
 retired passes 3 and 6 of [[010-events-and-reaper]]: `workspace_purged`
 and `file_purged` were pass 6's, and `lease_expired` was pass 3's.
 
@@ -324,7 +324,7 @@ reads the ledger once per run and, for every space, observes its bytes
 into `arca_space_usage_bytes` and increments every band its size
 clears, so the bands are cumulative and a space of 500 GiB counts in all
 three.
-There is no series per space, and the reason is [[004-metadata-store]]:
+There is no series per space, and the reason is [004-metadata-store](.archive/004-metadata-store.md):
 a space is addressed by the subject `<issuer>|<sub>` and there is no
 second identifier, so a `space` label would be a subject on an endpoint
 anyone who can scrape the namespace reads, and it would grow a series
@@ -336,7 +336,7 @@ distribution says how the installation's bytes are spread,
 large, and `arca_limit_rejections_total` says whether anybody is being
 refused against a limit their platform set. Which space is the large one
 is a question with a name in the answer, so it is answered by
-[[012-administration]]'s overview, which reads the ledger under an
+[012-administration](.archive/012-administration.md)'s overview, which reads the ledger under an
 administrator's token and needs no time series.
 
 No metric here names a limit, because Arca stores none. A limit lives in
@@ -411,7 +411,7 @@ the second line and the test below plants one canary of each kind.
 ### Alerts
 
 `deploy/base/prometheusrule.yaml` is a `PrometheusRule` object.
-[[016-release-and-installation]] says why it sits beside the base's
+[016-release-and-installation](.archive/016-release-and-installation.md) says why it sits beside the base's
 kustomization rather than in it; this spec owns what is in it.
 `tools/rules` prints the rules document out of the object, because
 `promtool check rules` reads a rules file and not a Kubernetes object,
@@ -431,7 +431,7 @@ not checked.
 | `ArcaReaperFailing` | `arca_reaper_runs_total{outcome="error"}` increasing, or no increase in `arca_reaper_runs_total` over three times `ARCA_REAP_INTERVAL` |
 | `ArcaOrphanGrowth` | `arca_reaper_findings_total{kind="orphan_object",action="found"}` rising while `action="repaired"` does not, for 30 minutes |
 | `ArcaAuthorizerUnavailable` | `arca_decisions_total{outcome="unavailable"}` increasing over 5 minutes |
-| `ArcaWritesRefusedByLimit` | `arca_limit_rejections_total` increasing over 30 minutes; the limit is the platform's and not Arca's, so this alerts the operator that somebody's platform is refusing writes, and which space is named by [[012-administration]]'s overview and not by a label |
+| `ArcaWritesRefusedByLimit` | `arca_limit_rejections_total` increasing over 30 minutes; the limit is the platform's and not Arca's, so this alerts the operator that somebody's platform is refusing writes, and which space is named by [012-administration](.archive/012-administration.md)'s overview and not by a label |
 | `ArcaLedgerDrifting` | `arca_reaper_findings_total{kind="usage_corrected"}` increasing over three runs; a write path that forgot its delta, which is a bug and not a capacity signal |
 | `ArcaUploadsExpiring` | `arca_upload_sessions_total{outcome="expired"}` above `outcome="completed"` over 1 hour, which says clients are starting uploads they cannot finish |
 | `ArcaDatabaseSaturated` | `arca_db_conns{state="in_use"}` at the pool's size for 5 minutes |
@@ -460,7 +460,7 @@ endpoints. A sampling policy beyond `pkg/otel`'s default. The event log
 itself, which is a product surface and not telemetry
 ([[010-events-and-reaper]]). That log is also where an administrator's
 actions are recorded, which makes it doubly a product surface and not
-telemetry ([[012-administration]]).
+telemetry ([012-administration](.archive/012-administration.md)).
 
 ## Acceptance criteria
 
@@ -493,7 +493,7 @@ the binary are in the tree and green. Six criteria stand as written: 1,
 exporter.
 
 **What the production installation settled.** The cutover of
-[[019-migration-from-drive]] put this code behind an operator that
+[019-migration-from-drive](.archive/019-migration-from-drive.md) put this code behind an operator that
 injects `OTEL_EXPORTER_OTLP_ENDPOINT` into every workload of its
 namespace. `internal/config` reads that name where the table's own row
 is unset, `cmd/arcad` hands the value to `pkg/otel` before the
@@ -521,12 +521,12 @@ a footnote in it.
 
 **What was narrowed, and why none of it was built here.** Criteria 2, 4,
 5, 6, 7 and 8 gave up a half each, and every half needs something this
-spec does not own: a case in the tier [[017-conformance-suite]] owns
+spec does not own: a case in the tier [017-conformance-suite](.archive/017-conformance-suite.md) owns
 (the label sweep), a bridge or a handler in `latere.ai/x/pkg` (the reap
 process's counters, the redaction handler over both paths of the tee),
-spans inside [[006-identity]] and [[004-metadata-store]] and an order
-assertion on [[005-files]]' write route (the span table), and a decision
-in [[005-files]] about which read is a stream (the stream lines).
+spans inside [[006-identity]] and [004-metadata-store](.archive/004-metadata-store.md) and an order
+assertion on [005-files](.archive/005-files.md)' write route (the span table), and a decision
+in [005-files](.archive/005-files.md) about which read is a stream (the stream lines).
 `arca_stored_bytes` needs a per-plane ledger read, which is
 [[010-events-and-reaper]]'s table and not a recording site here. All six
 are [[025-observability-follow-ups]], carrying each criterion in the

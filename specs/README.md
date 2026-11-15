@@ -48,38 +48,38 @@ spec once every spec in its `depends_on` is at `testing` or later, not
 
 | Spec | Title | Status |
 |---|---|---|
-| [001](001-architecture.md) | Architecture: two stores, spaces and planes, packages, invariants | complete |
-| [002](002-repository-scaffold.md) | Repository scaffold: module, binary, configuration, quality gate, image, workflow | complete |
-| [003](003-object-store.md) | Object store: the bucket contract, keys, integrity, presigned reads, multipart | complete |
-| [004](004-metadata-store.md) | Metadata store: the schema, migrations, transactions, the store interface | complete |
-| [005](005-files.md) | Files: put, get, list, move, delete; versions, trash, stars | complete |
+| [001](.archive/001-architecture.md) | Architecture: two stores, spaces and planes, packages, invariants | complete |
+| [002](.archive/002-repository-scaffold.md) | Repository scaffold: module, binary, configuration, quality gate, image, workflow | complete |
+| [003](.archive/003-object-store.md) | Object store: the bucket contract, keys, integrity, presigned reads, multipart | complete |
+| [004](.archive/004-metadata-store.md) | Metadata store: the schema, migrations, transactions, the store interface | complete |
+| [005](.archive/005-files.md) | Files: put, get, list, move, delete; versions, trash, stars | complete |
 | [006](006-identity.md) | Identity: verification, the subject, the action vocabulary, the authorizer question, the owner policy | complete |
-| [007](007-uploads.md) | Uploads: sessions, size classes, direct-to-bucket parts, integrity | complete |
-| [008](008-shares-and-links.md) | Shares and links: grants and the permission ladder, public links, what a caller sees shared with them | complete |
-| [009](009-workspaces.md) | Workspaces: durable subtrees, the writer lease, materialize and sync. Superseded by 028 on 2026-10-12 and removed by it | superseded |
+| [007](.archive/007-uploads.md) | Uploads: sessions, size classes, direct-to-bucket parts, integrity | complete |
+| [008](.archive/008-shares-and-links.md) | Shares and links: grants and the permission ladder, public links, what a caller sees shared with them | complete |
+| [009](.archive/009-workspaces.md) | Workspaces: durable subtrees, the writer lease, materialize and sync. Superseded by 028 on 2026-10-12 and removed by it | superseded |
 | [010](010-events-and-reaper.md) | Events and the reaper: the ledger, the log, the reconciliation of the two stores | complete |
 | 011 | Webhooks | retired 2026-09-18 before drafting closed; the number is not reused. Events are tailed by cursor, spec 010 |
-| [012](012-administration.md) | Administration: the overview across spaces, the cross-space restore, the record of what was done, the `check` command | complete |
+| [012](.archive/012-administration.md) | Administration: the overview across spaces, the cross-space restore, the record of what was done, the `check` command | complete |
 | [013](013-api.md) | API: routes, the error table, OpenAPI, the document served | complete |
-| [014](014-test-stubs-and-tiers.md) | Test stubs and tiers: the unit tier, the store tier on MinIO and Postgres, the e2e tier | complete |
+| [014](.archive/014-test-stubs-and-tiers.md) | Test stubs and tiers: the unit tier, the store tier on MinIO and Postgres, the e2e tier | complete |
 | [015](015-security-and-threat-model.md) | Security and threat model | complete |
-| [016](016-release-and-installation.md) | Release and installation: images, binaries, deploy manifests, the operator's overlay | complete |
-| [017](017-conformance-suite.md) | Conformance suite: the contract as an importable test package | complete |
+| [016](.archive/016-release-and-installation.md) | Release and installation: images, binaries, deploy manifests, the operator's overlay | complete |
+| [017](.archive/017-conformance-suite.md) | Conformance suite: the contract as an importable test package | complete |
 | [018](018-observability.md) | Observability: traces, metrics, logs, the alert rules | complete |
-| [019](019-migration-from-drive.md) | Migration from Drive: the order the code moves, the data, the consumers, the sunset, the archive | complete |
+| [019](.archive/019-migration-from-drive.md) | Migration from Drive: the order the code moves, the data, the consumers, the sunset, the archive | complete |
 | [020](020-per-part-checksums.md) | Per-part checksums: a digest the client declares, the store verifies, and the completion carries | validated |
 | [021](021-transactional-audit-events.md) | Transactional audit events: the append that commits with the mutation it records | validated |
 | [022](022-api-response-validation.md) | API response validation: the e2e tier checked against the served OpenAPI document | validated |
 | [023](023-merged-coverage-floor.md) | Merged coverage floor: the 90% bar judged over the unit, store and e2e profiles together | validated |
-| [024](024-conformance-against-a-published-release.md) | N-1 conformance: the previous release's suite run against this release's binary | in-progress |
+| [024](.archive/024-conformance-against-a-published-release.md) | N-1 conformance: the previous release's suite run against this release's binary | complete |
 | [025](025-observability-follow-ups.md) | Observability follow-ups: the request span, the redaction handler, the label sweep, the stored-bytes gauge | validated |
 | [026](026-installation-verification-jobs.md) | Installation verification jobs: the candidate, the deploy archive, the install walk, and the clean-runner check of a published release | validated |
-| [027](027-serving-under-the-capability-prefix.md) | Serving under the capability prefix: the base path, the second audience, and the one batch that moves both callers | complete |
-| [028](028-one-tree.md) | One tree: a space is one tree of files and folders, workspaces are removed, a folder is deleted or copied in one call, and an answer's limits turn versions and the trash off and leave subtrees out of an enumeration | complete |
-| [029](029-finding-files.md) | Finding files: a folder listing narrowed to names that contain a text, and the newest files under a folder | complete |
-| [030](030-moving-a-folder.md) | Moving a folder: every object under a folder renamed below a destination in one call and one transaction, with no byte copied | complete |
-| [031](031-download-only-link-reads.md) | Download-only link reads: every answer of the three link routes is an attachment, never sniffed and sandboxed, and a link's redirect asks the bucket for the attachment | complete |
-| [032](032-space-delete.md) | Space delete: one administrative route removes everything an owner's Storage space holds, under its own action | validated |
+| [027](.archive/027-serving-under-the-capability-prefix.md) | Serving under the capability prefix: the base path, the second audience, and the one batch that moves both callers | complete |
+| [028](.archive/028-one-tree.md) | One tree: a space is one tree of files and folders, workspaces are removed, a folder is deleted or copied in one call, and an answer's limits turn versions and the trash off and leave subtrees out of an enumeration | complete |
+| [029](.archive/029-finding-files.md) | Finding files: a folder listing narrowed to names that contain a text, and the newest files under a folder | complete |
+| [030](.archive/030-moving-a-folder.md) | Moving a folder: every object under a folder renamed below a destination in one call and one transaction, with no byte copied | complete |
+| [031](.archive/031-download-only-link-reads.md) | Download-only link reads: every answer of the three link routes is an attachment, never sniffed and sandboxed, and a link's redirect asks the bucket for the attachment | complete |
+| [032](.archive/032-space-delete.md) | Space delete: one administrative route removes everything an owner's Storage space holds, under its own action | complete |
 
 The order of building is the order of the numbers except where a spec's
 `depends_on` says otherwise, and 019 runs alongside all of them: each

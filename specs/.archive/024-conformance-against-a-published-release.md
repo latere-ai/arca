@@ -1,14 +1,14 @@
 ---
 title: "N-1 conformance: the previous release's suite run against this release's binary"
-status: in-progress
+status: complete
 track: core
 depends_on:
-  - specs/016-release-and-installation.md
-  - specs/017-conformance-suite.md
+  - specs/.archive/016-release-and-installation.md
+  - specs/.archive/017-conformance-suite.md
 affects: [.github/workflows/release.yml, test/conformance/]
 effort: medium
 created: 2026-09-19
-updated: 2026-10-18
+updated: 2026-11-15
 author: changkun
 ---
 
@@ -170,3 +170,11 @@ is what moves this spec to `testing`.
 | 4 | The release body names the previous tag the run was held to and the number of cases it passed | `release-evidence/conformance.md`, read on the first release that runs it |
 | 5 | A superseded entry applies only between the previous tag and the tag that superseded it; a name that is not a case of the previous suite, a code the case does not declare, or a code outside `4xx` fails the check | `TestASupersededEntryAppliesBetweenItsTwoTags`, `TestASupersededEntryIsARefusalThePreviousCaseDeclared`, `TestTheSupersededListIsRefusals` |
 | 6 | The run skips exactly the applying cases, fails if one ran, and the evidence lists each under its reason | `TestPreviousSuitePasses`; `TestTheSkipPatternNamesEachCaseAndNoOther`, `TestTheEvidenceListsEachSkippedCaseUnderItsReason` |
+
+## Outcome
+
+`TestPreviousSuitePasses` landed in ba238d6, and the `conformance` job of
+`.github/workflows/release.yml` runs it after the release's own suite
+(93d07a6). The previous tag's cases run with the superseded refusals
+skipped under their stated reason, and the evidence is appended to
+`release-evidence/conformance.md`.

@@ -3,13 +3,13 @@ title: "Administration: the overview across spaces, moderation, restore, the rec
 status: complete
 track: core
 depends_on:
-  - specs/001-architecture.md
-  - specs/002-repository-scaffold.md
-  - specs/004-metadata-store.md
-  - specs/005-files.md
+  - specs/.archive/001-architecture.md
+  - specs/.archive/002-repository-scaffold.md
+  - specs/.archive/004-metadata-store.md
+  - specs/.archive/005-files.md
   - specs/006-identity.md
-  - specs/008-shares-and-links.md
-  - specs/009-workspaces.md
+  - specs/.archive/008-shares-and-links.md
+  - specs/.archive/009-workspaces.md
   - specs/010-events-and-reaper.md
 affects: [internal/admin/, internal/check/, internal/api/, internal/auth/, internal/events/, internal/store/, cmd/arcad/, docs/]
 effort: medium
