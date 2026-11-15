@@ -72,8 +72,7 @@ Podman otherwise; `DEV_ENGINE` overrides it.
 
 The tier then runs `go test -tags=tiers -race -run '^TestStore'` over
 `internal/blob`, `internal/store`, `internal/events`, `internal/reaper`,
-`internal/files`, `internal/uploads`, `tools/migrate-drive`, and
-`tools/move-objects`, with the stack's addresses in `E2E_DATABASE_URL`,
+`internal/files`, and `internal/uploads`, with the stack's addresses in `E2E_DATABASE_URL`,
 `E2E_S3_ENDPOINT`, `E2E_S3_KEY`, `E2E_S3_SECRET`, and `E2E_S3_BUCKET`. A
 store test without those variables skips and names what to run. These are
 the tests that prove what a fake cannot: a bucket's conditional create and

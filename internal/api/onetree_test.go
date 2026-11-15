@@ -37,10 +37,6 @@ var excepted = []string{
 	"internal/store/onetree_tier_test.go",
 	// The workflows read github.workspace, the runner's checkout directory.
 	".github/workflows/",
-	// The finished migration from the predecessor and the page about it,
-	// which wrote into the schema as it was before migration 0006.
-	"tools/migrate-drive/",
-	"docs/internals/drive-migration.md",
 	// The upgrade section an operator reads before running migration 0006,
 	// which names the paths and routes clients move away from.
 	"docs/operations.md",

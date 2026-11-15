@@ -178,9 +178,7 @@ meaning. `internal/` promises nothing to anyone outside the module.
 
 `tools/` holds commands that are not part of the server: `apidoc` renders
 `api/openapi.yaml`, `rules` renders the alert rules, `smoke` holds the
-release pipeline's smoke script, and `migrate-drive` and `move-objects`
-are the one-time migration tools described in
-[Migrating from Drive](drive-migration.md).
+release pipeline's smoke script.
 
 ## The schema
 

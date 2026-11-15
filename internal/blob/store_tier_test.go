@@ -523,7 +523,7 @@ func TestStoreACopyAboveTheLimitGoesThroughTheTail(t *testing.T) {
 // The store neither honors the condition nor refuses it: it overwrites. So
 // a move cannot read a refusal as "the destination is already there" and
 // cannot read a success as "it was not". It reads the destination instead,
-// which is what tools/move-objects does before it copies anything. The
+// which is what a caller has to do before it copies anything. The
 // completion of a copied tail is the other half of the finding: the same
 // store does hold to the condition there.
 func TestStoreTheConditionalCopyIsNotHonoredByEveryStore(t *testing.T) {
