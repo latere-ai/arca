@@ -100,7 +100,10 @@ jobs:
   conformance:
     name: conformance against the published image
     needs: build
-    runs-on: ubuntu-latest
+    # Ubuntu 26.04's Docker keeps images in containerd's store, where a
+    # pulled multi-platform image has one platform's content, and kind's load
+    # imports every platform the index names, so it fails on the missing one.
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     # The images carry no tag until publish, so the stack pulls them by
     # digest, and a fork's packages are private until their owner opens
