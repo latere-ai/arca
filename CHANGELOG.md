@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.13.2 - 2026-11-15
+
 - **v0.13.0 is published with this release.** The release of v0.13.1 also
   stopped before publishing: its conformance run could not load the image
   into the test cluster on GitHub's new Ubuntu 26.04 runner, so that job now
