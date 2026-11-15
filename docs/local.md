@@ -67,7 +67,7 @@ does these things, in this order:
    action except on one reserved resource that every authorizer must
    refuse, which is how `arcad` can tell that it really asks someone.
    [Writing an authorizer](authorizer.md) describes the real one, and
-   the [design of the stand-ins](../specs/014-test-stubs-and-tiers.md)
+   the [design of the stand-ins](../specs/.archive/014-test-stubs-and-tiers.md)
    lists their options.
 
 4. **Migrates** the database. It prints the command it runs, with every

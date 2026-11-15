@@ -3,10 +3,8 @@
 # postgres:5432 and from the runner as localhost:30432, which is what lets
 # a test open the database directly and read what a request wrote.
 #
-# The version is at or above the floor spec 004 names. It is pinned by tag
-# and not yet by digest: a digest is written here from the first CI run
-# that pulls it, so the value is one a reader can verify rather than one
-# copied from somewhere else.
+# The version is at or above the floor spec 004 names. It is pinned by tag,
+# not by digest.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

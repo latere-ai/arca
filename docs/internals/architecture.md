@@ -3,7 +3,7 @@
 How `arcad` is put together, for someone about to change it. The user's view
 of the same system is the [API guide](../api.md); the reasoning behind each
 decision is in the design records under [`specs/`](../../specs/README.md),
-starting with the architecture record, `specs/001-architecture.md`.
+starting with the architecture record, `specs/.archive/001-architecture.md`.
 
 ## Two stores, one stateless process
 
