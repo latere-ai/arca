@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.14.0 - 2026-11-16
+
 ### Changed
 
 - **A grant and a file now refuse any step their lifecycle does not have.**
