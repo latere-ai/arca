@@ -245,3 +245,13 @@ e2e:
       E2E_S3_KEY: "${minio.access_key}"
       E2E_S3_SECRET: "${minio.secret_key}"
       E2E_S3_BUCKET: arca-test
+
+# The lifecycles of the store: each status type is held to its table by the
+# enum-go gate, so a switch over one names every state.
+enums:
+  go:
+    types:
+      - internal/store.GrantStatus
+      - internal/store.FileStatus
+    fields:
+      internal/store.Grant.Status: internal/store.GrantStatus
