@@ -6,6 +6,23 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Changed
+
+- **A grant and a file now refuse any step their lifecycle does not have.**
+  A grant goes from active to revoked and no further, and a file goes from
+  live to the trash, back from the trash, or out for good, and never returns
+  once it is gone. Every write checks the state the record is in as it
+  writes, so two requests that race on one record cannot leave it somewhere
+  neither meant. The lifecycles are checked by proofs and model checks that
+  run with the tests.
+
+### Fixed
+
+- **Revoking a grant that is already revoked no longer records a second
+  revoke.** The answer is still a success, but the ledger holds one
+  `share_revoked` entry per grant, including when two revokes arrive at the
+  same moment.
+
 ## v0.13.2 - 2026-11-15
 
 - **v0.13.0 is published with this release.** The release of v0.13.1 also
