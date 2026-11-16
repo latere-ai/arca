@@ -113,7 +113,8 @@ func (erasure) Erase(ctx context.Context, q Querier, owner, keep string) (SpaceE
 	}
 
 	rows, err := q.Query(ctx,
-		`DELETE FROM files WHERE owner = $1 RETURNING object_id, deleted_at IS NOT NULL`, owner)
+		`DELETE FROM files WHERE owner = $1 AND `+FileSources(FilePurged)+`
+		 RETURNING object_id, deleted_at IS NOT NULL`, owner)
 	if err != nil {
 		return fail("files", err)
 	}

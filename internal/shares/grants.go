@@ -5,12 +5,14 @@ package shares
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
 
 	"latere.ai/x/pkg/authz"
 	"latere.ai/x/pkg/httpjson"
+	"latere.ai/x/pkg/statemachine"
 
 	"latere.ai/x/arca/authorizer"
 	"latere.ai/x/arca/internal/api"
@@ -45,7 +47,7 @@ type Grant struct {
 func view(g store.Grant) Grant {
 	v := Grant{
 		ID: g.ID, Owner: g.Owner, PathPrefix: g.PathPrefix, GranteeKind: g.GranteeKind,
-		Grantee: g.Grantee, Permission: g.Permission, Status: g.Status,
+		Grantee: g.Grantee, Permission: g.Permission, Status: string(g.Status),
 		CreatedBy: g.CreatedBy, CreatedAt: stamp(g.CreatedAt),
 	}
 	if g.ExpiresAt != nil {
@@ -308,9 +310,14 @@ func (s *Service) revoke(ctx context.Context, g store.Grant) error {
 }
 
 // revokeIn revokes one grant and records it, inside the caller's
-// transaction.
+// transaction. A grant that is no longer active, because an earlier or a
+// concurrent revoke took it, is already where the caller wants it: the
+// answer is a success and no second revoke is recorded.
 func (s *Service) revokeIn(ctx context.Context, q store.Querier, g store.Grant) error {
-	if _, err := s.store.Revoke(ctx, q, g.ID); err != nil {
+	if err := s.store.Revoke(ctx, q, g.ID); err != nil {
+		if errors.Is(err, statemachine.ErrIllegalTransition) {
+			return nil
+		}
 		return err
 	}
 	_, err := s.ledger.Append(ctx, q, Event{

@@ -107,7 +107,7 @@ func TestStoreSharesCoveringIsActiveUnexpiredAndMatchedBySegment(t *testing.T) {
 	expired.ExpiresAt = &past
 	grant(t, db, expired)
 	revoked := grant(t, db, subjectGrant(alice, "files/reports", bobby, "write"))
-	if _, err := shares.Revoke(t.Context(), db.Querier(), revoked.ID); err != nil {
+	if err := shares.Revoke(t.Context(), db.Querier(), revoked.ID); err != nil {
 		t.Fatal(err)
 	}
 	living := subjectGrant(alice, "files/reports", bobby, "read")
@@ -176,7 +176,7 @@ func TestStoreSharesHoldersAreEachSubjectsRungOnThePath(t *testing.T) {
 	expired.ExpiresAt = &past
 	grant(t, db, expired)
 	revoked := grant(t, db, subjectGrant(alice, "files/reports", carol, "read"))
-	if _, err := shares.Revoke(t.Context(), db.Querier(), revoked.ID); err != nil {
+	if err := shares.Revoke(t.Context(), db.Querier(), revoked.ID); err != nil {
 		t.Fatal(err)
 	}
 	grant(t, db, tokenGrant(alice, "files/reports", GranteeLink, "h0lders-l1nk"))
@@ -295,7 +295,7 @@ func TestStoreSharesWithMeIsTheGranteeIndexAndNoMembership(t *testing.T) {
 	}
 
 	// A revoke takes effect on the next read, with no sweep in between.
-	if _, err := shares.Revoke(t.Context(), db.Querier(), mine.ID); err != nil {
+	if err := shares.Revoke(t.Context(), db.Querier(), mine.ID); err != nil {
 		t.Fatal(err)
 	}
 	page, err = shares.ListGrantee(t.Context(), db.Querier(), bobby, "", 100, nil)
@@ -334,7 +334,7 @@ func TestStoreLinksATokenResolvesUntilItIsRevokedOrExpires(t *testing.T) {
 		t.Errorf("the link answered for a space that does not own it: %v", err)
 	}
 
-	if _, err := shares.Revoke(t.Context(), db.Querier(), live.ID); err != nil {
+	if err := shares.Revoke(t.Context(), db.Querier(), live.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := shares.ByToken(t.Context(), db.Querier(), "t0ken-live"); !errors.Is(err, pgx.ErrNoRows) {
@@ -445,7 +445,7 @@ func TestStoreLinksAHoldWaitsAndThenReadsTheRevokeBeforeIt(t *testing.T) {
 			if _, err := shares.Hold(t.Context(), q, alice, row.Path); err != nil {
 				return err
 			}
-			if _, err := shares.Revoke(t.Context(), q, first.ID); err != nil {
+			if err := shares.Revoke(t.Context(), q, first.ID); err != nil {
 				return err
 			}
 			close(held)

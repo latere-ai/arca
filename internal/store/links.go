@@ -21,7 +21,7 @@ import (
 
 // liveToken is the condition every token read carries: a token grant of a
 // space, active, and not past its expiry.
-const liveToken = `grantee_kind IN ('link', 'public') AND status = 'active'
+const liveToken = `grantee_kind IN ('link', 'public') AND ` + activeGrant + `
 	AND (expires_at IS NULL OR expires_at > now())`
 
 // ByToken resolves a token to its grant.

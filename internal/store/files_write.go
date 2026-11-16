@@ -42,6 +42,9 @@ func (files) GetForUpdate(ctx context.Context, q Querier, owner, path string) (F
 // 008 set it, because publicity is a decision about the path and not a
 // property of the bytes at it.
 func (files) Upsert(ctx context.Context, q Querier, f File) error {
+	if err := startsLive(); err != nil {
+		return err
+	}
 	_, err := q.Exec(ctx, `
 		INSERT INTO files (owner, path, object_id, created_by, content_type, size_bytes,
 		                   checksum, checksum_kind)
@@ -65,6 +68,9 @@ func (files) Upsert(ctx context.Context, q Querier, f File) error {
 // racing creators commits and the other reads its refusal from the row count
 // rather than from a pre-read it could have lost since.
 func (files) CreateOnly(ctx context.Context, q Querier, f File) (bool, error) {
+	if err := startsLive(); err != nil {
+		return false, err
+	}
 	tag, err := q.Exec(ctx, `
 		INSERT INTO files (owner, path, object_id, created_by, content_type, size_bytes,
 		                   checksum, checksum_kind)
@@ -72,7 +78,7 @@ func (files) CreateOnly(ctx context.Context, q Querier, f File) (bool, error) {
 		ON CONFLICT (owner, path) DO UPDATE
 		   SET object_id = $3, content_type = $5, size_bytes = $6, checksum = $7,
 		       checksum_kind = $8, deleted_at = NULL, updated_at = now()
-		 WHERE files.deleted_at IS NOT NULL`,
+		 WHERE `+fileSourcesOf("files", FileLive),
 		f.Owner, f.Path, f.ObjectID, f.CreatedBy, f.ContentType, f.SizeBytes,
 		f.Checksum, f.ChecksumKind)
 	if err != nil {
@@ -87,7 +93,7 @@ func (files) CreateOnly(ctx context.Context, q Querier, f File) (bool, error) {
 func (files) SoftDelete(ctx context.Context, q Querier, owner, path string) (bool, error) {
 	tag, err := q.Exec(ctx, `
 		UPDATE files SET deleted_at = now(), updated_at = now()
-		 WHERE owner = $1 AND path = $2 AND deleted_at IS NULL`, owner, path)
+		 WHERE owner = $1 AND path = $2 AND `+FileSources(FileTrashed), owner, path)
 	if err != nil {
 		return false, classify(fmt.Sprintf("trash %q of %q", path, owner), err)
 	}
@@ -100,7 +106,8 @@ func (files) SoftDelete(ctx context.Context, q Querier, owner, path string) (boo
 // reaper finds and never a row without them.
 func (files) HardDelete(ctx context.Context, q Querier, owner, path string) (File, bool, error) {
 	f, err := scanFile(q.QueryRow(ctx,
-		`DELETE FROM files WHERE owner = $1 AND path = $2 RETURNING `+fileColumns, owner, path))
+		`DELETE FROM files WHERE owner = $1 AND path = $2 AND `+FileSources(FilePurged)+`
+		 RETURNING `+fileColumns, owner, path))
 	switch {
 	case missing(err):
 		return File{}, false, nil

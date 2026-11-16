@@ -190,7 +190,7 @@ func (r *Reconciler) missingBytes(ctx context.Context, q store.Querier, table st
 // the predecessor purged trash outside any transaction and kept no ledger at
 // all.
 func (r *Reconciler) purgeTrash(ctx context.Context, q store.Querier, f *Findings, changed spaces) error {
-	const past = `files WHERE deleted_at IS NOT NULL AND deleted_at < $1`
+	past := `files WHERE ` + store.FileIn(store.FileTrashed) + ` AND deleted_at < $1`
 	cutoff := r.opts.Now().Add(-r.opts.TrashRetention)
 	if r.opts.DryRun {
 		n, err := count(ctx, q, `SELECT count(*) FROM `+past, cutoff)

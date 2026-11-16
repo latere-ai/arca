@@ -200,8 +200,8 @@ func TestStoreTheLinkCountIsTheLinkListingCounted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("write the revoked link: %v", err)
 	}
-	if ok, err := shares.Revoke(t.Context(), db.Querier(), revoked.ID); err != nil || !ok {
-		t.Fatalf("the revoke = %t, %v", ok, err)
+	if err := shares.Revoke(t.Context(), db.Querier(), revoked.ID); err != nil {
+		t.Fatalf("the revoke = %v", err)
 	}
 
 	counts, err := shares.CountLinks(t.Context(), db.Querier(), []string{owner, quiet})
@@ -249,8 +249,8 @@ func TestStoreTheGrantSweepTakesOnlyWhatExpiredAWholeWindowAgo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("write the revoked grant: %v", err)
 	}
-	if ok, err := shares.Revoke(t.Context(), db.Querier(), revoked.ID); err != nil || !ok {
-		t.Fatalf("the revoke = %t, %v", ok, err)
+	if err := shares.Revoke(t.Context(), db.Querier(), revoked.ID); err != nil {
+		t.Fatalf("the revoke = %v", err)
 	}
 	cutoff := time.Now().Add(-720 * time.Hour)
 

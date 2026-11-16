@@ -84,7 +84,7 @@ func TestACreateWritesTheGrantAndAppendsOneEvent(t *testing.T) {
 	if got.PathPrefix != "files/reports" {
 		t.Errorf("the prefix is %q; a trailing slash is not part of a subtree's name", got.PathPrefix)
 	}
-	if got.GranteeKind != store.GranteeSubject || got.Permission != "write" || got.Status != store.GrantActive {
+	if got.GranteeKind != store.GranteeSubject || got.Permission != "write" || got.Status != string(store.GrantActive) {
 		t.Errorf("the grant is %+v", got)
 	}
 	if got.Token != "" {

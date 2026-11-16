@@ -12,6 +12,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"latere.ai/x/pkg/statemachine"
 )
 
 // aGrant is one grant as a case writes it.
@@ -123,14 +125,14 @@ func TestGetReadsOneGrantAndTellsAMissingRow(t *testing.T) {
 	}
 }
 
-func TestRevokeReportsWhetherThereWasAGrant(t *testing.T) {
+func TestRevokeRefusesAGrantThatIsNotActive(t *testing.T) {
 	shares := NewShares()
 	q := &fakeQuerier{tag: pgconn.NewCommandTag("UPDATE 1")}
-	revoked, err := shares.Revoke(t.Context(), q, "01J8GRANT")
-	if err != nil || !revoked {
-		t.Fatalf("Revoke = %t, %v", revoked, err)
+	if err := shares.Revoke(t.Context(), q, "01J8GRANT"); err != nil {
+		t.Fatalf("Revoke = %v", err)
 	}
-	if args := q.args[0]; args[0] != "01J8GRANT" || args[1] != GrantRevoked {
+	if args := q.args[0]; args[0] != "01J8GRANT" || args[1] != string(GrantRevoked) ||
+		!slices.Equal(args[2].([]string), []string{string(GrantActive)}) {
 		t.Errorf("Revoke bound %v", args)
 	}
 	// Nothing else is stamped: the predecessor wrote a resolver and a time
@@ -140,12 +142,15 @@ func TestRevokeReportsWhetherThereWasAGrant(t *testing.T) {
 		t.Errorf("Revoke stamps more than the status: %q", q.statements[0])
 	}
 	q = &fakeQuerier{tag: pgconn.NewCommandTag("UPDATE 0")}
-	if revoked, err := shares.Revoke(t.Context(), q, "nobody"); err != nil || revoked {
-		t.Errorf("revoking nothing = %t, %v", revoked, err)
+	if err := shares.Revoke(t.Context(), q, "nobody"); !errors.Is(err, statemachine.ErrIllegalTransition) {
+		t.Errorf("revoking nothing = %v, want ErrIllegalTransition", err)
+	}
+	if err := MoveGrant(t.Context(), q, "01J8GRANT", GrantActive); !errors.Is(err, statemachine.ErrIllegalTransition) {
+		t.Errorf("moving a grant to active = %v, want ErrIllegalTransition", err)
 	}
 	q = &fakeQuerier{execErr: errors.New("the connection went away")}
-	if _, err := shares.Revoke(t.Context(), q, "01J8GRANT"); err == nil {
-		t.Error("a failed revoke answered no error")
+	if err := shares.Revoke(t.Context(), q, "01J8GRANT"); err == nil || errors.Is(err, statemachine.ErrIllegalTransition) {
+		t.Errorf("a failed revoke = %v, want a fault", err)
 	}
 }
 

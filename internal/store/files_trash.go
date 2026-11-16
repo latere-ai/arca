@@ -34,7 +34,7 @@ type TrashCursor struct {
 func (files) Restore(ctx context.Context, q Querier, owner, path string, since time.Time) (bool, error) {
 	tag, err := q.Exec(ctx, `
 		UPDATE files SET deleted_at = NULL, updated_at = now()
-		 WHERE owner = $1 AND path = $2 AND deleted_at IS NOT NULL AND deleted_at > $3`,
+		 WHERE owner = $1 AND path = $2 AND `+FileSources(FileLive)+` AND deleted_at > $3`,
 		owner, path, since)
 	if err != nil {
 		return false, classify(fmt.Sprintf("restore %q of %q", path, owner), err)
@@ -60,7 +60,7 @@ func (files) Restore(ctx context.Context, q Querier, owner, path string, since t
 func (files) RestoreByID(ctx context.Context, q Querier, owner, id string, since time.Time) (File, bool, error) {
 	f, err := scanFile(q.QueryRow(ctx, `
 		UPDATE files SET deleted_at = NULL, updated_at = now()
-		 WHERE owner = $1 AND id = $2 AND deleted_at IS NOT NULL AND deleted_at > $3
+		 WHERE owner = $1 AND id = $2 AND `+FileSources(FileLive)+` AND deleted_at > $3
 		RETURNING `+fileColumns, owner, id, since))
 	switch err = noSuchID(err); {
 	case missing(err):
@@ -133,7 +133,7 @@ func (files) PurgeTrash(ctx context.Context, q Querier, owner, path string, omit
 	}
 	rows, err := q.Query(ctx, `
 		DELETE FROM files
-		 WHERE owner = $1 AND deleted_at IS NOT NULL AND ($2 = '' OR path = $2)
+		 WHERE owner = $1 AND `+FileIn(FileTrashed)+` AND ($2 = '' OR path = $2)
 		   AND `+notOmitted("path", 3)+`
 		RETURNING `+fileColumns, owner, path, omitted(omit))
 	if err != nil {

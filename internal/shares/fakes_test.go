@@ -16,6 +16,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"latere.ai/x/pkg/statemachine"
+
 	"latere.ai/x/arca/internal/shares"
 	"latere.ai/x/arca/internal/store"
 )
@@ -88,16 +90,16 @@ func (t *table) Get(_ context.Context, _ store.Querier, id string) (store.Grant,
 	return store.Grant{}, fmt.Errorf("store: read the grant: %w", pgx.ErrNoRows)
 }
 
-func (t *table) Revoke(_ context.Context, _ store.Querier, id string) (bool, error) {
+func (t *table) Revoke(_ context.Context, _ store.Querier, id string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for i := range t.grants {
-		if t.grants[i].ID == id {
+		if t.grants[i].ID == id && t.grants[i].Status == store.GrantActive {
 			t.grants[i].Status = store.GrantRevoked
-			return true, nil
+			return nil
 		}
 	}
-	return false, nil
+	return fmt.Errorf("revoke %q: %w", id, statemachine.ErrIllegalTransition)
 }
 
 // Move carries every grant on exactly from to to, the way the Postgres

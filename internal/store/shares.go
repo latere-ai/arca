@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"latere.ai/x/pkg/statemachine"
 )
 
 // Grant is one row of the shares table: one grantee holding one permission
@@ -40,7 +42,7 @@ type Grant struct {
 	// creation, and never listed (spec 015).
 	Token string
 	// Status is GrantActive or GrantRevoked.
-	Status string
+	Status GrantStatus
 	// ExpiresAt is when the grant stops counting, nil for no expiry.
 	ExpiresAt *time.Time
 	// CreatedBy is the subject that created the grant.
@@ -60,13 +62,10 @@ const (
 	GranteePublic  = "public"
 )
 
-// The statuses of spec 008. A revoked row is kept so an audit can see the
-// grant existed; the pending and denied statuses of the approval queue the
-// predecessor held do not arrive (spec 019).
-const (
-	GrantActive  = "active"
-	GrantRevoked = "revoked"
-)
+// The statuses of spec 008 are GrantStatus, in lifecycles.go. A revoked row
+// is kept so an audit can see the grant existed; the pending and denied
+// statuses of the approval queue the predecessor held do not arrive (spec
+// 019).
 
 // Shares is the query set over the grants of every space, the token grants
 // among them included. A handler takes the interface, so a test passes a
@@ -84,9 +83,10 @@ type Shares interface {
 	// there is pgx.ErrNoRows.
 	Get(ctx context.Context, q Querier, id string) (Grant, error)
 	// Revoke sets the status of one grant to revoked and stamps nothing
-	// else. It answers false when there is no such grant. A grant that is
-	// already revoked is a success: the end state is the goal.
-	Revoke(ctx context.Context, q Querier, id string) (bool, error)
+	// else. A grant that is not active, whether it is already revoked or
+	// there is no such grant, changes nothing and is an error wrapping
+	// statemachine.ErrIllegalTransition.
+	Revoke(ctx context.Context, q Querier, id string) error
 	// Move carries a grant on exactly this path to the path an object moved
 	// to, inside the move's own transaction. A grant on an ancestor covers a
 	// subtree and stays where it is.
@@ -225,12 +225,29 @@ func (shares) Get(ctx context.Context, q Querier, id string) (Grant, error) {
 }
 
 // Revoke sets one grant's status to revoked.
-func (shares) Revoke(ctx context.Context, q Querier, id string) (bool, error) {
-	tag, err := q.Exec(ctx, `UPDATE shares SET status = $2 WHERE id = $1`, id, GrantRevoked)
-	if err != nil {
-		return false, classify(fmt.Sprintf("revoke the grant %q", id), err)
+func (shares) Revoke(ctx context.Context, q Querier, id string) error {
+	return MoveGrant(ctx, q, id, GrantRevoked)
+}
+
+// MoveGrant takes the grant id to the state to, the one writer of
+// shares.status. The write is guarded on the states GrantTable lists before
+// to, so a grant that is already revoked, or that no longer exists, is left
+// as it is and the answer is an error wrapping
+// statemachine.ErrIllegalTransition.
+func MoveGrant(ctx context.Context, q Querier, id string, to GrantStatus) error {
+	from := sources(GrantTable.Sources(to))
+	if len(from) == 0 {
+		return fmt.Errorf("store: move the grant %q to %s: no step leads there: %w", id, to, statemachine.ErrIllegalTransition)
 	}
-	return tag.RowsAffected() == 1, nil
+	tag, err := q.Exec(ctx, `UPDATE shares SET status = $2 WHERE id = $1 AND status = ANY($3)`,
+		id, string(to), from)
+	if err != nil {
+		return classify(fmt.Sprintf("move the grant %q to %s", id, to), err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("store: move the grant %q to %s: none in a state before it: %w", id, to, statemachine.ErrIllegalTransition)
+	}
+	return nil
 }
 
 // expiredGrants is the condition pass 7 of spec 010 works to: a grant whose
@@ -247,7 +264,7 @@ func (shares) Revoke(ctx context.Context, q Querier, id string) (bool, error) {
 // still serve to anyone, and the pass clears the object before the grant may
 // leave (Lapsed).
 const expiredGrants = `shares WHERE expires_at IS NOT NULL AND expires_at < $1
-	AND NOT (grantee_kind = 'public' AND status = 'active' AND EXISTS (
+	AND NOT (grantee_kind = 'public' AND ` + activeGrant + ` AND EXISTS (
 	    SELECT 1 FROM files f
 	     WHERE f.owner = shares.owner AND f.path = shares.path_prefix AND ` + lapsedRow + `))`
 
@@ -260,7 +277,7 @@ const lapsedRow = `f.is_public AND f.deleted_at IS NULL
 	AND NOT EXISTS (
 	    SELECT 1 FROM shares l
 	     WHERE l.owner = f.owner AND l.path_prefix = f.path
-	       AND l.grantee_kind = 'public' AND l.status = 'active'
+	       AND l.grantee_kind = 'public' AND l.` + activeGrant + `
 	       AND (l.expires_at IS NULL OR l.expires_at > now()))`
 
 // Expired counts the grants that expired before the cutoff.
@@ -306,7 +323,7 @@ func (shares) Lapsed(ctx context.Context, q Querier, limit int) ([]File, error) 
 		  FROM files f
 		 WHERE (f.owner, f.path) IN (
 		        SELECT e.owner, e.path_prefix FROM shares e
-		         WHERE e.grantee_kind = 'public' AND e.status = 'active'
+		         WHERE e.grantee_kind = 'public' AND e.`+activeGrant+`
 		           AND e.expires_at IS NOT NULL AND e.expires_at <= now())
 		   AND `+lapsedRow+`
 		 ORDER BY f.owner, f.path

@@ -543,7 +543,7 @@ func TestStoreOneTreeNarrowsAGrantItCannotCarry(t *testing.T) {
 			t.Errorf("the grant on the removed plane covers %s: %+v, %v", path, covering, err)
 		}
 	}
-	var status string
+	var status GrantStatus
 	if err := db.Querier().QueryRow(t.Context(),
 		`SELECT status FROM shares WHERE owner = $1`, owner).Scan(&status); err != nil {
 		t.Fatal(err)

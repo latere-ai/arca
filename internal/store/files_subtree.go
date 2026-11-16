@@ -110,7 +110,7 @@ func (files) TrashSubtree(ctx context.Context, q Querier, owner, folder string, 
 	err := q.QueryRow(ctx, `
 		WITH trashed AS (
 		    UPDATE files SET deleted_at = now(), updated_at = now()
-		     WHERE owner = $1 AND path LIKE $2 ESCAPE '\' AND deleted_at IS NULL
+		     WHERE owner = $1 AND path LIKE $2 ESCAPE '\' AND `+FileSources(FileTrashed)+`
 		       AND `+notOmitted("path", 3)+`
 		    RETURNING size_bytes
 		)
@@ -134,7 +134,7 @@ func (files) DropSubtree(ctx context.Context, q Querier, owner, folder string, o
 	rows, err := q.Query(ctx, `
 		WITH gone AS (
 		    DELETE FROM files
-		     WHERE owner = $1 AND path LIKE $2 ESCAPE '\'
+		     WHERE owner = $1 AND path LIKE $2 ESCAPE '\' AND `+FileSources(FilePurged)+`
 		       AND `+notOmitted("path", 3)+`
 		    RETURNING object_id, size_bytes
 		), history AS (

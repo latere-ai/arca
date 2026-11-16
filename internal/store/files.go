@@ -133,6 +133,9 @@ func (files) Get(ctx context.Context, q Querier, owner, path string) (File, erro
 
 // Insert writes a path that does not exist yet.
 func (files) Insert(ctx context.Context, q Querier, f File) (bool, error) {
+	if err := startsLive(); err != nil {
+		return false, err
+	}
 	var id string
 	err := q.QueryRow(ctx, `
 		INSERT INTO files (owner, path, object_id, created_by, content_type, size_bytes,

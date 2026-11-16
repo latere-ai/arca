@@ -195,7 +195,7 @@ func TestARevokedGrantStopsGrantingOnTheNextQuestion(t *testing.T) {
 	if !ask(t, p, grantee, authorizer.ActionFileRead, file("files/reports/q3.pdf")) {
 		t.Fatal("the grantee could not read what it holds")
 	}
-	if _, err := tbl.Revoke(t.Context(), nil, held.ID); err != nil {
+	if err := tbl.Revoke(t.Context(), nil, held.ID); err != nil {
 		t.Fatal(err)
 	}
 	if ask(t, p, grantee, authorizer.ActionFileRead, file("files/reports/q3.pdf")) {
@@ -234,7 +234,7 @@ func TestTheLinkStepAnswersLinkReadAndNothingElse(t *testing.T) {
 		t.Error("an anonymous caller reads a file through the link step")
 	}
 
-	if _, err := tbl.Revoke(t.Context(), nil, link.ID); err != nil {
+	if err := tbl.Revoke(t.Context(), nil, link.ID); err != nil {
 		t.Fatal(err)
 	}
 	if ask(t, p, "", authorizer.ActionLinkRead, resource(link.ID, "files/reports")) {
